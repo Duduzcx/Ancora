@@ -36,8 +36,9 @@ export default function Privacidade() {
           </section>
 
           <section>
-            <h2 className="text-lg font-bold text-[#001f3f] mb-3">5. Exclusão de Conta e Dados</h2>
-            <p>O usuário possui o direito de solicitar a exclusão permanente de sua conta e de todos os dados associados a qualquer momento. Isso pode ser feito diretamente nas configurações do aplicativo ou entrando em contato com nosso suporte.</p>
+            <h2 className="text-lg font-bold text-[#001f3f] mb-3">7. Período de Retenção e Eliminação dos Dados</h2>
+            <p className="mb-4">Nós armazenamos e retemos os seus dados pessoais (incluindo histórico de mensagens, logs de humor e informações de cadastro) apenas pelo período em que sua conta estiver ativa. Caso o usuário fique inativo por mais de 12 meses, os dados serão automaticamente anonimizados.</p>
+            <p>A qualquer momento, o usuário pode solicitar a exclusão de sua conta e de todos os seus dados diretamente pelo aplicativo ou por e-mail. Após a solicitação, todos os dados coletados serão eliminados de forma definitiva e permanente dos nossos servidores (PostgreSQL) em um prazo máximo de até 30 dias.</p>
           </section>
 
           <section>
