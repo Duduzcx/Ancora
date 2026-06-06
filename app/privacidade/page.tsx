@@ -8,15 +8,15 @@ export default function Privacidade() {
         <div className="space-y-8 text-sm leading-relaxed text-slate-600">
           <section>
             <h2 className="text-lg font-bold text-[#001f3f] mb-3">1. Introdução</h2>
-            <p>A ZCX Studios, desenvolvedora do aplicativo Nórica, compromete-se a proteger a sua privacidade. Esta política detalha como coletamos, usamos e protegemos suas informações pessoais em nosso ecossistema de saúde mental.</p>
+            <p>A ZCX Studios, desenvolvedora do aplicativo Nórica, compromete-se a proteger a sua privacidade. Esta política detalha como coletamos, usamos e protegemos suas informações pessoais em nosso sistema de foco e produtividade.</p>
           </section>
 
           <section>
             <h2 className="text-lg font-bold text-[#001f3f] mb-3">2. Coleta de Dados</h2>
-            <p>Para fornecer o nosso sistema de navegação emocional, coletamos os seguintes dados:</p>
+            <p>Para fornecer o nosso sistema de organização de rotina, coletamos os seguintes dados:</p>
             <ul className="list-disc pl-5 mt-3 space-y-2">
               <li><strong>Dados de Autenticação:</strong> Nome, endereço de e-mail e foto de perfil, fornecidos pelo provedor de login (Google OAuth) no momento da criação da conta.</li>
-              <li><strong>Dados de Interação:</strong> Informações fornecidas voluntariamente pelo usuário durante a interação com a nossa Inteligência Artificial (Bússola) para fins de triagem emocional.</li>
+              <li><strong>Dados de Interação:</strong> Informações fornecidas voluntariamente pelo usuário durante a interação com a nossa Inteligência Artificial (Bússola) para fins de planejamento de rotina.</li>
             </ul>
           </section>
 
@@ -25,8 +25,8 @@ export default function Privacidade() {
             <p>Seus dados são utilizados exclusivamente para as seguintes finalidades:</p>
             <ul className="list-disc pl-5 mt-3 space-y-2">
               <li>Gerenciar sua sessão e manter sua conta segura.</li>
-              <li>Processar análises e gerar relatórios de triagem mental utilizando nossa tecnologia de IA.</li>
-              <li>Facilitar o encaminhamento para profissionais de saúde especializados.</li>
+              <li>Processar análises e gerar relatórios de planejamento e organização utilizando nossa tecnologia de IA.</li>
+              <li>Facilitar o direcionamento para rotinas de produtividade recomendadas.</li>
             </ul>
           </section>
 
@@ -36,9 +36,9 @@ export default function Privacidade() {
           </section>
 
           <section>
-            <h2 className="text-lg font-bold text-[#001f3f] mb-3">7. Período de Retenção e Eliminação dos Dados</h2>
-            <p className="mb-4">Nós armazenamos e retemos os seus dados pessoais (incluindo histórico de mensagens, logs de humor e informações de cadastro) apenas pelo período em que sua conta estiver ativa. Caso o usuário fique inativo por mais de 12 meses, os dados serão automaticamente anonimizados.</p>
-            <p>A qualquer momento, o usuário pode solicitar a exclusão de sua conta e de todos os seus dados diretamente pelo aplicativo ou por e-mail. Após a solicitação, todos os dados coletados serão eliminados de forma definitiva e permanente dos nossos servidores (PostgreSQL) em um prazo máximo de até 30 dias.</p>
+            <h2 className="text-lg font-bold text-[#001f3f] mb-3">5. Período de Retenção e Eliminação dos Dados</h2>
+            <p>Os dados do usuário são retidos apenas enquanto a conta estiver ativa. Ao excluir a conta, todos os dados são apagados definitivamente em até 30 dias.</p>
+            <p className="mt-3">Nórica é um aplicativo de produtividade. Não coletamos dados de saúde. Todos os dados inseridos são retidos apenas para organização do usuário e excluídos permanentemente após a solicitação de remoção da conta ou após 30 dias de inatividade.</p>
           </section>
 
           <section>
