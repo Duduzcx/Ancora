@@ -13,6 +13,9 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import AnimatedBackground from '@/components/AnimatedBackground';
 import { createClient } from '@/lib/supabase-client';
+import { firstName } from '@/lib/user-name';
+import { noricaApi } from '@/lib/norica-api';
+import { loadFarolReading, EMPTY_FAROL, type FarolReading } from '@/lib/farol';
 
 export default function FarolPage() {
   const [progress, setProgress] = useState<number>(0);
@@ -24,6 +27,8 @@ export default function FarolPage() {
 
   const [dailyLog, setDailyLog] = useState<any>(null);
   const [weeklyLogs, setWeeklyLogs] = useState<any[]>([]);
+  const [isPro, setIsPro] = useState(false);
+  const [reading, setReading] = useState<FarolReading>(EMPTY_FAROL);
 
   useEffect(() => {
     setIsMounted(true);
@@ -58,22 +63,9 @@ export default function FarolPage() {
       
       if (user) {
         // Prioridade: Metadata da sessão (instantâneo) -> Banco de dados
-        const metaName = user.user_metadata?.display_name;
-        const metaNameAlt = user.user_metadata?.name;
-        
-        if (metaName && metaName.trim() !== "") {
-          setUserName(metaName.split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' '));
-        } else if (metaNameAlt && !metaNameAlt.includes('@')) {
-           setUserName(metaNameAlt.split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' '));
-        } else {
-           setUserName("Navegador");
-        }
-
-        // Busca no banco apenas para garantir sincronia, mas sem bloquear a UI
+        setUserName(firstName(user));
         const { data: profile } = await supabase.from('profiles').select('display_name').eq('id', user.id).maybeSingle();
-        if (profile?.display_name) {
-          setUserName(profile.display_name.split(' ').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' '));
-        }
+        if (profile?.display_name) setUserName(firstName(user, profile.display_name));
       }
     };
     getProfile();
@@ -86,8 +78,12 @@ export default function FarolPage() {
       const { data: todayLog } = await supabase.from('daily_logs').select('*').eq('user_id', session.user.id).eq('date', today).maybeSingle();
       if (todayLog) setDailyLog(todayLog);
       
+      // Plano Pro vê as marés dos últimos 30 dias; o Gratuito, 7.
+      const plan = await noricaApi.plan().catch(() => null);
+      const pro = plan?.effective === 'pro';
+      setIsPro(pro);
       const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - (pro ? 30 : 7));
       const { data: weekLogs } = await supabase.from('daily_logs')
         .select('*')
         .eq('user_id', session.user.id)
@@ -97,6 +93,8 @@ export default function FarolPage() {
       if (weekLogs) setWeeklyLogs(weekLogs);
     };
     fetchLogs();
+    // Leituras reais para os cartões (humor marcado + Logs dos últimos dias).
+    loadFarolReading().then(setReading).catch(() => {});
 
     // Listener para mudanças no localStorage caso o usuário complete algo em outra aba (raro mas bom ter)
     window.addEventListener('storage', loadProgress);
@@ -270,7 +268,7 @@ export default function FarolPage() {
                 <motion.button 
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
-                  onClick={() => router.push(`/porto?humor=${encodeURIComponent(status.trigger)}`)}
+                  onClick={() => router.push(`/porto/?prompt=${encodeURIComponent(`Nórica, quero ${status.trigger}.`)}`)}
                   className="w-full sm:w-auto justify-center px-10 py-6 bg-emerald-500 text-slate-950 rounded-[2.5rem] font-black flex items-center gap-4 shadow-2xl shadow-emerald-500/20 hover:bg-emerald-400 transition-all text-sm relative overflow-hidden"
                 >
                   <MessageSquare size={24} className="relative z-10" />
@@ -340,7 +338,7 @@ export default function FarolPage() {
             >
               <div className="flex items-center gap-3 mb-6">
                 <Activity size={20} className="text-emerald-400" />
-                <h3 className="text-sm font-black text-emerald-400 uppercase tracking-widest">Marés (7 Dias)</h3>
+                <h3 className="text-sm font-black text-emerald-400 uppercase tracking-widest">Marés ({isPro ? 30 : 7} Dias)</h3>
               </div>
               <div className="w-full h-24 relative flex items-end justify-between">
                 <svg className="absolute inset-0 w-full h-full overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none">
@@ -377,10 +375,10 @@ export default function FarolPage() {
 
         {/* BOTTOM CARDS */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <InsightCard icon={Compass} title="Norte" desc="Sua bússola hoje aponta para hábitos de bem-estar." index={0} />
-          <InsightCard icon={Star} title="Brilho" desc="Você está mantendo a constância no mapeamento das suas emoções." index={1} />
-          <InsightCard icon={ShieldCheck} title="Proteção" desc="Mapeamento de sentimentos ativado para equilíbrio emocional." index={2} />
-          <InsightCard icon={BarChart3} title="Tendência" desc="Crescimento estável de bem-estar detectado." index={3} />
+          <InsightCard icon={Compass} title="Norte" desc={reading.insights.norte} index={0} />
+          <InsightCard icon={Star} title="Brilho" desc={reading.insights.brilho} index={1} />
+          <InsightCard icon={ShieldCheck} title="Proteção" desc={reading.insights.protecao} index={2} />
+          <InsightCard icon={BarChart3} title="Tendência" desc={reading.insights.tendencia} index={3} />
         </div>
       </div>
       </div>

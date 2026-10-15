@@ -14,9 +14,9 @@ export default function ExclusaoConta() {
             <h2 className="text-lg font-bold text-[#001f3f] mb-3">Como solicitar a exclusão:</h2>
             <ol className="list-decimal pl-5 space-y-3 text-slate-700 font-medium">
               <li>Abra o aplicativo <strong>Nórica</strong> no seu dispositivo.</li>
-              <li>Acesse o menu de <strong>Configurações</strong> ou <strong>Perfil</strong>.</li>
-              <li>Clique na opção <strong>"Excluir Minha Conta"</strong> no final da página.</li>
-              <li>Confirme a ação. Sua conta será desativada instantaneamente.</li>
+              <li>Toque em <strong>Perfil</strong> no menu inferior.</li>
+              <li>Role até o final e toque em <strong>"Excluir Minha Conta"</strong>.</li>
+              <li>Digite <strong>EXCLUIR</strong> para confirmar. Sua conta e todos os dados são apagados na hora.</li>
             </ol>
             <p className="mt-4 text-xs text-slate-500 italic">
               *Caso não tenha mais acesso ao app, você pode solicitar a exclusão enviando um e-mail para o suporte da ZCX Studios.
@@ -28,15 +28,17 @@ export default function ExclusaoConta() {
             <p className="text-slate-600 mb-4">Ao processar sua solicitação, os seguintes dados são removidos permanentemente de nossos servidores ativos:</p>
             <ul className="list-disc pl-5 space-y-2 text-sm text-slate-600">
               <li><strong>Informações de Perfil:</strong> Nome, e-mail e foto de perfil.</li>
-              <li><strong>Histórico de Reflexões:</strong> Todos os registros de mapeamento de hábitos e reflexões diárias realizados com a Bússola (IA).</li>
-              <li><strong>Logs de Atividade:</strong> Registros de uso e preferências dentro do ecossistema Nórica.</li>
+              <li><strong>Histórico Emocional:</strong> todas as conversas do Porto e os registros de humor (mapa emocional).</li>
+              <li><strong>Cofre:</strong> todos os textos guardados.</li>
+              <li><strong>Logs:</strong> hábitos e tarefas registrados.</li>
             </ul>
           </section>
 
           <section>
-            <h2 className="text-lg font-bold text-[#001f3f] mb-3">Retenção de Dados</h2>
+            <h2 className="text-lg font-bold text-[#001f3f] mb-3">Período de Armazenamento Adicional</h2>
             <p className="text-sm text-slate-600 leading-relaxed">
-              Os dados do usuário são retidos apenas enquanto a conta estiver ativa. Ao excluir a conta, todos os dados são apagados definitivamente em até 30 dias.
+              Após a confirmação da exclusão, os dados são removidos imediatamente dos bancos de dados de produção. 
+              Por motivos de segurança e conformidade legal, cópias de backup podem reter essas informações por um período adicional de até <strong>30 dias</strong>, após o qual são eliminadas de forma definitiva e irrecuperável.
             </p>
           </section>
         </div>

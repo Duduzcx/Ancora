@@ -1,36 +1,113 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Nórica
 
-## Getting Started
+App Android (Next.js 16 + Capacitor 8 + Supabase) de apoio emocional, organização de rotina e autoconhecimento.
+Pacote na Play Store: `com.zcx.ancora` · deep link de login: `com.zcx.norica://login-callback`.
 
-First, run the development server:
+## Como funciona
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+| Parte | O que faz | Onde fica |
+| --- | --- | --- |
+| Início | Cards "Como está o seu mar?" (registra o humor) e atalhos | `app/page.tsx` |
+| S.O.S | Neblina para limpar com o dedo + botão de ajuda (CVV 188 / SAMU 192) | `components/NeblinaSOS.tsx`, `components/AjudaAgora.tsx` |
+| Porto | Chat com a IA, voz, histórico, tarefas sugeridas → Logs | `app/porto/page.tsx`, `components/ChatHistorySidebar.tsx` |
+| Arena | Simulação de conversas difíceis + retorno do treino | `app/arena/page.tsx` |
+| Logs | 21 hábitos diários + tarefas da IA, sincronizados na conta | `app/log/page.tsx` |
+| Farol | Leitura real de humor + Logs dos últimos 14 dias | `app/farol/page.tsx`, `lib/farol.ts` |
+| Cofre | Segredos criptografados, lista e exclusão | `app/cofre/page.tsx` |
+| Perfil | Dados, privacidade, excluir conta | `app/perfil/page.tsx` |
+
+Tabelas: `chats` e `messages` (conversas, criptografadas), `daily_logs` (resumo emocional do dia feito pela IA, lido pelo Farol), `habit_logs` (hábitos da aba Logs), `mood_logs` (humor marcado na Início), `vault_entries` (Cofre, criptografado), `consents`, `user_plans`, `usage_events`.
+
+Toda chamada de IA e todo dado sensível passam pelas Edge Functions em `supabase/functions/`:
+
+- `norica` — chat do Porto, Arena, retorno da Arena, histórico, Cofre e exclusão de conta. Exige login, guarda a chave da IA no servidor, criptografa mensagens/títulos/Cofre (AES-256-GCM) e aplica o protocolo de crise antes de responder.
+- `norica-transcribe` — transcrição de voz (Whisper na Groq), com login.
+
+O app **não carrega nenhuma chave de IA**. As únicas variáveis públicas são as do Supabase.
+
+## Variáveis de ambiente (`.env.local`)
+
+```
+NEXT_PUBLIC_SUPABASE_URL=https://dtvsxhiwcvhnncbnnxci.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+NEXT_PUBLIC_GOOGLE_CLIENT_ID=...   # login nativo com Google
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+`NEXT_PUBLIC_GROQ_API_KEY` não é mais usada — apague do `.env`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Publicar esta versão (1.3.0)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. **Revogue as chaves antigas** (estavam expostas): Groq e Gemini. Gere uma chave nova da Groq.
+2. **Banco** — rode, nesta ordem, os dois arquivos de `supabase/migrations/` no SQL Editor do Supabase (ou `supabase db push`).
+3. **Secrets das Edge Functions**:
+   ```bash
+   supabase login
+   supabase link --project-ref dtvsxhiwcvhnncbnnxci
+   supabase secrets set GROQ_API_KEY=gsk_NOVA_CHAVE
+   supabase secrets set NORICA_ENCRYPTION_KEY=$(openssl rand -base64 32)
+   ```
+   Guarde a `NORICA_ENCRYPTION_KEY` num lugar seguro: sem ela, mensagens e Cofre não podem ser lidos.
+4. **Deploy das funções**:
+   ```bash
+   supabase functions deploy norica
+   supabase functions deploy norica-transcribe
+   ```
+5. **App**:
+   ```bash
+   npm install
+   npm run build:mobile
+   ```
+   Depois gere o AAB assinado no Android Studio (versionCode 41) e envie para a Play Store.
+6. **Play Console** — atualize a seção *Segurança dos dados*: dados de saúde/emocionais coletados, criptografados, com opção de exclusão no app; URL de exclusão: `https://SEU-SITE/excluir-conta/`.
+7. Troque `CONTACT_EMAIL` em `app/privacidade/page.tsx` pelo e-mail oficial.
 
-## Learn More
+## Modelos de IA
 
-To learn more about Next.js, take a look at the following resources:
+A Groq desliga modelos antigos de tempos em tempos (o `llama-3.1-8b-instant` usado até a 1.2.7 foi desligado em 16/08/2026 — por isso a IA parou).
+Os modelos agora são escolhidos no servidor e podem ser trocados **sem publicar nova versão do app**:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+supabase secrets set GROQ_CHAT_MODEL=openai/gpt-oss-120b GROQ_FAST_MODEL=openai/gpt-oss-20b
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Acompanhe: https://console.groq.com/docs/deprecations
 
-## Deploy on Vercel
+## Verificar se tudo funciona
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+No app: **Perfil → Verificar sistema** (rodapé). Testa banco, criptografia e os dois modelos de IA.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Planos e assinatura Pro (R$ 15,00/mês)
+
+- **Gratuito:** 30 mensagens/dia no Porto, 2 retornos/dia na Arena, Farol de 7 dias. S.O.S, Ajuda, Respiração, Logs e Cofre sem limite.
+- **Pro:** Porto e Arena sem limite diário (uso justo), Farol de 30 dias. Em breve: relatório mensal em PDF e novos cenários.
+- **Modo lançamento:** enquanto o secret `NORICA_LAUNCH_ALL_PRO` não for `false`, todos usam o Pro de graça e o botão mostra "Me avise quando abrir".
+
+### Ligar a cobrança pela Google Play
+
+1. **Play Console → Monetizar → Produtos → Assinaturas → Criar assinatura**
+   - ID do produto: `norica_pro_mensal`
+   - Plano básico: mensal, renovação automática, preço **R$ 15,00**. Ative o plano básico.
+2. **Google Cloud** (mesmo projeto ligado ao Play Console): ative a *Google Play Android Developer API* e crie uma **conta de serviço** com chave JSON.
+3. **Play Console → Usuários e permissões → Convidar** o e-mail da conta de serviço, com permissão de *Ver dados financeiros* e *Gerenciar pedidos e assinaturas* para o app.
+4. **Secrets**:
+   ```bash
+   supabase secrets set GOOGLE_SERVICE_ACCOUNT_JSON="$(cat conta-de-servico.json)"
+   supabase functions deploy norica
+   ```
+5. Publique a nova versão (o plugin de compras adiciona a permissão de cobrança): `npm install && npm run build:mobile`.
+6. Teste com uma conta em **Play Console → Configuração → Teste de licença** (compras de teste não são cobradas).
+7. Quando estiver tudo certo, ligue a cobrança: `supabase secrets set NORICA_LAUNCH_ALL_PRO=false`.
+
+Como funciona: a pessoa assina na Google Play → o app envia o token da compra → a função `norica` confere com o Google (inclusive se a compra é da mesma conta) e só então libera o Pro → o app confirma a compra. Renovações e cancelamentos são conferidos com o Google quando o período pago termina.
+
+Para dar Pro manualmente (parceiro, piloto), veja o comentário no fim de `supabase/migrations/20261015170000_norica_planos.sql`.
+
+## Manter o Supabase ativo
+
+O workflow `.github/workflows/supabase-keepalive.yml` faz uma consulta a cada 2 dias.
+Crie o secret `SUPABASE_ANON_KEY` em *Settings → Secrets and variables → Actions* e rode uma vez manualmente em *Actions*.
+
+## Segurança
+
+- Nunca versione keystores (`*.jks`, `*.keystore`, `aab/`) nem `.env` — já estão no `.gitignore`.
+- O keystore `aab/zcx` ficou no histórico público do repositório. Se for a chave de upload da Play Store, peça o reset da chave de upload no Play Console.

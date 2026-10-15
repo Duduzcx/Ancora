@@ -39,3 +39,15 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Nórica: nunca versionar chaves, keystores, builds ou arquivos de IDE
+*.jks
+*.keystore
+*.p12
+aab/
+android/app/release/
+.idea/
+android/.idea/
+scratch/
+supabase/.temp/
+supabase/.branches/

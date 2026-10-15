@@ -1,0 +1,38 @@
+# Mantém o projeto Supabase do Nórica ativo (o plano gratuito pausa após ~7 dias sem uso).
+#
+# Única configuração necessária:
+#   GitHub > Ancora > Settings > Secrets and variables > Actions > New repository secret
+#   Nome:  SUPABASE_ANON_KEY
+#   Valor: a mesma chave de NEXT_PUBLIC_SUPABASE_ANON_KEY do seu .env
+#          (Supabase > Project Settings > API > anon / publishable key)
+#
+# O que faz: a cada 2 dias consulta a tabela "profiles" pela API REST.
+# Com RLS ativo a resposta vem vazia ([]), mas a requisição chega ao Postgres
+# e conta como atividade, o que impede o plano gratuito de pausar o projeto.
+# Depois de salvar, rode uma vez manualmente em Actions > Supabase keep-alive > Run workflow.
+
+name: Supabase keep-alive
+
+on:
+  schedule:
+    - cron: "0 12 */2 * *"   # a cada 2 dias, 09h de Brasília
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping no banco do Nórica
+        env:
+          SUPABASE_URL: https://dtvsxhiwcvhnncbnnxci.supabase.co
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          status=$(curl -s -o /dev/null -w "%{http_code}" \
+            "$SUPABASE_URL/rest/v1/profiles?select=id&limit=1" \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY")
+          echo "Supabase respondeu HTTP $status"
+          if [ "$status" != "200" ]; then
+            echo "::error::Ping falhou (HTTP $status). Confira o secret SUPABASE_ANON_KEY ou se o projeto já foi pausado."
+            exit 1
+          fi

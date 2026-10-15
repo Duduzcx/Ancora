@@ -54,6 +54,23 @@ export default function SignupPage() {
         setError("Preencha todos os campos do perfil.");
         return;
       }
+      if (birthDate.length !== 10) {
+        setError("Informe a data completa (DD/MM/AAAA).");
+        return;
+      }
+      const [d, m, y] = birthDate.split('/').map(Number);
+      const born = new Date(y, m - 1, d);
+      if (isNaN(born.getTime()) || born.getDate() !== d || y < 1900) {
+        setError("Data de nascimento inválida.");
+        return;
+      }
+      const now = new Date();
+      let age = now.getFullYear() - y;
+      if (now.getMonth() < m - 1 || (now.getMonth() === m - 1 && now.getDate() < d)) age--;
+      if (age < 18) {
+        setError("O Nórica é destinado a maiores de 18 anos. Se precisar de apoio agora, ligue 188 (CVV).");
+        return;
+      }
     }
     setStep(step + 1);
   };

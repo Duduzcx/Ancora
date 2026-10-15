@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase-client';
 import { usePathname, useRouter } from 'next/navigation';
 import { Anchor } from 'lucide-react';
@@ -8,150 +8,126 @@ import { App } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { motion, AnimatePresence } from 'framer-motion';
 import NavigationDock from '@/components/NavigationDock';
+import ConsentGate from '@/components/ConsentGate';
 
-const publicPages = ['/auth', '/auth/signup', '/auth/forgot-password', '/privacidade'];
+const publicPages = ['/auth', '/auth/signup', '/auth/forgot-password', '/privacidade', '/excluir-conta'];
+
+const log = (msg: string) => console.log(`[AUTH_DEBUG] ${new Date().toLocaleTimeString()}: ${msg}`);
+
+const isChunkError = (err: any, msg = '') =>
+  msg.includes('Loading chunk') ||
+  msg.includes('ChunkLoadError') ||
+  err?.name === 'ChunkLoadError' ||
+  err?.message?.includes('Loading chunk') ||
+  err?.message?.includes('Failed to fetch dynamically imported module');
 
 export default function LayoutWrapper({ children }: { children: React.ReactNode }) {
   const [isMounted, setIsMounted] = useState(false);
   const [session, setSession] = useState<any>(null);
+  const [authReady, setAuthReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const pathname = usePathname();
   const router = useRouter();
+  const pathnameRef = useRef(pathname);
+  pathnameRef.current = pathname;
 
-  const [debugLogs, setDebugLogs] = useState<string[]>([]);
-  const addLog = (msg: string) => {
-    const time = new Date().toLocaleTimeString();
-    setDebugLogs(prev => [...prev.slice(-8), `${time}: ${msg}`]);
-    console.log(`[AUTH_DEBUG] ${msg}`);
-  };
-
+  // Ouvintes registrados UMA vez (antes eram recriados a cada troca de tela,
+  // o que podia tentar usar o mesmo código de login duas vezes e falhar).
   useEffect(() => {
     setIsMounted(true);
-    addLog(`Montado! Pathname inicial: "${pathname}"`);
-    
-    let deepLinkHandlerPromise: Promise<any> | null = null;
-    const setupDeepLinks = async () => {
-      try {
-        const isNative = Capacitor.isNativePlatform();
-        if (isNative && Capacitor.isPluginAvailable('App')) {
-          deepLinkHandlerPromise = App.addListener('appUrlOpen', async (event: any) => {
-            addLog(`DeepLink aberto: ${event.url}`);
-            if (event.url.includes('com.zcx.norica') || event.url.includes('com.zcx.ancora')) {
-              if (event.url.includes('access_token') || event.url.includes('code=')) {
-                const url = new URL(event.url.replace('#', '?'));
-                const code = url.searchParams.get('code');
-                
-                if (code) {
-                  addLog("DeepLink contem código, trocando por sessão...");
-                  await supabase.auth.exchangeCodeForSession(code);
-                } else {
-                  addLog("DeepLink sem código, chamando getSession...");
-                  await supabase.auth.getSession();
-                }
-                addLog("Navegando para / pós deeplink");
-                router.push('/');
-              }
-            }
-          });
-        } else {
-          addLog("Capacitor App plugin não disponível ou plataforma não nativa.");
+    log(`Montado! Pathname inicial: "${pathname}"`);
+
+    const listeners: Promise<{ remove: () => void }>[] = [];
+
+    if (Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('App')) {
+      // Retorno do login pelo navegador (e-mail de confirmação, recuperação de senha, OAuth web).
+      listeners.push(App.addListener('appUrlOpen', async (event: any) => {
+        log(`DeepLink aberto: ${event.url}`);
+        if (!(event.url.includes('com.zcx.norica') || event.url.includes('com.zcx.ancora'))) return;
+        if (!(event.url.includes('access_token') || event.url.includes('code='))) return;
+        try {
+          const url = new URL(event.url.replace('#', '?'));
+          const code = url.searchParams.get('code');
+          if (code) {
+            await supabase.auth.exchangeCodeForSession(code);
+          } else {
+            const access_token = url.searchParams.get('access_token');
+            const refresh_token = url.searchParams.get('refresh_token');
+            if (access_token && refresh_token) await supabase.auth.setSession({ access_token, refresh_token });
+          }
+        } catch (e: any) {
+          log(`Erro no retorno do login: ${e?.message || e}`);
         }
-      } catch (e: any) {
-        addLog(`Erro ao configurar DeepLinks: ${e?.message || e}`);
-      }
-    };
-
-    setupDeepLinks();
-
-    let hasCheckedAuth = false;
-
-    const checkRedirect = (currentSession: any) => {
-      const isPublic = publicPages.some(page => pathname?.startsWith(page));
-      addLog(`checkRedirect: session=${currentSession ? "YES" : "NO"}, path="${pathname}", isPublic=${isPublic}`);
-      
-      if (!currentSession && !isPublic && pathname !== '/') {
-        addLog(`-> REDIRECTING to "/" !`);
+        try {
+          const { Browser } = await import('@capacitor/browser');
+          await Browser.close();
+        } catch (_e) {}
         router.push('/');
-      } else {
-        addLog(`-> No redirect needed.`);
-      }
-      setLoading(false);
-    };
+      }));
 
-    // Inscreve no onAuthStateChange e monitora o carregamento inicial
-    addLog("Inscrevendo no onAuthStateChange...");
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      addLog(`onAuthStateChange: event="${event}", session=${session ? "YES" : "NO"}`);
-      setSession(session);
-      
-      if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
-        hasCheckedAuth = true;
-        checkRedirect(session);
-      }
+      // Mantém o login vivo: renova o token quando o app volta para a tela.
+      listeners.push(App.addListener('appStateChange', ({ isActive }) => {
+        if (isActive) supabase.auth.startAutoRefresh();
+        else supabase.auth.stopAutoRefresh();
+      }));
+    }
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, newSession) => {
+      log(`onAuthStateChange: event="${event}", session=${newSession ? 'YES' : 'NO'}`);
+      setSession(newSession);
+      if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'SIGNED_OUT') setAuthReady(true);
     });
 
-    // Fallback de segurança para garantir que a tela não trave caso o INITIAL_SESSION falhe ou demore
-    const fallbackTimeout = setTimeout(async () => {
-      if (!hasCheckedAuth) {
-        addLog("Fallback timeout acionado!");
-        try {
-          const { data: { session: currentSession } } = await supabase.auth.getSession();
-          addLog(`Fallback getSession: ${currentSession ? "YES" : "NO"}`);
-          setSession(currentSession);
-          checkRedirect(currentSession);
-        } catch (e: any) {
-          addLog(`Erro no fallback getSession: ${e?.message || e}`);
-          setLoading(false);
-        }
+    // Fallback para a tela não travar se o INITIAL_SESSION demorar.
+    const fallback = setTimeout(async () => {
+      try {
+        const { data: { session: current } } = await supabase.auth.getSession();
+        setSession(current);
+      } catch (e: any) {
+        log(`Erro no fallback getSession: ${e?.message || e}`);
+      } finally {
+        setAuthReady(true);
       }
     }, 1200);
 
     const handleGlobalError = (event: ErrorEvent) => {
-      const errorMsg = event.message || '';
-      const isChunkError = 
-        errorMsg.includes('Loading chunk') || 
-        errorMsg.includes('ChunkLoadError') || 
-        (event.error && (event.error.name === 'ChunkLoadError' || event.error.message?.includes('Loading chunk') || event.error.message?.includes('Failed to fetch dynamically imported module')));
-      
-      addLog(`GLOBAL ERROR: "${errorMsg}"`);
-      if (isChunkError) {
-        addLog('ChunkLoadError detectado! Recarregando página...');
-        window.location.reload();
-      }
+      log(`GLOBAL ERROR: "${event.message || ''}"`);
+      if (isChunkError(event.error, event.message || '')) window.location.reload();
     };
-
     const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
-      const error = event.reason;
-      const errorMsg = error?.message || String(error);
-      addLog(`UNHANDLED REJECTION: "${errorMsg}"`);
-      if (error && (error.name === 'ChunkLoadError' || error.message?.includes('Loading chunk') || error.message?.includes('Failed to fetch dynamically imported module'))) {
-        addLog('ChunkLoadError detectado via promise rejection! Recarregando página...');
-        window.location.reload();
-      }
+      log(`UNHANDLED REJECTION: "${event.reason?.message || String(event.reason)}"`);
+      if (isChunkError(event.reason)) window.location.reload();
     };
-
     window.addEventListener('error', handleGlobalError);
     window.addEventListener('unhandledrejection', handleUnhandledRejection);
 
     return () => {
-      addLog("Limpando useEffect...");
       subscription.unsubscribe();
-      clearTimeout(fallbackTimeout);
+      clearTimeout(fallback);
       window.removeEventListener('error', handleGlobalError);
       window.removeEventListener('unhandledrejection', handleUnhandledRejection);
-      if (deepLinkHandlerPromise) {
-        deepLinkHandlerPromise.then(handler => handler.remove()).catch(() => {});
-      }
+      listeners.forEach(p => p.then(l => l.remove()).catch(() => {}));
     };
-  }, [pathname, router]);
+  }, []);
+
+  // Proteção das telas: a cada navegação, quem não está logado volta para a Início.
+  useEffect(() => {
+    if (!authReady) return;
+    const isPublic = publicPages.some(page => pathname?.startsWith(page));
+    log(`checkRedirect: session=${session ? 'YES' : 'NO'}, path="${pathname}", isPublic=${isPublic}`);
+    if (!session && !isPublic && pathname !== '/') router.push('/');
+    setLoading(false);
+  }, [authReady, session, pathname, router]);
 
   if (!isMounted) return null;
+
+  const isPublic = publicPages.some(page => pathname?.startsWith(page));
 
   return (
     <div className="min-h-screen bg-transparent relative">
       <AnimatePresence mode="wait">
         {loading ? (
-          <motion.div 
+          <motion.div
             key="loader"
             initial={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -168,7 +144,7 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
           </motion.div>
         ) : (
           <div className="min-h-[100dvh] w-full relative z-0 flex flex-col">
-              <motion.div 
+              <motion.div
                 key={pathname}
                 initial={{ opacity: 0.3 }}
                 animate={{ opacity: 1 }}
@@ -181,6 +157,8 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
           </div>
         )}
       </AnimatePresence>
+      {/* Consentimento LGPD para dados emocionais (uma vez por conta) */}
+      {!isPublic && <ConsentGate userId={session?.user?.id ?? null} />}
     </div>
   );
 }

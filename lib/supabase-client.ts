@@ -1,9 +1,13 @@
-import { createBrowserClient } from '@supabase/ssr'
+import { createClient as createSupabaseClient, type SupabaseClient } from '@supabase/supabase-js'
 import { Preferences } from '@capacitor/preferences'
 
-// Custom storage adapter for Capacitor
+// Sessão salva no armazenamento nativo do aparelho (Capacitor Preferences).
+// Antes o app usava @supabase/ssr, que guarda a sessão em cookies do WebView —
+// no Android esses cookies podem se perder ao fechar o app, e a pessoa precisava
+// entrar de novo toda vez. Agora o login fica salvo até a pessoa tocar em "Sair".
 const capacitorStorage = {
   getItem: async (key: string) => {
+    if (typeof window === 'undefined') return null;
     const { value } = await Preferences.get({ key });
     return value;
   },
@@ -15,19 +19,25 @@ const capacitorStorage = {
   },
 };
 
-let client: ReturnType<typeof createBrowserClient> | null = null;
+// Durante o build (pré-renderização) não existe aparelho nem armazenamento.
+const isBrowser = typeof window !== 'undefined';
 
-export const createClient = () => {
+let client: SupabaseClient | null = null;
+
+export const createClient = (): SupabaseClient => {
   if (!client) {
-    client = createBrowserClient(
+    client = createSupabaseClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       {
         auth: {
           storage: capacitorStorage,
-          autoRefreshToken: true,
-          persistSession: true,
-          detectSessionInUrl: true,
+          storageKey: 'norica-auth',
+          persistSession: isBrowser,
+          autoRefreshToken: isBrowser,
+          // O retorno do login (Google, e-mail) é tratado manualmente com exchangeCodeForSession.
+          detectSessionInUrl: false,
+          flowType: 'pkce',
         },
       }
     )

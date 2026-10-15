@@ -1,0 +1,8 @@
+# Configuração mínima para o Supabase CLI (deploy das Edge Functions).
+project_id = "dtvsxhiwcvhnncbnnxci"
+
+[functions.norica]
+verify_jwt = true
+
+[functions.norica-transcribe]
+verify_jwt = true

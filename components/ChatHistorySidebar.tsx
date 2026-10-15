@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useEffect, useState } from 'react';
-import { Plus, MessageSquare, Clock, ChevronRight, X, ArrowLeft, Anchor, Search } from 'lucide-react';
+import { Plus, MessageSquare, Clock, X, ArrowLeft, Anchor, Search, Trash2 } from 'lucide-react';
+import { noricaApi } from '@/lib/norica-api';
 import { createClient } from '@/lib/supabase-client';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
@@ -34,11 +35,8 @@ export default function ChatHistorySidebar({ isOpen, onClose }: ChatHistorySideb
     setUser(sessionUser);
 
     if (sessionUser) {
-      const { data } = await supabase
-        .from('chats')
-        .select('id, title, created_at')
-        .eq('user_id', sessionUser.id)
-        .order('created_at', { ascending: false });
+      // Títulos ficam criptografados no banco; o servidor devolve já legíveis.
+      const data = await noricaApi.listChats().then(r => r.chats).catch(() => null);
 
       if (data) {
         setChats(data);
@@ -53,7 +51,19 @@ export default function ChatHistorySidebar({ isOpen, onClose }: ChatHistorySideb
 
   useEffect(() => {
     fetchChats();
-  }, []); // Carrega apenas uma vez no mount para poupar recursos
+  }, []);
+
+  const handleDeleteChat = async (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    if (!window.confirm('Apagar esta conversa para sempre?')) return;
+    try {
+      await noricaApi.deleteChat(id);
+      setChats((prev: any[]) => prev.filter(c => c.id !== id));
+      if (currentChatId === id) router.push('/porto/');
+    } catch (err) {
+      console.error("Erro ao apagar conversa:", err);
+    }
+  }; // Carrega apenas uma vez no mount para poupar recursos
 
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -207,7 +217,14 @@ export default function ChatHistorySidebar({ isOpen, onClose }: ChatHistorySideb
                       </span>
                     </div>
                   </div>
-                  <ChevronRight size={16} className={`shrink-0 transition-transform group-hover:translate-x-1 ${currentChatId === chat.id ? 'text-slate-950/60' : 'text-white/20'}`} />
+                  <span
+                    role="button"
+                    aria-label="Apagar conversa"
+                    onClick={(e) => handleDeleteChat(e, chat.id)}
+                    className={`shrink-0 p-2 rounded-xl transition-colors ${currentChatId === chat.id ? 'text-slate-950/50 hover:text-rose-700' : 'text-white/25 hover:text-rose-400'}`}
+                  >
+                    <Trash2 size={16} />
+                  </span>
                 </motion.button>
               ))
             ) : (

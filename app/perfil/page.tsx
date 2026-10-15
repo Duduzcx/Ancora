@@ -3,12 +3,13 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { createClient } from '@/lib/supabase-client';
+import { noricaApi, type HealthReport } from '@/lib/norica-api';
 import { 
   User, Save, CheckCircle2, ArrowLeft, ShieldCheck, 
   Anchor, LifeBuoy, Mail, Calendar, 
   LogOut, Settings, Fingerprint, AlertCircle, Loader2,
   ChevronRight, BadgeCheck, Shield, Key, Sparkles,
-  ShipWheel, Compass, Waves, Camera
+  ShipWheel, Compass, Waves, Camera, Crown, Trash2
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import AnimatedBackground from '@/components/AnimatedBackground';
@@ -85,7 +86,8 @@ export default function PerfilPage() {
       const sessionUser = session.user;
       setUser(sessionUser);
       
-      const metaName = sessionUser.user_metadata?.display_name;
+      // Conta Google não tem display_name: usa o nome da conta como ponto de partida.
+      const metaName = sessionUser.user_metadata?.display_name || sessionUser.user_metadata?.full_name || sessionUser.user_metadata?.name;
       const metaBirth = sessionUser.user_metadata?.birth_date;
       const metaAvatar = sessionUser.user_metadata?.avatar_url || sessionUser.user_metadata?.picture;
       
@@ -177,6 +179,46 @@ export default function PerfilPage() {
       setError("Erro ao salvar dados. Tente novamente.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+  const [deleteText, setDeleteText] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  // Exclusão real da conta (LGPD + política do Google Play).
+  const handleDeleteAccount = async () => {
+    if (deleteText.trim().toUpperCase() !== 'EXCLUIR' || isDeleting) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      await noricaApi.deleteAccount();
+      try {
+        Object.keys(localStorage).filter(k => k.startsWith('norica')).forEach(k => localStorage.removeItem(k));
+      } catch (_e) {}
+      await supabase.auth.signOut().catch(() => {});
+      setIsDeleteOpen(false);
+      router.replace('/');
+    } catch (err: any) {
+      setDeleteError(err?.message || 'Não foi possível excluir agora.');
+      setIsDeleting(false);
+    }
+  };
+
+  const [health, setHealth] = useState<HealthReport | null>(null);
+  const [isHealthOpen, setIsHealthOpen] = useState(false);
+  const [healthError, setHealthError] = useState<string | null>(null);
+
+  // Diagnóstico: confere banco, criptografia e IA de uma vez.
+  const runHealth = async () => {
+    setIsHealthOpen(true);
+    setHealth(null);
+    setHealthError(null);
+    try {
+      setHealth(await noricaApi.health());
+    } catch (err: any) {
+      setHealthError(err?.message || 'Não foi possível falar com o servidor. As funções do Supabase já foram publicadas?');
     }
   };
 
@@ -438,10 +480,174 @@ export default function PerfilPage() {
           <ChevronRight size={20} className="text-white/40 group-hover:translate-x-1 transition-transform" />
         </motion.button>
 
+        {/* Plano */}
+        <motion.button 
+          initial={{ opacity: 0, y: 15 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.5, delay: 0.22 }}
+          whileTap={{ scale: 0.96 }}
+          onClick={() => router.push('/planos/')}
+          className="w-full flex items-center justify-between p-7 bg-white/5 border border-white/10 rounded-[2.5rem] shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] hover:bg-emerald-500/10 hover:border-emerald-500/20 transition-all group"
+        >
+          <div className="flex items-center gap-4">
+             <div className="w-12 h-12 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-2xl flex items-center justify-center group-hover:rotate-12 transition-transform">
+                <Crown size={24} />
+             </div>
+             <div className="text-left">
+                <h3 className="text-sm font-black text-white uppercase tracking-tighter italic">Meu Plano</h3>
+                <p className="text-[9px] font-black text-emerald-400 uppercase tracking-widest leading-none mt-1">Gratuito e Pro</p>
+             </div>
+          </div>
+          <ChevronRight size={20} className="text-white/40 group-hover:translate-x-1 transition-transform" />
+        </motion.button>
+
+        {/* Privacidade */}
+        <motion.button 
+          initial={{ opacity: 0, y: 15 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.5, delay: 0.25 }}
+          whileTap={{ scale: 0.96 }}
+          onClick={() => router.push('/privacidade/')}
+          className="w-full flex items-center justify-between p-7 bg-white/5 border border-white/10 rounded-[2.5rem] shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] hover:bg-teal-500/10 hover:border-teal-500/20 transition-all group"
+        >
+          <div className="flex items-center gap-4">
+             <div className="w-12 h-12 bg-teal-500/10 text-teal-400 border border-teal-500/20 rounded-2xl flex items-center justify-center group-hover:rotate-12 transition-transform">
+                <ShieldCheck size={24} />
+             </div>
+             <div className="text-left">
+                <h3 className="text-sm font-black text-white uppercase tracking-tighter italic">Privacidade</h3>
+                <p className="text-[9px] font-black text-teal-400 uppercase tracking-widest leading-none mt-1">Como cuidamos dos seus dados</p>
+             </div>
+          </div>
+          <ChevronRight size={20} className="text-white/40 group-hover:translate-x-1 transition-transform" />
+        </motion.button>
+
+        {/* Excluir conta (LGPD + Google Play) */}
+        <motion.button 
+          initial={{ opacity: 0, y: 15 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.5, delay: 0.3 }}
+          whileTap={{ scale: 0.96 }}
+          onClick={() => { setDeleteText(''); setDeleteError(null); setIsDeleteOpen(true); }}
+          className="w-full flex items-center justify-between p-7 bg-white/5 border border-white/10 rounded-[2.5rem] shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] hover:bg-rose-500/10 hover:border-rose-500/20 transition-all group"
+        >
+          <div className="flex items-center gap-4">
+             <div className="w-12 h-12 bg-rose-500/10 text-rose-400 border border-rose-500/20 rounded-2xl flex items-center justify-center group-hover:rotate-12 transition-transform">
+                <Trash2 size={24} />
+             </div>
+             <div className="text-left">
+                <h3 className="text-sm font-black text-white uppercase tracking-tighter italic">Excluir Minha Conta</h3>
+                <p className="text-[9px] font-black text-rose-400 uppercase tracking-widest leading-none mt-1">Apaga todos os seus dados</p>
+             </div>
+          </div>
+          <ChevronRight size={20} className="text-white/40 group-hover:translate-x-1 transition-transform" />
+        </motion.button>
+
         <p className="text-center text-[10px] font-black text-white/20 uppercase tracking-[0.5em] italic pt-10">
           Nórica • Foco e Produtividade
         </p>
+        <button
+          onClick={runHealth}
+          className="block mx-auto text-[9px] font-black text-white/20 hover:text-emerald-400 uppercase tracking-[0.3em] transition-colors"
+        >
+          Verificar sistema
+        </button>
       </motion.div>
+      <AnimatePresence>
+        {isHealthOpen && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsHealthOpen(false)} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[1000]" />
+            <motion.div
+              initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 28, stiffness: 260 }}
+              className="fixed inset-x-0 bottom-0 z-[1001] bg-[#0b0f19] border-t border-white/10 rounded-t-[2.5rem] p-6 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] shadow-2xl max-w-lg mx-auto max-h-[80dvh] overflow-y-auto"
+            >
+              <h3 className="text-sm font-black text-white uppercase tracking-tighter mb-1">Verificação do sistema</h3>
+              <p className="text-[9px] font-black text-emerald-400 uppercase tracking-widest mb-5">Banco, criptografia e IA</p>
+              {!health && !healthError && (
+                <div className="flex items-center gap-3 text-white/60 text-sm font-bold py-6 justify-center">
+                  <Loader2 size={18} className="animate-spin" /> Testando...
+                </div>
+              )}
+              {healthError && <p className="text-rose-400 text-sm font-bold">{healthError}</p>}
+              {health && (
+                <div className="space-y-2">
+                  <p className={`text-sm font-black mb-3 ${health.ok ? 'text-emerald-400' : 'text-rose-400'}`}>
+                    {health.ok ? 'Tudo funcionando ✓' : 'Algo precisa de atenção'}
+                  </p>
+                  {Object.entries(health.checks).map(([name, c]) => (
+                    <div key={name} className="flex items-start gap-3 text-xs">
+                      <span className={`mt-1 w-2 h-2 rounded-full shrink-0 ${c.ok ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                      <div>
+                        <p className="font-black text-white/80 uppercase tracking-wider text-[10px]">{name.replace(/_/g, ' ')}</p>
+                        {c.detail && <p className="text-white/40 break-all">{c.detail}</p>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <button onClick={() => setIsHealthOpen(false)} className="w-full mt-6 py-4 rounded-2xl bg-white/10 text-white font-black uppercase tracking-widest text-[10px]">
+                Fechar
+              </button>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isDeleteOpen && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => !isDeleting && setIsDeleteOpen(false)} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[1000]" />
+            <motion.div
+              initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 28, stiffness: 260 }}
+              className="fixed inset-x-0 bottom-0 z-[1001] bg-[#0b0f19] border-t border-white/10 rounded-t-[2.5rem] p-6 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] shadow-2xl max-w-lg mx-auto"
+            >
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-12 h-12 rounded-2xl bg-rose-500/15 text-rose-400 flex items-center justify-center">
+                  <Trash2 size={22} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-white uppercase tracking-tighter leading-none">Excluir conta</h3>
+                  <p className="text-[9px] font-black text-rose-400 uppercase tracking-widest mt-1">Esta ação não pode ser desfeita</p>
+                </div>
+              </div>
+              <p className="text-sm text-white/70 font-semibold leading-relaxed mb-4">
+                Vamos apagar sua conta, seu perfil, todas as conversas do Porto, seus registros de humor, seus Logs e o Cofre.
+                Para confirmar, digite <b className="font-black text-rose-400">EXCLUIR</b>.
+              </p>
+              <input
+                value={deleteText}
+                onChange={(e) => setDeleteText(e.target.value)}
+                placeholder="EXCLUIR"
+                autoCapitalize="characters"
+                className="w-full mb-4 px-6 py-4 rounded-2xl bg-white/5 border border-white/10 outline-none text-white font-black tracking-widest focus:ring-4 ring-rose-500/20"
+              />
+              {deleteError && <p className="text-rose-400 text-[10px] font-black uppercase tracking-widest mb-4">{deleteError}</p>}
+              <div className="flex flex-col gap-3">
+                <button
+                  onClick={handleDeleteAccount}
+                  disabled={deleteText.trim().toUpperCase() !== 'EXCLUIR' || isDeleting}
+                  className="w-full py-4 rounded-2xl bg-rose-500 text-white font-black uppercase tracking-widest text-[10px] disabled:opacity-30 flex items-center justify-center gap-2"
+                >
+                  {isDeleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                  {isDeleting ? 'Excluindo...' : 'Excluir definitivamente'}
+                </button>
+                <button
+                  onClick={() => setIsDeleteOpen(false)}
+                  disabled={isDeleting}
+                  className="w-full py-4 rounded-2xl bg-white/5 border border-white/10 text-white/80 font-black uppercase tracking-widest text-[10px]"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </main>
   );
 }

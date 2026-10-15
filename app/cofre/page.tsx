@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { noricaApi, type VaultEntry } from '@/lib/norica-api';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Flame, Lock, ShieldCheck, Key, ArrowLeft, Menu } from 'lucide-react';
 import { useRouter } from 'next/navigation';
@@ -20,17 +21,61 @@ export default function CofrePage() {
     }, 100);
   };
 
-  const handleSave = () => {
+  const [isListOpen, setIsListOpen] = useState(false);
+  const [entries, setEntries] = useState<VaultEntry[]>([]);
+  const [isListLoading, setIsListLoading] = useState(false);
+  const [vaultError, setVaultError] = useState<string | null>(null);
+
+  // Migra o último segredo que ficava só no aparelho (versões antigas) para o Cofre criptografado.
+  useEffect(() => {
+    let legacy: string | null = null;
+    try { legacy = localStorage.getItem('norica_vault_latest'); } catch (_e) {}
+    if (!legacy) return;
+    noricaApi.vaultSave(legacy)
+      .then(() => { try { localStorage.removeItem('norica_vault_latest'); } catch (_e) {} })
+      .catch(() => {});
+  }, []);
+
+  // Segredos agora são criptografados no servidor e ficam na conta (não se perdem ao trocar de celular).
+  const handleSave = async () => {
     if (!text) return;
     setIsSaving(true);
-    localStorage.setItem('norica_vault_latest', text);
-    
-    setTimeout(() => {
-      setIsSaving(false);
+    setVaultError(null);
+    const startedAt = Date.now();
+    try {
+      await noricaApi.vaultSave(text);
+      // Mantém a animação de "selando" com a mesma duração de antes.
+      await new Promise(r => setTimeout(r, Math.max(0, 1500 - (Date.now() - startedAt))));
       setShowSavedToast(true);
       setText('');
       setTimeout(() => setShowSavedToast(false), 4000);
-    }, 1500);
+    } catch (err: any) {
+      setVaultError(err?.message || 'Não foi possível selar agora.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const openList = async () => {
+    setIsListOpen(true);
+    setIsListLoading(true);
+    setVaultError(null);
+    try {
+      const { entries } = await noricaApi.vaultList();
+      setEntries(entries);
+    } catch (err: any) {
+      setVaultError(err?.message || 'Não foi possível abrir o Cofre.');
+    } finally {
+      setIsListLoading(false);
+    }
+  };
+
+  const deleteEntry = async (id: string) => {
+    if (!window.confirm('Apagar este segredo para sempre?')) return;
+    try {
+      await noricaApi.vaultDelete(id);
+      setEntries(prev => prev.filter(e => e.id !== id));
+    } catch (_e) {}
   };
 
   const handleBurn = () => {
@@ -108,6 +153,14 @@ export default function CofrePage() {
                 className="w-full py-5 bg-white text-black font-black rounded-3xl text-[10px] uppercase tracking-[0.2em] shadow-xl"
               >
                 ABRIR SANTUÁRIO
+              </motion.button>
+              <motion.button 
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={openList}
+                className="w-full py-5 border border-emerald-500/30 text-emerald-400 font-black rounded-3xl text-[10px] uppercase tracking-[0.2em] bg-emerald-500/5"
+              >
+                VER SEGREDOS SELADOS
               </motion.button>
               <button 
                 onClick={() => {
@@ -233,6 +286,10 @@ export default function CofrePage() {
               )}
             </div>
 
+            {vaultError && (
+              <p className="flex-none text-center text-rose-400 text-[10px] font-black uppercase tracking-widest pt-2">{vaultError}</p>
+            )}
+
             {/* BOTÕES Flex-none */}
             <div className="flex-none flex flex-col md:flex-row gap-4 pt-4 pb-8 bg-black z-50">
               <motion.button 
@@ -285,6 +342,58 @@ export default function CofrePage() {
             >
               Voltar ao Silêncio
             </motion.button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      {/* LISTA DE SEGREDOS SELADOS */}
+      <AnimatePresence>
+        {isListOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[130] bg-black/95 backdrop-blur-3xl flex flex-col p-6 pt-[calc(env(safe-area-inset-top)+1.5rem)] pb-[calc(env(safe-area-inset-bottom)+1.5rem)]"
+          >
+            <div className="flex-none flex items-center gap-4 mb-8 max-w-2xl w-full mx-auto">
+              <button
+                onClick={() => setIsListOpen(false)}
+                className="p-3 border border-white/10 text-white/40 hover:text-white rounded-2xl bg-white/5 transition-all"
+              >
+                <ArrowLeft size={20} />
+              </button>
+              <div className="flex flex-col">
+                <h2 className="text-xl font-black text-white tracking-tighter uppercase italic leading-none">Segredos Selados</h2>
+                <p className="text-emerald-500/60 font-mono text-[9px] tracking-[0.3em] uppercase mt-1">Criptografados. Só você lê.</p>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto custom-scrollbar max-w-2xl w-full mx-auto space-y-4">
+              {isListLoading ? (
+                [1, 2, 3].map(i => <div key={i} className="h-24 rounded-[2rem] bg-white/5 animate-pulse" />)
+              ) : vaultError ? (
+                <p className="text-center text-rose-400 text-[10px] font-black uppercase tracking-widest py-12">{vaultError}</p>
+              ) : entries.length === 0 ? (
+                <p className="text-center text-white/30 font-mono text-[10px] tracking-[0.3em] uppercase py-12">O Cofre está vazio.</p>
+              ) : (
+                entries.map(entry => (
+                  <motion.div
+                    key={entry.id}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="p-5 rounded-[2rem] border border-white/10 bg-white/5"
+                  >
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-emerald-500/60 font-mono text-[9px] tracking-[0.2em] uppercase">
+                        {new Date(entry.created_at).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}
+                      </span>
+                      <button onClick={() => deleteEntry(entry.id)} aria-label="Apagar segredo" className="p-2 rounded-xl text-white/30 hover:text-orange-400 transition-colors">
+                        <Flame size={16} />
+                      </button>
+                    </div>
+                    <p className="text-white/80 text-sm leading-relaxed whitespace-pre-wrap break-words">{entry.content}</p>
+                  </motion.div>
+                ))
+              )}
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

@@ -3,6 +3,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
+import { HelpButton, HelpSheet } from '@/components/AjudaAgora';
 
 interface NeblinaSOSProps {
   onClareou: () => void;
@@ -207,6 +208,7 @@ export default function NeblinaSOS({ onClareou }: NeblinaSOSProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioSynthRef = useRef<SOSAudioSynth | null>(null);
   const [isCleared, setIsCleared] = useState(false);
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [rubCount, setRubCount] = useState(0);
 
   useEffect(() => {
@@ -361,8 +363,20 @@ export default function NeblinaSOS({ onClareou }: NeblinaSOSProps) {
           >
             Entrar no Porto
           </button>
+          <button
+            onClick={() => setIsHelpOpen(true)}
+            className="w-full mt-3 py-4 rounded-2xl border border-white/20 bg-white/10 text-white font-black uppercase tracking-widest text-[10px]"
+          >
+            Ainda não estou bem — falar com alguém
+          </button>
         </motion.div>
       )}
+
+      {/* AJUDA HUMANA: sempre ao alcance durante o S.O.S (CVV 188 / SAMU 192) */}
+      <div className="absolute top-[calc(env(safe-area-inset-top)+1rem)] right-4 z-[60]">
+        <HelpButton dark onClick={() => setIsHelpOpen(true)} />
+      </div>
+      <HelpSheet open={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
 
       {!isCleared && (
         <div className="absolute top-1/3 z-30 text-center w-full pointer-events-none px-6">

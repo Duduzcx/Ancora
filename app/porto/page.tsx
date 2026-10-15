@@ -4,9 +4,11 @@
 import React, { useState, useEffect, useRef, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Bot, User, Anchor, ArrowLeft, Clock, Loader2, Mic, MicOff, Search, Edit2, Copy, Sparkles, Trash2, SendHorizontal } from 'lucide-react';
+import { Send, Bot, User, Anchor, ArrowLeft, Clock, Loader2, Mic, MicOff, Search, Edit2, Copy, Sparkles, Trash2, SendHorizontal, LifeBuoy, Plus, CheckCircle2 } from 'lucide-react';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { createClient } from '@/lib/supabase-client';
+import { noricaApi, toMood, addTasksToToday } from '@/lib/norica-api';
+import { HelpSheet, CrisisCard } from '@/components/AjudaAgora';
 import ChatHistorySidebar from '@/components/ChatHistorySidebar';
 import AnimatedBackground from '@/components/AnimatedBackground';
 import SafeMarkdown from '@/components/SafeMarkdown';
@@ -22,15 +24,7 @@ const greetingPool = {
   default: ["Bem-vindo ao Porto. Como posso te ajudar nas suas reflexões de bem-estar hoje? ⚓", "As portas do Porto estão abertas para seus insights emocionais."]
 };
 
-const SYSTEM_PROMPT = `Você é a "Nórica", a inteligência artificial de navegação mental e bem-estar do aplicativo Nórica. Sua função é atuar como uma guia paciente e compreensiva, mantendo um tom de conversa natural, caloroso e humano. 
-
-Regras Absolutas de Resposta (Siga estritamente):
-1. Espelhamento de Energia: Se o usuário mandar uma mensagem curta (ex: 'Oi', 'Tudo bem?'), responda de forma igualmente curta, amigável e termine com uma pergunta aberta. NUNCA envie um bloco grande de texto para uma saudação.
-2. Foco na Interação: Aja como um diálogo real. Em vez de vomitar toda a informação ou um plano completo de uma vez, entregue a informação em partes curtas e pergunte ao usuário se faz sentido ou como ele quer prosseguir.
-3. Direto ao ponto: Elimine introduções clichês e vá direto ao valor que o usuário pediu, usando formatação rica em Markdown (listas dinâmicas, cronogramas visuais, negrito) para facilitar a leitura.
-4. Acolhimento e Empatia: Aja como uma parceira dedicada a ajudar o usuário a concluir seus objetivos passo a passo. Seja calorosa, natural e sempre ofereça um espaço seguro para reflexão.
-5. Limitações Médicas: NUNCA prometa resultados clínicos. Evite estritamente termos médicos como 'diagnóstico', 'tratamento', 'cura', 'ansiedade', 'depressão' ou 'transtorno'.
-6. Proibição de Palavra: NUNCA use a palavra 'Âncora' sob nenhuma circunstância.`;
+// O prompt da IA (Nórica e Clara) agora fica no servidor: supabase/functions/_shared/safety.ts
 
 function PortoContent() {
   const router = useRouter();
@@ -60,6 +54,22 @@ function PortoContent() {
   // Refs para controle de parada imediata e AbortController do Groq
   const cancelarRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Humor vindo da Início (cards) ou do S.O.S vai para a IA como contexto.
+  const mood = toMood(humor === 'neblina' ? 'sos' : humor);
+  const prefill = searchParams.get('prompt') || '';
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
+  const [addedTasks, setAddedTasks] = useState<Record<string, boolean>>({});
+
+  const handleAddTasks = async (messageId: string, tasks: string[]) => {
+    try {
+      await addTasksToToday(tasks);
+      setAddedTasks(prev => ({ ...prev, [messageId]: true }));
+      triggerHapticsLight();
+    } catch (err) {
+      console.error("Erro ao adicionar tarefas:", err);
+    }
+  };
 
   // Haptic feedback helpers
   const triggerHapticsLight = async () => {
@@ -115,7 +125,8 @@ function PortoContent() {
   };
 
   const handleEditMessage = (message: any) => {
-    setInput(message.content);
+    setInput(message.content ?? message.texto);
+    setEditingMessageId(message.id);
     setActiveTooltipMessageId(null);
     if (inputRef.current) {
       inputRef.current.focus();
@@ -127,7 +138,7 @@ function PortoContent() {
     setActiveTooltipMessageId(null);
     try {
       if (chatId) {
-        await supabase.from('messages').delete().eq('id', messageId);
+        await noricaApi.deleteMessages(chatId, [messageId]);
       }
     } catch (err) {
       console.error("Erro ao deletar mensagem:", err);
@@ -162,12 +173,12 @@ function PortoContent() {
         const truncated = messages.slice(0, lastUserIdx);
         setMessages(truncated);
 
-        // Se houver chatId no Supabase, deleta a última mensagem do usuário e a resposta da IA
+        // Apaga no servidor a última mensagem e a resposta (que pode chegar alguns segundos depois).
         if (chatId) {
-          const idsToDelete = messages.slice(lastUserIdx).map(m => m.id);
-          if (idsToDelete.length > 0) {
-            await supabase.from('messages').delete().in('id', idsToDelete);
-          }
+          const anchor = truncated.slice().reverse().find(m => /^[0-9a-f-]{36}$/.test(String(m.id)));
+          const afterId = anchor ? String(anchor.id) : null;
+          noricaApi.deleteAfter(chatId, afterId).catch(() => {});
+          setTimeout(() => { noricaApi.deleteAfter(chatId, afterId).catch(() => {}); }, 20000);
         }
       }
     }
@@ -179,254 +190,77 @@ function PortoContent() {
     } catch (e) {}
   };
 
-  const generateResponse = async (currentMessages: any[], activeChatIdParam?: string) => {
-    const activeChatId = activeChatIdParam || chatId;
-    let requestSuccessful = false;
-    let botMessageId = "";
+  // A resposta vem da Edge Function: login obrigatório, chave da IA no servidor,
+  // mensagens criptografadas, protocolo de crise e resumo do dia para o Farol.
+  const generateResponse = async (text: string, opts: { regenerate?: boolean; tempUserId?: string } = {}) => {
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const isClara = action === 'suporte-b2b' || messages.some(m => m.content && m.content.includes("Clara"));
+    const welcomeMsg = !chatId ? messages.find(m => m.id === 'welcome') : undefined;
+    if (!chatId) isInitializingNewChat.current = true;
 
     try {
-      let activeSystemPrompt = SYSTEM_PROMPT;
-      const hasClaraWelcome = messages.some(m => m.content && m.content.includes("Clara Silveira"));
-      if (action === 'suporte-b2b' || hasClaraWelcome) {
-        activeSystemPrompt = `Você é Clara Silveira, especialista em bem-estar e autoconhecimento parceira do aplicativo Nórica. Sua missão é ser um espaço de apoio reflexivo e orientação de bem-estar pessoal e profissional para o usuário.
-        
-Regras de comunicação e comportamento:
-1. Apresente-se como Clara Silveira se apropriado (ou aja como ela).
-2. NUNCA use a palavra 'Âncora' sob nenhuma circunstância.
-3. Mantenha um tom calmo, acolhedor, profissional e de bem-estar.
-4. Use formatação em Markdown (como **negrito** para destacar pontos importantes, listas para organizar ideias) para deixar a leitura agradável.
-5. Termine com UMA única pergunta reflexiva ou de escuta ativa.`;
-      }
-
-      const controller = new AbortController();
-      abortControllerRef.current = controller;
-
-      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
+      const result = await noricaApi.chat(text, chatId, {
+        mood,
+        persona: isClara ? 'clara' : 'norica',
+        welcome: welcomeMsg?.content,
+        regenerate: opts.regenerate,
         signal: controller.signal,
-        headers: {
-          "Authorization": `Bearer ${process.env.NEXT_PUBLIC_GROQ_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "llama-3.1-8b-instant",
-          messages: [
-            { role: "system", content: activeSystemPrompt },
-            ...currentMessages.map(m => ({ role: m.role, content: m.content }))
-          ],
-          temperature: 0.7,
-          max_tokens: 500,
-          stream: true
-        }),
       });
+      if (cancelarRef.current) return;
 
-      if (!response.ok) {
-        throw new Error("Erro na resposta do Groq");
+      if (!chatId && result.chatId) {
+        router.replace(`/porto/?chatId=${result.chatId}${action ? `&action=${action}` : ''}${humor !== 'default' ? `&humor=${encodeURIComponent(humor)}` : ''}`, { scroll: false });
       }
+      if (result.title) setChatTitle(result.title);
 
-      requestSuccessful = true;
-      botMessageId = (Date.now() + 1).toString();
-
-      setAnimatedIds(prev => {
-        const next = new Set(prev);
-        next.add(botMessageId);
-        return next;
-      });
-      setMessages(prev => [...prev, { id: botMessageId, role: 'assistant', content: "" }]);
-      setStreamingMessageId(botMessageId);
+      const botMessageId = result.assistantMessageId || (Date.now() + 1).toString();
+      setAnimatedIds(prev => new Set(prev).add(botMessageId));
+      setMessages(prev => [
+        ...prev.map(m => (opts.tempUserId && m.id === opts.tempUserId && result.userMessageId) ? { ...m, id: result.userMessageId } : m),
+        ...(result.crisis ? [{ id: `crisis-${Date.now()}`, role: 'crisis', content: '' }] : []),
+        { id: botMessageId, role: 'assistant', content: result.reply, tasks: result.tasks || [] },
+      ]);
       setIsLoading(false);
-
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder("utf-8");
-      let done = false;
-      let botText = "";
-      let buffer = "";
-
-      if (!reader) {
-        throw new Error("Não foi possível ler a resposta.");
-      }
-
-      while (!done) {
-        const { value, done: doneReading } = await reader.read();
-        done = doneReading;
-        if (value) {
-          buffer += decoder.decode(value, { stream: !done });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
-          
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed) continue;
-            if (trimmed.startsWith("data: ")) {
-              const dataStr = trimmed.slice(6);
-              if (dataStr === "[DONE]") {
-                break;
-              }
-              try {
-                const parsed = JSON.parse(dataStr);
-                const content = parsed.choices?.[0]?.delta?.content || "";
-                if (content) {
-                  botText += content;
-                  setMessages(prev => prev.map(m => m.id === botMessageId ? { ...m, content: botText } : m));
-                }
-              } catch (err) {}
-            }
-          }
-        }
-      }
-
-      if (buffer) {
-        const trimmed = buffer.trim();
-        if (trimmed.startsWith("data: ")) {
-          const dataStr = trimmed.slice(6);
-          if (dataStr !== "[DONE]") {
-            try {
-              const parsed = JSON.parse(dataStr);
-              const content = parsed.choices?.[0]?.delta?.content || "";
-              if (content) {
-                botText += content;
-                setMessages(prev => prev.map(m => m.id === botMessageId ? { ...m, content: botText } : m));
-              }
-            } catch (err) {}
-          }
-        }
-      }
-
-      // Salvar mensagem do bot e gerar resumo
-      if (activeChatId) {
-        await supabase.from('messages').insert({
-          chat_id: activeChatId,
-          role: 'assistant',
-          content: botText
-        });
-
-        // Gerar Título Inteligente em background após a 2a troca de mensagens (quando length for 3 ou 4)
-        if (currentMessages.length === 3 || currentMessages.length === 4) {
-          // Fire and forget (não usa await para não travar a resposta da IA)
-          (async () => {
-            try {
-              // Pegar as 3 primeiras mensagens como contexto
-              const contextoMensagens = currentMessages.slice(0, 3).map(m => `${m.role}: ${m.content}`).join('\n');
-              const summaryResponse = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                method: "POST",
-                headers: {
-                  "Authorization": `Bearer ${process.env.NEXT_PUBLIC_GROQ_API_KEY}`,
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                  model: "llama-3.1-8b-instant",
-                  messages: [
-                    { role: "system", content: "Analise este início de conversa. Crie um título inteligente, curto, acolhedor e empático (máximo de 3 a 4 palavras) que resuma o verdadeiro tema, dor ou sentimento do usuário. Retorne estritamente o título gerado, sem aspas, sem introduções e sem ponto final." },
-                    { role: "user", content: contextoMensagens }
-                  ],
-                  temperature: 0.5,
-                }),
-              });
-              const summaryData = await summaryResponse.json();
-              const summary = summaryData.choices?.[0]?.message?.content?.replace(/["']/g, '');
-              if (summary) {
-                await supabase.from('chats').update({ title: summary }).eq('id', activeChatId);
-                setChatTitle(summary);
-              }
-            } catch (e) {
-              console.error("Erro ao gerar resumo em background:", e);
-            }
-          })();
-        }
-
-        // Extração de Sentimentos (Logs Diários do Farol) em background
-        const userMessagesCount = currentMessages.filter(m => m.role === 'user').length;
-        if (userMessagesCount === 3 || userMessagesCount === 6) {
-          (async () => {
-            try {
-              const contextoCompleto = currentMessages.map(m => `${m.role}: ${m.content}`).join('\n');
-              const aiResponse = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-                method: "POST",
-                headers: {
-                  "Authorization": `Bearer ${process.env.NEXT_PUBLIC_GROQ_API_KEY}`,
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                  model: "llama-3.1-8b-instant",
-                  response_format: { type: "json_object" },
-                  messages: [
-                    { role: "system", content: "Analise esta conversa. Retorne APENAS UM JSON válido com três chaves estritas: 'humor_predominante' (deve ser exatamente 'calmo', 'ansioso', 'agitado' ou 'sos'), 'assunto_principal' (máximo 3 palavras) e 'conselho_curto' (uma frase de 10 palavras acolhedora baseada no que foi dito)." },
-                    { role: "user", content: contextoCompleto }
-                  ],
-                  temperature: 0.3,
-                }),
-              });
-              const aiData = await aiResponse.json();
-              const jsonString = aiData.choices?.[0]?.message?.content;
-              if (jsonString) {
-                const parsed = JSON.parse(jsonString);
-                if (parsed.humor_predominante) {
-                  const { data: { session } } = await supabase.auth.getSession();
-                  if (session?.user) {
-                    const today = new Date().toLocaleDateString('en-CA');
-                    await supabase.from('daily_logs').upsert({
-                      user_id: session.user.id,
-                      date: today,
-                      humor: parsed.humor_predominante,
-                      assunto: parsed.assunto_principal,
-                      conselho: parsed.conselho_curto
-                    }, { onConflict: 'user_id, date' });
-                  }
-                }
-              }
-            } catch (e) {
-              console.error("Erro ao gerar log diário em background:", e);
-            }
-          })();
-        }
-      }
+      if (result.crisis) setIsHelpOpen(true);
     } catch (err: any) {
-      if (err.name === 'AbortError') {
-        return;
-      }
-      setMessages(prev => [...prev, { id: 'error', role: 'assistant', content: "⚠️ Sinal fraco no Porto. Verifique sua conexão." }]);
+      if (err?.name === 'AbortError' || cancelarRef.current) return;
+      setMessages(prev => [...prev, { id: `error-${Date.now()}`, role: 'assistant', content: `⚠️ ${err?.message || "Sinal fraco no Porto. Verifique sua conexão."}` }]);
       setIsResponding(false);
     } finally {
       setIsLoading(false);
       setStreamingMessageId(null);
-      if (!requestSuccessful) {
-        setIsResponding(false);
-      }
       setTimeout(() => {
         isInitializingNewChat.current = false;
       }, 1000);
     }
   };
 
-  const handleSendMessage = async (e?: React.FormEvent) => {
-    e?.preventDefault();
-    if (!input.trim() || isLoading || isResponding) return;
+  const handleSendMessage = async (e?: React.FormEvent | null, overrideText?: string) => {
+    e?.preventDefault?.();
+    const text = (overrideText ?? input).trim();
+    if (!text || isLoading || isResponding) return;
 
-    if (editingMessageId) {
+    if (editingMessageId && !overrideText) {
       const targetIndex = messages.findIndex(m => m.id === editingMessageId);
       if (targetIndex !== -1) {
         const updatedMessages = [...messages];
-        updatedMessages[targetIndex] = { ...updatedMessages[targetIndex], content: input };
-        const truncatedMessages = updatedMessages.slice(0, targetIndex + 1);
-        setMessages(truncatedMessages);
+        updatedMessages[targetIndex] = { ...updatedMessages[targetIndex], content: text };
+        setMessages(updatedMessages.slice(0, targetIndex + 1));
+        const editedId = editingMessageId;
         setEditingMessageId(null);
-        
         setIsLoading(true);
         setIsResponding(true);
         cancelarRef.current = false;
         setInput("");
-
         try {
           if (chatId) {
-            await supabase.from('messages').update({ content: input }).eq('id', editingMessageId);
-            const messagesToDelete = messages.slice(targetIndex + 1).map(m => m.id);
-            if (messagesToDelete.length > 0) {
-              await supabase.from('messages').delete().in('id', messagesToDelete);
-            }
+            await noricaApi.editMessage(chatId, editedId, text);
+            await generateResponse(text, { regenerate: true });
           }
-          await generateResponse(truncatedMessages);
-        } catch (err) {
+        } catch (err: any) {
           console.error("Erro ao editar mensagem:", err);
+          setMessages(prev => [...prev, { id: `error-${Date.now()}`, role: 'assistant', content: `⚠️ ${err?.message || "Não foi possível editar agora."}` }]);
           setIsLoading(false);
           setIsResponding(false);
         }
@@ -434,61 +268,13 @@ Regras de comunicação e comportamento:
       return;
     }
 
-    const userMessage = { id: Date.now().toString(), role: 'user', content: input };
-    const currentMessages = [...messages, userMessage];
-    setMessages(currentMessages);
-    setInput("");
-
+    const tempUserId = `tmp-${Date.now()}`;
+    setMessages(prev => [...prev, { id: tempUserId, role: 'user', content: text }]);
+    if (!overrideText) setInput("");
     setIsLoading(true);
     setIsResponding(true);
     cancelarRef.current = false;
-
-    try {
-      let activeChatId = chatId;
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      // 1. Criar Chat se não existir
-      if (!activeChatId && session?.user) {
-        isInitializingNewChat.current = true;
-        const { data: newChat } = await supabase
-          .from('chats')
-          .insert({ 
-            user_id: session.user.id, 
-            title: "Nova Conversa"
-          })
-          .select()
-          .single();
-        
-        if (newChat) {
-          activeChatId = newChat.id;
-          // Salvar mensagem de boas-vindas inicial se houver
-          const welcomeMsg = messages.find(m => m.id === 'welcome');
-          if (welcomeMsg) {
-            await supabase.from('messages').insert({
-              chat_id: activeChatId,
-              role: 'assistant',
-              content: welcomeMsg.content
-            });
-          }
-          router.replace(`/porto/?chatId=${activeChatId}`, { scroll: false });
-        }
-      }
-
-      // 2. Salvar mensagem do usuário
-      if (activeChatId) {
-        await supabase.from('messages').insert({
-          chat_id: activeChatId,
-          role: 'user',
-          content: userMessage.content
-        });
-      }
-
-      await generateResponse(currentMessages, activeChatId);
-    } catch (err) {
-      console.error(err);
-      setIsLoading(false);
-      setIsResponding(false);
-    }
+    await generateResponse(text, { tempUserId });
   };
 
   useEffect(() => {
@@ -500,14 +286,14 @@ Regras de comunicação e comportamento:
       // Se já temos mensagens e o chatId não mudou drasticamente (ou seja, não estamos vindo de uma navegação lateral)
       // poderíamos evitar o fetch, mas para garantir sincronia com histórico, fazemos o fetch apenas se chatId existir
       if (chatId) {
-        const { data: chatData } = await supabase.from('chats').select('title').eq('id', chatId).single();
-        if (chatData?.title) {
-          setChatTitle(chatData.title);
-        }
-        
-        const { data: history } = await supabase.from('messages').select('id, role, content').eq('chat_id', chatId).order('created_at', { ascending: true });
-        if (history && history.length > 0) {
-          setMessages(history.map(m => ({ id: m.id, role: m.role, content: m.content })));
+        try {
+          const { messages: history, title } = await noricaApi.history(chatId);
+          if (title) setChatTitle(title);
+          if (history && history.length > 0) {
+            setMessages(history.map(m => ({ id: m.id, role: m.role, content: m.content })));
+          }
+        } catch (err) {
+          console.error("Erro ao carregar conversa:", err);
         }
       } else {
         // Nova conversa (sem chatId)
@@ -515,16 +301,18 @@ Regras de comunicação e comportamento:
         if (action === 'revisar-metas' || action === 'revisar-reflexao') {
           initialGreeting = "Oi! Vi que você quer revisar suas reflexões e hábitos hoje. Como foi seu progresso no autoconhecimento nessa semana? ⚓✨";
         } else if (action === 'suporte-b2b') {
-          initialGreeting = "Olá! Sou Clara Silveira, especialista em bem-estar pela parceria Nórica. Como posso apoiar você hoje? Nosso espaço é seguro, acolhedor e focado no seu bem-estar pessoal. ⚓💙";
+          initialGreeting = "Olá! Sou a Clara, assistente virtual de bem-estar da parceria Nórica. Como posso apoiar você hoje? Nosso espaço é seguro, acolhedor e focado no seu bem-estar pessoal. ⚓💙";
         } else {
           const pool = greetingPool[humor] || greetingPool.default;
           initialGreeting = pool[Math.floor(Math.random() * pool.length)];
         }
         setMessages([{ id: 'welcome', role: 'assistant', content: initialGreeting }]);
+        // Atalhos do Farol chegam com uma sugestão pronta para enviar.
+        if (prefill) setInput(prefill);
       }
     };
     initialize();
-  }, [chatId, humor, action]); // Removi o messages.length da dependência para evitar loops, e agora ele limpa se chatId for nulo.
+  }, [chatId, humor, action, prefill]); // Removi o messages.length da dependência para evitar loops, e agora ele limpa se chatId for nulo.
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -575,24 +363,9 @@ Regras de comunicação e comportamento:
   const transcribeAudio = async (blob: Blob) => {
     setIsTranscribing(true);
     try {
-      const formData = new FormData();
-      formData.append('file', blob, 'recording.webm');
-      formData.append('model', 'whisper-large-v3');
-      formData.append('language', 'pt');
-
-      const response = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${process.env.NEXT_PUBLIC_GROQ_API_KEY}`,
-        },
-        body: formData,
-      });
-
-      const data = await response.json();
-      if (data.text) {
-        setInput(data.text);
-        // Opcional: Enviar automaticamente após transcrever
-        // handleSendMessage(null, data.text);
+      const text = await noricaApi.transcribe(blob);
+      if (text) {
+        setInput(text);
       }
     } catch (err) {
       console.error("Erro na transcrição:", err);
@@ -604,7 +377,8 @@ Regras de comunicação e comportamento:
   const mensagens = messages.map((m) => ({
     id: m.id,
     texto: m.content,
-    autor: m.role === 'user' ? 'User' : 'IA'
+    autor: m.role === 'user' ? 'User' : m.role === 'crisis' ? 'Crise' : 'IA',
+    tasks: (m.tasks || []) as string[],
   }));
   const inputTexto = input;
   const touchStartXRef = useRef(0);
@@ -652,6 +426,17 @@ Regras de comunicação e comportamento:
         <Anchor className="w-6 h-6" />
       </button>
 
+      {/* Ajuda humana agora (CVV 188 / SAMU 192) */}
+      <button 
+        onClick={(e) => { e.stopPropagation(); setIsHelpOpen(true); }}
+        className="absolute top-[4.75rem] right-4 z-50 p-2.5 rounded-full bg-rose-500/10 backdrop-blur-md border border-rose-500/30 shadow-sm active:scale-90 transition-all text-rose-400 hover:bg-rose-500/20 flex items-center justify-center"
+        title="Preciso de ajuda agora"
+        aria-label="Preciso de ajuda agora"
+      >
+        <LifeBuoy className="w-6 h-6" />
+      </button>
+      <HelpSheet open={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
+
       {/* Título da Conversa no Topo */}
       <div className="absolute top-6 left-20 right-20 z-40 flex justify-center items-center pointer-events-none">
         <motion.div 
@@ -674,15 +459,33 @@ Regras de comunicação e comportamento:
         {/* ÁREA DE MENSAGENS: Começa do topo (justify-start) e tem um pb-28 para a barra não cobrir a última mensagem */}
         <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 flex flex-col justify-start space-y-4 pb-28 pt-[calc(env(safe-area-inset-top,24px)+5rem)] relative">
         {mensagens.map((msg) => (
-          msg.autor === 'IA' ? (
-            <MensagemIA 
-              key={msg.id} 
-              textoOriginal={msg.texto} 
-              isStreaming={msg.id === streamingMessageId}
-              shouldAnimate={animatedIds.has(msg.id)}
-              cancelarRef={cancelarRef}
-              onFinalizado={() => setIsResponding(false)} 
-            />
+          msg.autor === 'Crise' ? (
+            <div key={msg.id} className="self-start w-full"><CrisisCard /></div>
+          ) : msg.autor === 'IA' ? (
+            <div key={msg.id} className="flex flex-col gap-2">
+              <MensagemIA 
+                textoOriginal={msg.texto} 
+                isStreaming={msg.id === streamingMessageId}
+                shouldAnimate={animatedIds.has(msg.id)}
+                cancelarRef={cancelarRef}
+                onFinalizado={() => setIsResponding(false)} 
+              />
+              {msg.tasks.length > 0 && !isResponding && (
+                addedTasks[msg.id] ? (
+                  <div className="flex items-center gap-2 text-teal-400 text-[10px] font-black uppercase tracking-widest pl-2">
+                    <CheckCircle2 size={14} /> Adicionado aos seus Logs de hoje
+                  </div>
+                ) : (
+                  <motion.button
+                    whileTap={{ scale: 0.97 }}
+                    onClick={() => handleAddTasks(msg.id, msg.tasks)}
+                    className="self-start flex items-center gap-2 px-4 py-2.5 rounded-full bg-teal-500/10 border border-teal-500/30 text-teal-300 text-[10px] font-black uppercase tracking-widest hover:bg-teal-500/20 transition-all"
+                  >
+                    <Plus size={14} /> Adicionar {msg.tasks.length} {msg.tasks.length === 1 ? 'passo' : 'passos'} aos Logs
+                  </motion.button>
+                )
+              )}
+            </div>
           ) : (
             <motion.div 
               key={msg.id} 

@@ -15,10 +15,31 @@ import confetti from 'canvas-confetti';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import Link from 'next/link';
 import AnimatedBackground from '@/components/AnimatedBackground';
+import { fetchDailyLog, saveDailyLog, todayKey, noricaApi, type CustomTask } from '@/lib/norica-api';
+
+// Tarefas sugeridas pela IA no Porto entram numa categoria própria.
+const AI_CATEGORY = "Da Nórica" as const;
+
+function withCustomTasks(base: Task[], completedIds: number[], custom: CustomTask[]): Task[] {
+  const done = new Set(completedIds);
+  return [
+    ...base.map(t => ({ ...t, completed: done.has(t.id as number) })),
+    ...custom.map(c => ({ id: c.id, category: AI_CATEGORY, text: c.text, completed: !!c.completed, icon: Sparkles })),
+  ];
+}
+
+function toPayload(day: string, list: Task[], progress: number) {
+  return {
+    day,
+    completed: list.filter(t => typeof t.id === 'number' && t.completed).map(t => t.id as number),
+    custom_tasks: list.filter(t => t.category === AI_CATEGORY).map(t => ({ id: String(t.id), text: t.text, completed: t.completed })),
+    progress,
+  };
+}
 
 interface Task {
-  id: number;
-  category: "Corpo" | "Mente" | "Ambiente" | "Conexão";
+  id: number | string;
+  category: "Corpo" | "Mente" | "Ambiente" | "Conexão" | "Da Nórica";
   text: string;
   completed: boolean;
   icon: any;
@@ -77,6 +98,8 @@ export default function LogPage() {
   const [currentReflection, setCurrentReflection] = useState("");
   const [feedback, setFeedback] = useState<string | null>(null);
   const [isMounted, setIsMounted] = useState(false);
+  const [isSynced, setIsSynced] = useState(false);
+  const saveTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [streak, setStreak] = useState(0);
   const [aiInsight, setAiInsight] = useState<string>("");
   
@@ -144,6 +167,14 @@ export default function LogPage() {
     } catch (e) {
       console.error("Erro ao gerenciar tarefas diárias:", e);
     }
+
+    // Sincroniza com a conta: o registro de hoje no Supabase vence a cópia local.
+    fetchDailyLog(today)
+      .then(log => {
+        if (log) setTasks(withCustomTasks(defaultTasks, log.completed || [], log.custom_tasks || []));
+      })
+      .catch(() => {})
+      .finally(() => setIsSynced(true));
   }, []);
 
   useEffect(() => {
@@ -155,6 +186,13 @@ export default function LogPage() {
     
     localStorage.setItem('norica-tasks', JSON.stringify(tasks));
     localStorage.setItem('norica-progress', newProgress.toString());
+
+    // Salva na conta (com pequeno atraso para juntar vários toques seguidos).
+    if (isSynced) {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      const snapshot = toPayload(todayKey(), tasks, newProgress);
+      saveTimer.current = setTimeout(() => { saveDailyLog(snapshot).catch(() => {}); }, 800);
+    }
 
     // Lógica de Streak (Ofensiva)
     const today = new Date().toLocaleDateString('en-CA');
@@ -191,7 +229,7 @@ export default function LogPage() {
         setShowVictory(true);
       }, 500);
     }
-  }, [tasks, isMounted, showVictory]);
+  }, [tasks, isMounted, showVictory, isSynced]);
 
   // Carregar/Gerar AI Insight (A cada 3 dias)
   useEffect(() => {
@@ -208,36 +246,15 @@ export default function LogPage() {
         setAiInsight(cachedInsight);
       } else {
         try {
-          const completedTasksNames = tasks.filter(t => t.completed).map(t => t.text).join(', ');
-          const prompt = `Com base nas seguintes tarefas de reflexão e hábitos que o usuário completou hoje: [${completedTasksNames || 'Nenhuma tarefa ainda'}], gere uma frase curta (máximo 15 palavras), calorosa, acolhedora e poética sobre os padrões de bem-estar e autoconhecimento dele. Use um tom acolhedor. Responda APENAS a frase, sem introduções ou aspas.`;
           
-          if (process.env.NEXT_PUBLIC_GROQ_API_KEY) {
-            const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-              method: "POST",
-              headers: {
-                "Authorization": `Bearer ${process.env.NEXT_PUBLIC_GROQ_API_KEY}`,
-              },
-              body: JSON.stringify({
-                model: "llama-3.1-8b-instant",
-                messages: [
-                  { role: "system", content: "Você é a Nórica, assistente de bem-estar e autoconhecimento da Nórica. Gere insights curtos, calorosos e poéticos." },
-                  { role: "user", content: prompt }
-                ],
-                temperature: 0.7,
-                max_tokens: 60
-              })
-            });
-            
-            if (response.ok) {
-              const data = await response.json();
-              const text = data.choices?.[0]?.message?.content?.replace(/["']/g, '') || "";
-              if (text) {
-                localStorage.setItem('norica-log-insight', text);
-                localStorage.setItem('norica-log-insight-time', now.toString());
-                setAiInsight(text);
-                return;
-              }
-            }
+          // A frase é gerada no servidor (a chave da IA não fica mais no app).
+          const completedTasks = tasks.filter(t => t.completed).map(t => t.text);
+          const { insight } = await noricaApi.logInsight(completedTasks, progress);
+          if (insight) {
+            localStorage.setItem('norica-log-insight', insight);
+            localStorage.setItem('norica-log-insight-time', now.toString());
+            setAiInsight(insight);
+            return;
           }
           throw new Error("API check failed or not set");
         } catch (err) {
@@ -259,7 +276,7 @@ export default function LogPage() {
     loadInsight();
   }, [isMounted, tasks]);
 
-  const toggleTask = (id: number) => {
+  const toggleTask = (id: number | string) => {
     setTasks(prev => prev.map(t => {
       if (t.id === id) {
         const newState = !t.completed;
@@ -279,7 +296,10 @@ export default function LogPage() {
     setShowReflection(true);
   };
 
-  const categories: Task["category"][] = ["Corpo", "Mente", "Ambiente", "Conexão"];
+  const categories: Task["category"][] = [
+    ...(tasks.some(t => t.category === AI_CATEGORY) ? [AI_CATEGORY] : []),
+    "Corpo", "Mente", "Ambiente", "Conexão",
+  ];
 
   if (!isMounted) return null;
 

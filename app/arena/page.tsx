@@ -2,7 +2,9 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Sword, Briefcase, Heart, ArrowLeft, Send, User, X, Loader2, Sparkles, ArrowRight, Mic, MicOff, Bot } from 'lucide-react';
+import { Sword, Briefcase, Heart, ArrowLeft, Send, User, X, Loader2, Sparkles, ArrowRight, Mic, MicOff, Bot, Trophy } from 'lucide-react';
+import { noricaApi } from '@/lib/norica-api';
+import { HelpSheet, CrisisCard } from '@/components/AjudaAgora';
 import { useRouter } from 'next/navigation';
 import AnimatedBackground from '@/components/AnimatedBackground';
 import SafeMarkdown from '@/components/SafeMarkdown';
@@ -14,13 +16,7 @@ const scenarios = [
   { id: 3, title: "Primeiro Encontro", desc: "Quebre o gelo e mantenha a autenticidade sob pressão.", icon: Heart, color: "text-rose-400", bg: "bg-rose-500/10" },
 ];
 
-const ARENA_PROMPT = `Você é o Simulador Tático da Arena Nórica. 
-Sua missão é atuar como o personagem desafiador no cenário escolhido pelo usuário.
-Regras:
-1. Seja realista e um pouco difícil, para que o usuário realmente treine.
-2. Responda sempre de forma concisa (máximo 2 parágrafos).
-3. Após cada fala do usuário, responda como o personagem e mantenha o diálogo vivo.
-4. Use emojis que combinem com a emoção do personagem.`;
+// O prompt da Arena agora fica no servidor: supabase/functions/_shared/safety.ts
 
 const gridVariants = {
   hidden: { opacity: 0 },
@@ -62,52 +58,69 @@ export default function ArenaPage() {
     setIsMounted(true);
   }, []);
 
-  const handleSendMessage = async (e, customInput) => {
-    if (e) e.preventDefault();
-    const content = customInput || input;
-    if (!content.trim() || isLoading) return;
+  const [crisis, setCrisis] = useState(false);
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
+  const [feedback, setFeedback] = useState<string | null>(null);
+  const [isFeedbackLoading, setIsFeedbackLoading] = useState(false);
 
-    if (!customInput) {
-      const userMessage = { id: Date.now().toString(), role: 'user', content };
-      setMessages(prev => [...prev, userMessage]);
-      setInput("");
-      if (textareaRef.current) textareaRef.current.style.height = '44px';
-    }
-    
+  const toTranscript = (list) =>
+    list
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .map(m => ({ role: m.role, content: m.content }));
+
+  // A IA da Arena roda no servidor (Edge Function), com login e protocolo de crise.
+  const requestReply = async (history) => {
     setIsLoading(true);
-
     try {
-      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${process.env.NEXT_PUBLIC_GROQ_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "llama-3.1-8b-instant",
-          messages: [
-            { role: "system", content: ARENA_PROMPT + `\nCENÁRIO ATUAL: ${selected?.title}` },
-            ...messages.map(m => ({ role: m.role, content: m.content })),
-            { role: "user", content }
-          ],
-          temperature: 0.8,
-        }),
-      });
-
-      const data = await response.json();
-      const botText = data.choices?.[0]?.message?.content || "Estou pronto para o desafio. Comece você.";
-      
-      setIsLoading(false);
-      setMessages(prev => [...prev, { id: (Date.now()+1).toString(), role: 'assistant', content: botText }]);
+      const result = await noricaApi.arena(selected.title, toTranscript(history));
+      if (result.crisis) {
+        setCrisis(true);
+        setIsHelpOpen(true);
+      }
+      setMessages(prev => [...prev, { id: (Date.now() + 1).toString(), role: 'assistant', content: result.reply }]);
     } catch (err) {
-      console.error("ERRO_ARENA_DIRETO:", err);
+      console.error("ERRO_ARENA:", err);
       setIsLoading(false);
+      setMessages(prev => [...prev, { id: `error-${Date.now()}`, role: 'assistant', content: `⚠️ ${err?.message || "Sinal fraco na Arena. Tente de novo."}` }]);
     }
+  };
+
+  const handleSendMessage = async (e?) => {
+    if (e) e.preventDefault();
+    const content = input;
+    if (!content.trim() || isLoading) return;
+    const userMessage = { id: Date.now().toString(), role: 'user', content };
+    const next = [...messages, userMessage];
+    setMessages(next);
+    setInput("");
+    if (textareaRef.current) textareaRef.current.style.height = '44px';
+    await requestReply(next);
+  };
+
+  // Retorno do treino: o que a pessoa fez bem, o que treinar e uma nota de confiança.
+  const handleFeedback = async () => {
+    if (isFeedbackLoading) return;
+    setIsFeedbackLoading(true);
+    try {
+      const result = await noricaApi.arenaFeedback(selected.title, toTranscript(messages));
+      setFeedback(result.feedback);
+    } catch (err) {
+      setFeedback(`⚠️ ${err?.message || "Não foi possível gerar o retorno agora."}`);
+    } finally {
+      setIsFeedbackLoading(false);
+    }
+  };
+
+  const resetArena = () => {
+    setSelected(null);
+    setMessages([]);
+    setFeedback(null);
+    setCrisis(false);
   };
 
   useEffect(() => {
     if (selected && messages.length === 0) {
-      handleSendMessage(null, `SISTEMA: Iniciar Simulação Arena - ${selected.title}. Comece o diálogo como o personagem desafiador.`);
+      requestReply([]);
     }
   }, [selected]);
 
@@ -155,17 +168,8 @@ export default function ArenaPage() {
   const transcribeAudio = async (blob) => {
     setIsTranscribing(true);
     try {
-      const formData = new FormData();
-      formData.append('file', blob, 'recording.webm');
-      formData.append('model', 'whisper-large-v3');
-      formData.append('language', 'pt');
-      const response = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
-        method: "POST",
-        headers: { "Authorization": `Bearer ${process.env.NEXT_PUBLIC_GROQ_API_KEY}` },
-        body: formData,
-      });
-      const data = await response.json();
-      if (data.text) setInput(data.text);
+      const text = await noricaApi.transcribe(blob);
+      if (text) setInput(text);
     } catch (err) {
       console.error(err);
     } finally {
@@ -175,7 +179,8 @@ export default function ArenaPage() {
 
   if (!isMounted) return null;
 
-  const visibleMessages = messages.filter(m => !m.content.startsWith('SISTEMA:'));
+  const visibleMessages = messages;
+  const userTurns = messages.filter(m => m.role === 'user').length;
 
   return (
     <main className="fixed inset-0 flex flex-col overflow-hidden bg-transparent z-10">
@@ -243,13 +248,24 @@ export default function ArenaPage() {
           >
             {/* Botão de Voltar - Flutuando no topo esquerdo */}
             <button 
-              onClick={() => { setSelected(null); setMessages([]); }} 
+              onClick={resetArena} 
               className="absolute top-6 left-4 z-50 p-2.5 rounded-full bg-white/5 backdrop-blur-md border border-white/10 shadow-sm active:scale-90 transition-all text-rose-400 hover:bg-white/10 flex items-center justify-center"
             >
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
               </svg>
             </button>
+
+            {/* Retorno do treino */}
+            <motion.button
+              whileTap={{ scale: 0.95 }}
+              onClick={handleFeedback}
+              disabled={userTurns === 0 || isFeedbackLoading}
+              className={`absolute top-6 right-4 z-50 px-4 py-2.5 rounded-full backdrop-blur-md border shadow-sm flex items-center gap-2 transition-all ${userTurns === 0 ? 'bg-white/5 border-white/10 text-white/30' : 'bg-rose-500/15 border-rose-500/30 text-rose-300 hover:bg-rose-500/25'}`}
+            >
+              {isFeedbackLoading ? <Loader2 size={16} className="animate-spin" /> : <Trophy size={16} />}
+              <span className="text-[10px] font-black uppercase tracking-widest">Ver retorno</span>
+            </motion.button>
 
             <div ref={scrollRef} className="flex-1 p-4 overflow-y-auto bg-transparent custom-scrollbar overscroll-contain pt-20">
               <div className="max-w-3xl mx-auto space-y-8 py-8">
@@ -278,6 +294,10 @@ export default function ArenaPage() {
                   );
                 })}
                 
+                {crisis && (
+                  <div className="flex justify-start"><CrisisCard /></div>
+                )}
+
                 {isLoading && (
                   <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex justify-start gap-3">
                     <div className="w-10 h-10 rounded-2xl bg-rose-950/20 border border-rose-500/20 text-rose-400 flex items-center justify-center shadow-sm backdrop-blur-md">
@@ -362,6 +382,46 @@ export default function ArenaPage() {
               </form>
             </div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      <HelpSheet open={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
+
+      <AnimatePresence>
+        {feedback && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setFeedback(null)}
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[900]"
+            />
+            <motion.div
+              initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 28, stiffness: 260 }}
+              className="fixed inset-x-0 bottom-0 z-[901] bg-[#0b0f19] border-t border-white/10 rounded-t-[2.5rem] p-6 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] shadow-2xl max-w-lg mx-auto max-h-[80dvh] overflow-y-auto custom-scrollbar"
+            >
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-12 h-12 rounded-2xl bg-rose-500/15 text-rose-400 flex items-center justify-center">
+                  <Trophy size={22} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-white uppercase tracking-tighter leading-none">Retorno do treino</h3>
+                  <p className="text-[9px] font-black text-rose-400 uppercase tracking-widest mt-1">{selected?.title}</p>
+                </div>
+              </div>
+              <div className="text-sm text-white/80 leading-relaxed">
+                <SafeMarkdown content={feedback} highlightColor="text-rose-400" />
+              </div>
+              <div className="flex flex-col gap-3 mt-6">
+                <button onClick={() => setFeedback(null)} className="w-full py-4 rounded-2xl bg-rose-500 text-white font-black uppercase tracking-widest text-[10px]">
+                  Continuar treinando
+                </button>
+                <button onClick={resetArena} className="w-full py-4 rounded-2xl bg-white/5 border border-white/10 text-white/80 font-black uppercase tracking-widest text-[10px]">
+                  Escolher outro cenário
+                </button>
+              </div>
+            </motion.div>
+          </>
         )}
       </AnimatePresence>
 

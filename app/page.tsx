@@ -4,6 +4,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Anchor, Mail, Lock, ArrowRight, Loader2, User, Wind, Cloud, Zap, LifeBuoy, MessageCircle, Sword, Lightbulb, CheckCircle2, Shield, Eye, EyeOff, Compass } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { createClient } from '@/lib/supabase-client';
+import { logMood, toMood } from '@/lib/norica-api';
+import { firstName } from '@/lib/user-name';
 import { useRouter } from 'next/navigation';
 import { Browser } from '@capacitor/browser';
 import { App } from '@capacitor/app';
@@ -85,6 +87,14 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
   const supabase = createClient();
+  const [profileName, setProfileName] = useState<string | null>(null);
+
+  // Nome escolhido no Perfil (vale mais que o nome da conta Google).
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase.from('profiles').select('display_name').eq('id', user.id).maybeSingle()
+      .then(({ data }) => setProfileName(data?.display_name ?? null));
+  }, [user?.id]);
   const gsapContainerRef = useRef<HTMLDivElement>(null);
   
   const [snakeStep, setSnakeStep] = useState(0);
@@ -98,7 +108,7 @@ export default function Home() {
       if (session?.user) {
         setUser({
           ...session.user,
-          display_name: session.user.user_metadata?.display_name || session.user.email?.split('@')[0] || 'Navegador'
+          display_name: firstName(session.user)
         });
       } else {
         setUser(null);
@@ -196,7 +206,7 @@ export default function Home() {
     if (session?.user) {
       setUser({
         ...session.user,
-        display_name: session.user.user_metadata?.display_name || session.user.email?.split('@')[0] || 'Navegador'
+        display_name: firstName(session.user)
       });
     } else {
       setUser(null);
@@ -215,8 +225,8 @@ export default function Home() {
     );
   }
 
-  const rawName = user?.user_metadata?.display_name || user?.display_name || "Navegador";
-  const formattedName = rawName.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(' ');
+  // Só o primeiro nome (nunca o e-mail inteiro).
+  const formattedName = firstName(user, profileName);
 
   if (user) {
     return (
@@ -357,6 +367,9 @@ export default function Home() {
                       whileHover={{ scale: 1.02, y: -2 }} 
                       whileTap={{ scale: 0.98 }} 
                       onClick={(e) => {
+                        // Mapa emocional: cada escolha de humor fica registrada (sem travar a navegação).
+                        const mood = toMood(item.h);
+                        if (mood) logMood(mood).catch(() => {});
                         if (item.h === 'S.O.S') {
                           setMostrarNeblina(true);
                         } else {
