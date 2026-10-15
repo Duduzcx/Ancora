@@ -5,7 +5,9 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Mail, ArrowLeft, Send, CheckCircle2, LifeBuoy } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase-client';
-import AnimatedBackground from '@/components/Background'; // Usando o background padrão se o outro não existir
+import AnimatedBackground from '@/components/AnimatedBackground'; // Usando o background padrão se o outro não existir
+import MovingGlow from '@/components/MovingGlow';
+import ParticleCoalesce from '@/components/ParticleCoalesce';
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -49,6 +51,7 @@ export default function ForgotPasswordPage() {
   return (
     <div className="min-h-[100dvh] relative flex items-center justify-center p-6 overflow-hidden bg-[#080D19]">
       <div className="absolute inset-0 bg-[#080D19]" />
+      <MovingGlow />
       
       {/* Decoração de Fundo */}
       <div className="absolute top-0 left-0 w-full h-full pointer-events-none overflow-hidden">
@@ -70,7 +73,7 @@ export default function ForgotPasswordPage() {
           </button>
         </div>
 
-        <div className="bg-[#101726]/80 backdrop-blur-3xl border border-white/5 rounded-[3rem] p-8 md:p-12 shadow-[0_20px_50px_rgba(0,0,0,0.3)] relative overflow-hidden">
+        <ParticleCoalesce className="bg-[#101726]/80 backdrop-blur-3xl border border-white/5 rounded-[3rem] p-8 md:p-12 shadow-[0_20px_50px_rgba(0,0,0,0.3)] relative overflow-hidden">
           {/* Barra de Progresso Sutil */}
           <div className="absolute top-0 left-0 w-full h-1.5 bg-white/5">
              <motion.div 
@@ -167,7 +170,9 @@ export default function ForgotPasswordPage() {
                   <motion.button 
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
-                    onClick={() => router.push('/')}
+                    onClick={() => {
+                      router.push('/');
+                    }}
                     className="w-full bg-white text-slate-950 rounded-full py-6 font-black uppercase tracking-[0.3em] text-[10px] shadow-xl hover:bg-emerald-50 transition-all"
                   >
                     Voltar para Login
@@ -176,7 +181,7 @@ export default function ForgotPasswordPage() {
               </motion.div>
             )}
           </AnimatePresence>
-        </div>
+        </ParticleCoalesce>
       </motion.div>
     </div>
   );

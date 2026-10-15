@@ -110,7 +110,9 @@ export default function CofrePage() {
                 ABRIR SANTUÁRIO
               </motion.button>
               <button 
-                onClick={() => router.push('/')}
+                onClick={() => {
+                  router.push('/');
+                }}
                 className="text-white/40 text-[10px] font-black uppercase tracking-widest hover:text-white transition-colors"
               >
                 Voltar ao Início

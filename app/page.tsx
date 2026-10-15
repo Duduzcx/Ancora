@@ -1,14 +1,24 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Anchor, Mail, Lock, ArrowRight, Loader2, User, Wind, Cloud, Zap, LifeBuoy, MessageCircle, Sword, Lightbulb, CheckCircle2, Shield, Eye, EyeOff, Compass } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { createClient } from '@/lib/supabase-client';
 import { useRouter } from 'next/navigation';
 import { Browser } from '@capacitor/browser';
 import { App } from '@capacitor/app';
+import { Capacitor } from '@capacitor/core';
+import { GoogleSignIn } from '@capawesome/capacitor-google-sign-in';
 import AnimatedBackground from '@/components/AnimatedBackground';
+import RevealOnScroll from '@/components/RevealOnScroll';
+import MovingGlow from '@/components/MovingGlow';
+import LoginBackground from '@/components/LoginBackground';
 import NeblinaSOS from '@/components/NeblinaSOS';
+import { gsap } from 'gsap';
+import { useGSAP } from '@gsap/react';
+import { ScrollTrigger } from 'gsap/ScrollTrigger';
+
+gsap.registerPlugin(useGSAP, ScrollTrigger);
 
 const LighthouseIcon = (props: any) => (
   <svg xmlns="http://www.w3.org/2000/svg" width={props.size || 24} height={props.size || 24} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={props.strokeWidth || 2} strokeLinecap="round" strokeLinejoin="round" {...props}>
@@ -38,6 +48,31 @@ const cardVariants = {
   }
 };
 
+const modulesContainerVariants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.12
+    }
+  }
+};
+
+const moduleCardVariants = {
+  hidden: { y: 60, scale: 0.9, opacity: 0 },
+  visible: {
+    y: 0,
+    scale: 1,
+    opacity: 1,
+    transition: {
+      type: "spring",
+      stiffness: 80,
+      damping: 10,
+      mass: 0.8
+    }
+  }
+};
+
 export default function Home() {
   const [mostrarNeblina, setMostrarNeblina] = useState(false);
   const [user, setUser] = useState<any>(null);
@@ -50,6 +85,13 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
   const supabase = createClient();
+  const gsapContainerRef = useRef<HTMLDivElement>(null);
+  
+  const [snakeStep, setSnakeStep] = useState(0);
+
+  const handleSnakeComplete = () => {
+    setSnakeStep(prev => (prev + 1) % 9);
+  };
 
   useEffect(() => {
     const handleSession = (session: any) => {
@@ -92,18 +134,40 @@ export default function Home() {
     setGoogleLoading(true);
     setError(null);
     try {
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: 'com.zcx.norica://login-callback',
-          queryParams: { prompt: 'select_account' },
-          skipBrowserRedirect: true
-        },
-      });
-      if (error) throw error;
-      if (data?.url) await Browser.open({ url: data.url, windowName: '_self' });
+      if (Capacitor.isNativePlatform()) {
+        const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+        if (!clientId || clientId.startsWith("YOUR_GOOGLE_WEB_CLIENT_ID")) {
+          throw new Error("Client ID do Google não configurado no arquivo de ambiente.");
+        }
+        await GoogleSignIn.initialize({
+          clientId: clientId,
+          serverClientId: clientId, // Faltava isso para o Supabase!
+          scopes: ['email', 'profile'],
+          offlineAccess: true, // Faltava isso para gerar o token corretamente
+        });
+        const result = await GoogleSignIn.signIn();
+        if (!result.idToken) {
+          throw new Error("Não foi possível obter o token do Google Sign-In.");
+        }
+        const { data, error: signInError } = await supabase.auth.signInWithIdToken({
+          provider: 'google',
+          token: result.idToken,
+        });
+        if (signInError) throw signInError;
+      } else {
+        const { data, error } = await supabase.auth.signInWithOAuth({
+          provider: 'google',
+          options: {
+            redirectTo: 'com.zcx.norica://login-callback',
+            queryParams: { prompt: 'select_account' },
+            skipBrowserRedirect: true
+          },
+        });
+        if (error) throw error;
+        if (data?.url) await Browser.open({ url: data.url, windowName: '_self' });
+      }
     } catch (err: any) {
-      setError("Falha na conexão Google.");
+      setError(err.message || "Falha na conexão Google.");
     } finally {
       setGoogleLoading(false);
     }
@@ -139,10 +203,14 @@ export default function Home() {
     }
   };
 
+  useGSAP(() => {
+    // ScrollTrigger desativado temporariamente conforme solicitado
+  }, { dependencies: [user], revertOnUpdate: true });
+
   if (isCheckingAuth) {
     return (
-      <main className="h-[100dvh] w-full bg-[#FDFCF7] flex items-center justify-center">
-        <Loader2 className="text-emerald-500 animate-spin" size={40} />
+      <main className="h-[100dvh] w-full bg-transparent flex items-center justify-center">
+        <Loader2 className="text-emerald-400 animate-spin" size={40} />
       </main>
     );
   }
@@ -152,35 +220,82 @@ export default function Home() {
 
   if (user) {
     return (
-      <main className="min-h-screen relative transition-all overflow-x-hidden pb-24 selection:bg-emerald-500/10">
-        <AnimatedBackground subtle={false} />
+      <main className="min-h-screen relative transition-all overflow-x-hidden pb-32 selection:bg-emerald-500/10 scroll-smooth">
+        <AnimatedBackground subtle />
+        
+        {/* Sombra Se Movendo Lentamente - Efeito Fundo do Mar */}
+        <motion.div 
+          className="fixed inset-0 pointer-events-none z-[-5] opacity-60 mix-blend-multiply"
+          style={{
+            backgroundImage: `radial-gradient(ellipse at 50% 50%, transparent 0%, rgba(2,10,16,0.6) 100%)`,
+            backgroundSize: '200% 200%'
+          }}
+          animate={{
+            backgroundPosition: ['0% 50%', '50% 0%', '100% 50%', '50% 100%', '0% 50%'],
+            scale: [1, 1.1, 1]
+          }}
+          transition={{ duration: 20, ease: "easeInOut", repeat: Infinity }}
+        />
         
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, ease: "easeOut" }}
+          className="hero-section"
         >
           {/* Top Section */}
           <div className="pt-16 pb-8 px-6 text-center space-y-5 relative z-10">
-          <div className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-500/10 text-emerald-500 rounded-full text-[10px] font-black uppercase tracking-widest border border-emerald-500/20 shadow-sm">
-            <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
-            Protocolo de Segurança Mental
+          <div className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-500/10 text-emerald-400 rounded-full text-[10px] font-black uppercase tracking-widest border border-emerald-500/20 shadow-sm">
+            <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></div>
+            Navegação Mental
           </div>
           
-          <h1 className="font-black text-slate-900 tracking-tighter leading-tight mt-6 whitespace-nowrap">
-            <span className="text-[34px] md:text-[42px] block leading-none mb-3">Sua<span className="font-brain text-6xl md:text-7xl text-pink-wave normal-case ml-1 mr-3">mente</span>em</span>
-            <span className="text-emerald-500 italic block text-[52px] md:text-[64px] tracking-[-0.05em]">Solo firme.</span>
-          </h1>
+          <motion.h1 
+            initial={{ opacity: 0, scale: 0.98 }}
+            animate={{ 
+              opacity: 1, 
+              scale: 1
+            }}
+            transition={{ 
+              opacity: { duration: 0.6, ease: "easeOut" },
+              scale: { duration: 0.6, ease: "easeOut" }
+            }}
+            className="font-black text-white tracking-tighter leading-tight mt-6 whitespace-nowrap"
+          >
+            <span className="text-[34px] md:text-[42px] block leading-none mb-3">
+              Sua
+              <motion.span
+                animate={{ 
+                  backgroundPosition: ['0% center', '-200% center'],
+                }}
+                transition={{ 
+                  duration: 2.5, 
+                  repeat: Infinity, 
+                  ease: "linear"
+                }}
+                className="font-brain text-6xl md:text-7xl normal-case px-1 ml-1 mr-2 inline-block bg-[linear-gradient(110deg,#DB2777,46%,#fff,54%,#DB2777)] bg-[length:200%_auto]"
+                style={{
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  backgroundClip: 'text',
+                }}
+              >
+                mente
+              </motion.span>
+              em
+            </span>
+            <span className="text-emerald-400 italic block text-[52px] md:text-[64px] tracking-[-0.05em]">Solo firme.</span>
+          </motion.h1>
           
-          <p className="text-slate-600 text-lg max-w-xs mx-auto font-bold leading-relaxed px-4 italic">
-            A vida é um mar que não obedece a ninguém. Nórica é o seu sistema de navegação emocional.
+          <p className="text-white/70 text-lg max-w-xs mx-auto font-bold leading-relaxed px-4 italic">
+            A vida é um mar que não obedece a ninguém. Nórica é o seu sistema de mapeamento de hábitos e reflexão diária.
           </p>
 
           <motion.button 
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.95 }}
             onClick={(e) => handleNavigate(e, '/porto/')}
-            className="mt-2 px-10 py-4 bg-slate-900 text-white rounded-full font-black text-[12px] uppercase tracking-widest inline-flex items-center gap-3 shadow-2xl active:scale-95 transition-transform"
+            className="mt-2 px-10 py-4 bg-emerald-500/80 text-white border border-emerald-400/20 rounded-full font-black text-[12px] uppercase tracking-widest inline-flex items-center gap-3 shadow-[0_8px_32px_0_rgba(16,185,129,0.3)] active:scale-95 transition-all breath-pulse hover:bg-emerald-500"
           >
             Entrar no Porto
             <ArrowRight size={16} />
@@ -196,81 +311,78 @@ export default function Home() {
           style={{ willChange: 'transform, opacity' }}
           className="mx-6 mt-12 mb-10 relative z-20"
         >
-          <div className="bg-white/80 backdrop-blur-2xl border border-white rounded-[3rem] p-6 shadow-2xl overflow-hidden relative group">
+          <div className="bg-slate-900/60 border border-white/10 rounded-[3rem] p-6 shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] overflow-hidden relative group">
             {/* Shimmer Effect */}
             <motion.div 
               animate={{ x: ['-100%', '200%'] }}
               transition={{ duration: 4, repeat: Infinity, ease: "linear", repeatDelay: 2 }}
-              className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent -skew-x-12 pointer-events-none"
+              className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -skew-x-12 pointer-events-none"
             />
             
             {/* Background decoration */}
-            <div className="absolute top-0 right-0 w-48 h-48 bg-emerald-500/5 rounded-full -mr-24 -mt-24 blur-3xl transition-transform group-hover:scale-110 duration-700" />
+            <div className="absolute top-0 right-0 w-48 h-48 bg-emerald-500/10 rounded-full -mr-24 -mt-24 blur-3xl transition-transform group-hover:scale-110 duration-700" />
             
             <div className="relative z-10 space-y-6">
               {/* Header */}
-              <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div className="flex items-center justify-between border-b border-white/10 pb-4">
                 <div className="space-y-1">
-                  <h2 className="text-xl font-bold text-slate-800 tracking-tight leading-none">
-                    Olá, <span className="text-emerald-500 font-brain text-2xl normal-case ml-1">{formattedName}</span>.
+                  <h2 className="text-xl font-bold text-white tracking-tight leading-none">
+                    Olá, <span className="text-emerald-400 font-brain text-2xl normal-case ml-1">{formattedName}</span>.
                   </h2>
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">Diário de Navegação</p>
+                  <p className="text-[10px] font-black text-white/40 uppercase tracking-[0.3em] mt-1">Diário de Navegação</p>
                 </div>
-                <div className="w-11 h-11 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400 border border-slate-100/50 shadow-inner">
+                <div className="w-11 h-11 bg-white/5 rounded-2xl flex items-center justify-center text-white/50 border border-white/10 shadow-inner">
                   <Anchor size={18} strokeWidth={1.5} />
                 </div>
               </div>
 
               {/* Question */}
               <div className="text-center py-1">
-                 <h3 className="text-2xl font-black text-slate-900 tracking-tighter italic leading-none">
-                   Como está seu <span className="text-water inline-block animate-tide-subtle px-1">mar</span> hoje?
+                 <h3 className="text-2xl font-black text-white tracking-tighter italic leading-none">
+                   Como está seu <span className="text-water inline-block px-1">mar</span> hoje?
                  </h3>
               </div>
 
               {/* Mood Grid */}
               <div className="grid grid-cols-2 gap-3">
                 {[
-                  {h:'Calmo', i:Wind, d:'Serenidade', from: '#10b981', to: '#059669', bg: 'bg-emerald-50', border: 'border-emerald-100'}, 
-                  {h:'Ansioso', i:Cloud, d:'Neblina', from: '#f59e0b', to: '#d97706', bg: 'bg-amber-50', border: 'border-amber-100'}, 
-                  {h:'Agitado', i:Zap, d:'Tormenta', from: '#f43f5e', to: '#e11d48', bg: 'bg-rose-50', border: 'border-rose-100'}, 
-                  {h:'S.O.S', i:LifeBuoy, d:'Resgate', from: '#3b82f6', to: '#2563eb', bg: 'bg-blue-50', border: 'border-blue-100'}
+                  {h:'Calmo', i:Wind, d:'Serenidade', from: '#10b981', to: '#059669', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20'}, 
+                  {h:'Ansioso', i:Cloud, d:'Neblina', from: '#f59e0b', to: '#d97706', bg: 'bg-amber-500/10', border: 'border-amber-500/20'}, 
+                  {h:'Agitado', i:Zap, d:'Tormenta', from: '#f43f5e', to: '#e11d48', bg: 'bg-rose-500/10', border: 'border-rose-500/20'}, 
+                  {h:'S.O.S', i:LifeBuoy, d:'Resgate', from: '#3b82f6', to: '#2563eb', bg: 'bg-blue-500/10', border: 'border-blue-500/20'}
                 ].map((item, idx) => (
-                  <motion.button 
-                    key={item.h} 
-                    initial={{ opacity: 0, y: 5 }}
-                    whileInView={{ opacity: 1, y: 0 }}
-                    viewport={{ once: true }}
-                    transition={{ delay: idx * 0.05, duration: 0.4 }}
-                    style={{ willChange: 'transform, opacity' }}
-                    whileHover={{ scale: 1.02, y: -2 }} 
-                    whileTap={{ scale: 0.98 }} 
-                    onClick={(e) => {
-                      if (item.h === 'S.O.S') {
-                        setMostrarNeblina(true);
-                      } else {
-                        handleNavigate(e, `/porto/?humor=${item.h.toLowerCase()}`);
-                      }
-                    }}
-                    className={`bg-white/50 border ${item.border} rounded-[2rem] p-4 flex flex-col items-center gap-3 transition-all hover:bg-white hover:shadow-xl hover:shadow-slate-200/50`}
-                  >
-                    <div className={`w-11 h-11 ${item.bg} rounded-2xl flex items-center justify-center mx-auto shadow-inner`}>
-                      <item.i size={22} style={{ color: item.from }} strokeWidth={2.5} />
-                    </div>
-                    <div className="text-center min-w-0 w-full">
-                      <span 
-                        className="text-sm font-black tracking-tighter block leading-none uppercase italic truncate"
-                        style={{ 
-                          background: `linear-gradient(to bottom, ${item.from}, ${item.to})`,
-                          WebkitBackgroundClip: 'text',
-                          WebkitTextFillColor: 'transparent'
-                        }}
-                      >
-                        {item.h}
-                      </span>
-                      <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest block mt-1 truncate">{item.d}</span>
-                    </div>
-                  </motion.button>
+                  <RevealOnScroll key={item.h} delay={idx * 0.15}>
+                    <motion.button 
+                      style={{ willChange: 'transform' }}
+                      whileHover={{ scale: 1.02, y: -2 }} 
+                      whileTap={{ scale: 0.98 }} 
+                      onClick={(e) => {
+                        if (item.h === 'S.O.S') {
+                          setMostrarNeblina(true);
+                        } else {
+                          handleNavigate(e, `/porto/?humor=${item.h.toLowerCase()}`);
+                        }
+                      }}
+                      className={`w-full h-full bg-white/5 border ${item.border} rounded-[2rem] p-4 flex flex-col items-center gap-3 transition-all hover:bg-white/10 hover:shadow-[0_8px_32px_0_rgba(255,255,255,0.05)] ${item.h === 'S.O.S' ? 'breath-pulse-rose' : ''}`}
+                    >
+                      <div className={`w-11 h-11 ${item.bg} rounded-2xl flex items-center justify-center mx-auto shadow-inner`}>
+                        <item.i size={22} style={{ color: item.from }} strokeWidth={2.5} />
+                      </div>
+                      <div className="text-center min-w-0 w-full">
+                        <span 
+                          className="text-sm font-black tracking-tighter block leading-none uppercase italic truncate"
+                          style={{ 
+                            background: `linear-gradient(to bottom, ${item.from}, ${item.to})`,
+                            WebkitBackgroundClip: 'text',
+                            WebkitTextFillColor: 'transparent'
+                          }}
+                        >
+                          {item.h}
+                        </span>
+                        <span className="text-[8px] font-bold text-white/45 uppercase tracking-widest block mt-1 truncate">{item.d}</span>
+                      </div>
+                    </motion.button>
+                  </RevealOnScroll>
                 ))}
               </div>
             </div>
@@ -284,178 +396,324 @@ export default function Home() {
           viewport={{ once: true }}
           className="px-10 py-20 flex items-center gap-4"
         >
-           <div className="h-[1px] flex-1 bg-emerald-200/50"></div>
-           <span className="text-[10px] font-black text-emerald-600/60 uppercase tracking-[0.6em] italic">Sistema Nórica</span>
-           <div className="h-[1px] flex-1 bg-emerald-200/50"></div>
+           <div className="h-[1px] flex-1 bg-white/10"></div>
+           <span className="text-[10px] font-black text-emerald-400/80 uppercase tracking-[0.6em] italic">Sistema Nórica</span>
+           <div className="h-[1px] flex-1 bg-white/10"></div>
         </motion.div>
 
         {/* Modules Section */}
-        <div className="px-6 space-y-8 max-w-md mx-auto">
+        <div ref={gsapContainerRef} className="cards-grid px-6 mt-4 space-y-6 max-w-md mx-auto perspective-[1200px] relative">
+          
+
           {/* O Porto */}
           <motion.div 
-            initial={{ opacity: 0, y: 15 }}
+            initial={{ opacity: 0, y: 30 }}
             whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, amount: 0.3 }}
-            transition={{ duration: 0.5 }}
-            style={{ willChange: 'transform, opacity' }}
-            whileHover={{ y: -10, scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.8, delay: 0.15 }}
+            style={{ '--card-index': 0 } as React.CSSProperties}
             onClick={(e) => handleNavigate(e, '/porto/')}
-            className="group bg-white/90 backdrop-blur-xl border border-white rounded-[3.5rem] p-8 text-center space-y-4 shadow-xl hover:shadow-2xl transition-all relative overflow-hidden cursor-pointer"
-          >
-            <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 rounded-bl-full -mr-10 -mt-10 transition-transform group-hover:scale-110" />
-            <div className="w-16 h-16 bg-gradient-to-br from-blue-600 to-blue-400 rounded-[2rem] flex items-center justify-center mx-auto shadow-lg shadow-blue-500/20 group-hover:rotate-6 transition-transform">
-              <LifeBuoy size={32} className="text-white" />
+            className="group p-6 rounded-3xl bg-[#131b2c] hover:bg-[#1a2333] border border-white/5 active:scale-[0.98] transition-all relative cursor-pointer shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] text-center overflow-hidden"
+          >            {/* SVG Snake Border */}
+            {snakeStep === 0 && (
+              <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none z-20 flex">
+                <svg className="absolute inset-0 w-full h-full block overflow-visible" xmlns="http://www.w3.org/2000/svg">
+                  <motion.rect
+                    x="0" y="0" width="100%" height="100%" rx="24" fill="none" stroke="#60A5FA" strokeWidth="4"
+                    initial={{ pathLength: 0, pathOffset: 0 }}
+                    animate={{ pathLength: [0, 0.4, 0], pathOffset: [0, 1.6, 1.6] }}
+                    transition={{ duration: 3, ease: "linear" }}
+                    style={{ opacity: 0.85 }}
+                    onAnimationComplete={handleSnakeComplete}
+                  />
+                </svg>
+              </div>
+            )}
+            {/* Gap Line to next card */}
+            {snakeStep === 1 && (
+              <div className="absolute -bottom-6 left-6 w-[2px] h-6 z-20 overflow-hidden">
+                <motion.div
+                  className="w-full bg-white"
+                  initial={{ height: "0%", y: "0%" }}
+                  animate={{ height: ["0%", "100%", "0%"], y: ["0%", "0%", "24px"] }}
+                  transition={{ duration: 0.3, ease: "linear" }}
+                  style={{ opacity: 0.85 }}
+                  onAnimationComplete={handleSnakeComplete}
+                />
+              </div>
+            )}
+            <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none z-0"><div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-bl-full -mr-10 -mt-10 transition-transform group-hover:scale-110" /></div>
+            <div className="relative z-10 flex flex-col items-center space-y-4">
+              <div className="w-16 h-16 bg-gradient-to-br from-blue-600 to-blue-400 rounded-[2rem] flex items-center justify-center mx-auto shadow-lg shadow-blue-500/20 group-hover:rotate-6 transition-transform relative z-10">
+                <LifeBuoy size={32} className="text-white" />
+              </div>
+              <div className="space-y-1 relative z-10">
+                <p className="text-[9px] font-black text-emerald-400 uppercase tracking-[0.4em]">DIÁRIO EMOCIONAL & REFLEXÃO</p>
+                <h2 className="text-3xl font-black text-white tracking-tighter uppercase italic">O Porto</h2>
+              </div>
+              <p className="text-white/70 text-sm font-bold leading-relaxed px-4 opacity-80 group-hover:opacity-100 transition-opacity relative z-10">
+                Seu cais seguro para realizar sua reflexão diária e registrar seus insights emocionais. Um espaço de autoconhecimento e total privacidade.
+              </p>
             </div>
-            <div className="space-y-1 relative z-10">
-              <p className="text-[9px] font-black text-emerald-500 uppercase tracking-[0.4em]">DESCANSO & ACOLHIMENTO</p>
-              <h2 className="text-3xl font-black text-slate-900 tracking-tighter uppercase italic">O Porto</h2>
-            </div>
-            <p className="text-slate-500 text-sm font-bold leading-relaxed px-4 opacity-80 group-hover:opacity-100 transition-opacity">
-              Seu cais seguro para descarregar o peso da jornada. Um espaço de acolhimento e total anonimato.
-            </p>
           </motion.div>
 
           {/* A Arena */}
           <motion.div 
-            initial={{ opacity: 0, y: 15 }}
+            initial={{ opacity: 0, y: 30 }}
             whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, amount: 0.3 }}
-            transition={{ duration: 0.5 }}
-            style={{ willChange: 'transform, opacity' }}
-            whileHover={{ y: -10, scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.8, delay: 0.3 }}
+            style={{ '--card-index': 1 } as React.CSSProperties}
             onClick={(e) => handleNavigate(e, '/arena/')}
-            className="group bg-white/90 backdrop-blur-xl border border-white rounded-[3.5rem] p-8 text-center space-y-4 shadow-xl hover:shadow-2xl transition-all relative overflow-hidden cursor-pointer"
-          >
-            <div className="absolute top-0 right-0 w-32 h-32 bg-rose-500/5 rounded-bl-full -mr-10 -mt-10 transition-transform group-hover:scale-110" />
-            <div className="w-16 h-16 bg-gradient-to-br from-rose-600 to-rose-400 rounded-[2rem] flex items-center justify-center mx-auto shadow-lg shadow-rose-500/20 group-hover:rotate-6 transition-transform">
-              <Sword size={32} className="text-white" />
+            className="group p-6 rounded-3xl bg-[#131b2c] hover:bg-[#1a2333] border border-white/5 active:scale-[0.98] transition-all relative cursor-pointer shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] text-center overflow-hidden"
+          >            {/* SVG Snake Border */}
+            {snakeStep === 2 && (
+              <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none z-20 flex">
+                <svg className="absolute inset-0 w-full h-full block overflow-visible" xmlns="http://www.w3.org/2000/svg">
+                  <motion.rect
+                    x="0" y="0" width="100%" height="100%" rx="24" fill="none" stroke="#FB7185" strokeWidth="4"
+                    initial={{ pathLength: 0, pathOffset: 0 }}
+                    animate={{ pathLength: [0, 0.4, 0], pathOffset: [0, 1.6, 1.6] }}
+                    transition={{ duration: 3, ease: "linear" }}
+                    style={{ opacity: 0.85 }}
+                    onAnimationComplete={handleSnakeComplete}
+                  />
+                </svg>
+              </div>
+            )}
+            {/* Gap Line to next card */}
+            {snakeStep === 3 && (
+              <div className="absolute -bottom-6 left-6 w-[2px] h-6 z-20 overflow-hidden">
+                <motion.div
+                  className="w-full bg-white"
+                  initial={{ height: "0%", y: "0%" }}
+                  animate={{ height: ["0%", "100%", "0%"], y: ["0%", "0%", "24px"] }}
+                  transition={{ duration: 0.3, ease: "linear" }}
+                  style={{ opacity: 0.85 }}
+                  onAnimationComplete={handleSnakeComplete}
+                />
+              </div>
+            )}
+            <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none z-0">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-rose-500/10 rounded-bl-full -mr-10 -mt-10 transition-transform group-hover:scale-110" />
             </div>
-            <div className="space-y-1 relative z-10">
-              <p className="text-[9px] font-black text-emerald-500 uppercase tracking-[0.4em]">SIMULADOR TÁTICO</p>
-              <h2 className="text-3xl font-black text-slate-900 tracking-tighter uppercase italic">A Arena</h2>
+            <div className="relative z-10 flex flex-col items-center space-y-4">
+              <div className="w-16 h-16 bg-gradient-to-br from-rose-600 to-rose-400 rounded-[2rem] flex items-center justify-center mx-auto shadow-lg shadow-rose-500/20 group-hover:-rotate-6 transition-transform relative z-10">
+                <Sword size={32} className="text-white" />
+              </div>
+              <div className="space-y-1 relative z-10">
+                <p className="text-[9px] font-black text-emerald-400 uppercase tracking-[0.4em]">SIMULADOR TÁTICO</p>
+                <h2 className="text-3xl font-black text-white tracking-tighter uppercase italic">A Arena</h2>
+              </div>
+              <p className="text-white/70 text-sm font-bold leading-relaxed px-4 opacity-80 group-hover:opacity-100 transition-opacity relative z-10">
+                O convés de treinamento para a vida. Pratique diálogos difíceis e simule conexões com especialistas em ambiente seguro.
+              </p>
             </div>
-            <p className="text-slate-500 text-sm font-bold leading-relaxed px-4 opacity-80 group-hover:opacity-100 transition-opacity">
-              O convés de treinamento para a vida. Pratique diálogos difíceis e prepare sua voz para o mar aberto.
-            </p>
           </motion.div>
 
           {/* O Farol */}
           <motion.div 
-            initial={{ opacity: 0, y: 15 }}
+            initial={{ opacity: 0, y: 30 }}
             whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, amount: 0.3 }}
-            transition={{ duration: 0.5 }}
-            style={{ willChange: 'transform, opacity' }}
-            whileHover={{ y: -10, scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.8, delay: 0.45 }}
+            style={{ '--card-index': 2 } as React.CSSProperties}
             onClick={(e) => handleNavigate(e, '/farol/')}
-            className="group bg-white/90 backdrop-blur-xl border border-white rounded-[3.5rem] p-8 text-center space-y-4 shadow-xl hover:shadow-2xl transition-all relative overflow-hidden cursor-pointer"
+            className="group p-6 rounded-3xl bg-[#131b2c] hover:bg-[#1a2333] border border-white/5 active:scale-[0.98] transition-all relative cursor-pointer shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] text-center overflow-hidden"
           >
-            <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 rounded-bl-full -mr-10 -mt-10 transition-transform group-hover:scale-110" />
-            <div className="w-16 h-16 bg-gradient-to-br from-emerald-600 to-emerald-400 rounded-[2rem] flex items-center justify-center mx-auto shadow-lg shadow-emerald-500/20 group-hover:rotate-6 transition-transform">
-              <LighthouseIcon size={32} className="text-white" />
+            {/* SVG Snake Border */}
+            {snakeStep === 4 && (
+              <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none z-20 flex">
+                <svg className="absolute inset-0 w-full h-full block overflow-visible" xmlns="http://www.w3.org/2000/svg">
+                  <motion.rect
+                    x="0" y="0" width="100%" height="100%" rx="24" fill="none" stroke="#34D399" strokeWidth="4"
+                    initial={{ pathLength: 0, pathOffset: 0 }}
+                    animate={{ pathLength: [0, 0.4, 0], pathOffset: [0, 1.6, 1.6] }}
+                    transition={{ duration: 3, ease: "linear" }}
+                    style={{ opacity: 0.85 }}
+                    onAnimationComplete={handleSnakeComplete}
+                  />
+                </svg>
+              </div>
+            )}
+            {/* Gap Line to next card */}
+            {snakeStep === 5 && (
+              <div className="absolute -bottom-6 left-6 w-[2px] h-6 z-20 overflow-hidden">
+                <motion.div
+                  className="w-full bg-white"
+                  initial={{ height: "0%", y: "0%" }}
+                  animate={{ height: ["0%", "100%", "0%"], y: ["0%", "0%", "24px"] }}
+                  transition={{ duration: 0.3, ease: "linear" }}
+                  style={{ opacity: 0.85 }}
+                  onAnimationComplete={handleSnakeComplete}
+                />
+              </div>
+            )}
+            <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none z-0">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-bl-full -mr-10 -mt-10 transition-transform group-hover:scale-110" />
             </div>
-            <div className="space-y-1 relative z-10">
-              <p className="text-[9px] font-black text-emerald-500 uppercase tracking-[0.4em]">VISÃO & CLAREZA</p>
-              <h2 className="text-3xl font-black text-slate-900 tracking-tighter uppercase italic">O Farol</h2>
+            <div className="relative z-10 flex flex-col items-center space-y-4">
+              <div className="w-16 h-16 bg-gradient-to-br from-teal-500 to-teal-400 rounded-[2rem] flex items-center justify-center mx-auto shadow-lg shadow-teal-500/20 group-hover:rotate-12 transition-transform relative z-10">
+                <LighthouseIcon size={32} className="text-white" />
+              </div>
+              <div className="space-y-1 relative z-10">
+                <p className="text-[9px] font-black text-emerald-400 uppercase tracking-[0.4em]">ILUMINANDO O CAMINHO</p>
+                <h2 className="text-3xl font-black text-white tracking-tighter uppercase italic">O Farol</h2>
+              </div>
+              <p className="text-white/70 text-sm font-bold leading-relaxed px-4 opacity-80 group-hover:opacity-100 transition-opacity relative z-10">
+                Encontre direção nos momentos de névoa. Orientação e luz para quando você não souber qual direção navegar.
+              </p>
             </div>
-            <p className="text-slate-500 text-sm font-bold leading-relaxed px-4 opacity-80 group-hover:opacity-100 transition-opacity">
-              A luz que guia seus pensamentos. Analise padrões e encontre a direção certa para sua bússola.
-            </p>
           </motion.div>
 
           {/* O Cofre */}
           <motion.div 
-            initial={{ opacity: 0, y: 15 }}
+            initial={{ opacity: 0, y: 30 }}
             whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, amount: 0.3 }}
-            transition={{ duration: 0.5 }}
-            style={{ willChange: 'transform, opacity' }}
-            whileHover={{ y: -10, scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.8, delay: 0.6 }}
+            style={{ '--card-index': 3 } as React.CSSProperties}
             onClick={(e) => handleNavigate(e, '/cofre/')}
-            className="group bg-white/90 backdrop-blur-xl border border-white rounded-[3.5rem] p-8 text-center space-y-4 shadow-xl hover:shadow-2xl transition-all relative overflow-hidden cursor-pointer"
+            className="group p-6 rounded-3xl bg-[#131b2c] hover:bg-[#1a2333] border border-white/5 active:scale-[0.98] transition-all relative cursor-pointer shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] text-center"
           >
-            <div className="absolute top-0 right-0 w-32 h-32 bg-teal-500/5 rounded-bl-full -mr-10 -mt-10 transition-transform group-hover:scale-110" />
-            <div className="w-16 h-16 bg-gradient-to-br from-teal-600 to-teal-400 rounded-[2rem] flex items-center justify-center mx-auto shadow-lg shadow-teal-500/20 group-hover:rotate-6 transition-transform">
-              <Shield size={32} className="text-white" />
+            {/* SVG Snake Border */}
+            {snakeStep === 6 && (
+              <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none z-20 flex">
+                <svg className="absolute inset-0 w-full h-full block overflow-visible" xmlns="http://www.w3.org/2000/svg">
+                  <motion.rect
+                    x="0" y="0" width="100%" height="100%" rx="24" fill="none" stroke="#2DD4BF" strokeWidth="4"
+                    initial={{ pathLength: 0, pathOffset: 0 }}
+                    animate={{ pathLength: [0, 0.4, 0], pathOffset: [0, 1.6, 1.6] }}
+                    transition={{ duration: 3, ease: "linear" }}
+                    style={{ opacity: 0.85 }}
+                    onAnimationComplete={handleSnakeComplete}
+                  />
+                </svg>
+              </div>
+            )}
+            {/* Gap Line to next card */}
+            {snakeStep === 7 && (
+              <div className="absolute -bottom-6 left-6 w-[2px] h-6 z-20 overflow-hidden">
+                <motion.div
+                  className="w-full bg-white"
+                  initial={{ height: "0%", y: "0%" }}
+                  animate={{ height: ["0%", "100%", "0%"], y: ["0%", "0%", "24px"] }}
+                  transition={{ duration: 0.3, ease: "linear" }}
+                  style={{ opacity: 0.85 }}
+                  onAnimationComplete={handleSnakeComplete}
+                />
+              </div>
+            )}
+            <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none z-0">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-teal-500/10 rounded-bl-full -mr-10 -mt-10 transition-transform group-hover:scale-110" />
             </div>
-            <div className="space-y-1 relative z-10">
-              <p className="text-[9px] font-black text-emerald-500 uppercase tracking-[0.4em]">SIGILO ABSOLUTO</p>
-              <h2 className="text-3xl font-black text-slate-900 tracking-tighter uppercase italic">O Cofre</h2>
+            <div className="relative z-10 flex flex-col items-center space-y-4">
+              <div className="w-16 h-16 bg-gradient-to-br from-teal-600 to-teal-400 rounded-[2rem] flex items-center justify-center mx-auto shadow-lg shadow-teal-500/20 group-hover:rotate-6 transition-transform relative z-10">
+                <Shield size={32} className="text-white" />
+              </div>
+              <div className="space-y-1 relative z-10">
+                <p className="text-[9px] font-black text-emerald-400 uppercase tracking-[0.4em]">SIGILO ABSOLUTO</p>
+                <h2 className="text-3xl font-black text-white tracking-tighter uppercase italic">O Cofre</h2>
+              </div>
+              <p className="text-white/70 text-sm font-bold leading-relaxed px-4 opacity-80 group-hover:opacity-100 transition-opacity relative z-10">
+                Suas memórias mais preciosas sob tranca e chave. Um baú digital que só você pode acessar.
+              </p>
             </div>
-            <p className="text-slate-500 text-sm font-bold leading-relaxed px-4 opacity-80 group-hover:opacity-100 transition-opacity">
-              Suas memórias mais preciosas sob tranca e chave. Um baú digital que só você pode acessar.
-            </p>
           </motion.div>
 
           {/* Logs */}
           <motion.div 
-            initial={{ opacity: 0, y: 15 }}
+            initial={{ opacity: 0, y: 30 }}
             whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, amount: 0.3 }}
-            transition={{ duration: 0.5 }}
-            style={{ willChange: 'transform, opacity' }}
-            whileHover={{ y: -10, scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.8, delay: 0.75 }}
+            style={{ '--card-index': 4 } as React.CSSProperties}
             onClick={(e) => handleNavigate(e, '/log/')}
-            className="group bg-white/90 backdrop-blur-xl border border-white rounded-[3.5rem] p-8 text-center space-y-4 shadow-xl hover:shadow-2xl transition-all relative overflow-hidden cursor-pointer"
+            className="group p-6 rounded-3xl bg-[#131b2c] hover:bg-[#1a2333] border border-white/5 active:scale-[0.98] transition-all relative cursor-pointer shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] text-center"
           >
-            <div className="absolute top-0 right-0 w-32 h-32 bg-sky-500/5 rounded-bl-full -mr-10 -mt-10 transition-transform group-hover:scale-110" />
-            <div className="w-16 h-16 bg-gradient-to-br from-sky-600 to-sky-400 rounded-[2rem] flex items-center justify-center mx-auto shadow-lg shadow-sky-500/20 group-hover:rotate-6 transition-transform">
-              <CheckCircle2 size={32} className="text-white" />
+            {/* SVG Snake Border */}
+            {snakeStep === 8 && (
+              <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none z-20 flex">
+                <svg className="absolute inset-0 w-full h-full block overflow-visible" xmlns="http://www.w3.org/2000/svg">
+                  <motion.rect
+                    x="0" y="0" width="100%" height="100%" rx="24" fill="none" stroke="#38BDF8" strokeWidth="4"
+                    initial={{ pathLength: 0, pathOffset: 0 }}
+                    animate={{ pathLength: [0, 0.4, 0], pathOffset: [0, 1.6, 1.6] }}
+                    transition={{ duration: 3, ease: "linear" }}
+                    style={{ opacity: 0.85 }}
+                    onAnimationComplete={handleSnakeComplete}
+                  />
+                </svg>
+              </div>
+            )}
+            {/* Gap Line to next card */}
+            {false && (
+              <div className="absolute -bottom-6 left-6 w-[2px] h-6 z-20 overflow-hidden">
+                <motion.div
+                  className="w-full bg-white"
+                  initial={{ height: "0%", y: "0%" }}
+                  animate={{ height: ["0%", "100%", "0%"], y: ["0%", "0%", "24px"] }}
+                  transition={{ duration: 0.3, ease: "linear" }}
+                  style={{ opacity: 0.85 }}
+                  onAnimationComplete={handleSnakeComplete}
+                />
+              </div>
+            )}
+            <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none z-0">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-sky-500/10 rounded-bl-full -mr-10 -mt-10 transition-transform group-hover:scale-110" />
             </div>
-            <div className="space-y-1 relative z-10">
-              <p className="text-[9px] font-black text-emerald-500 uppercase tracking-[0.4em]">DIÁRIO DE BORDO</p>
-              <h2 className="text-4xl font-black text-slate-900 tracking-tighter uppercase italic leading-none">Logs</h2>
+            <div className="relative z-10 flex flex-col items-center space-y-4">
+              <div className="w-16 h-16 bg-gradient-to-br from-sky-600 to-sky-400 rounded-[2rem] flex items-center justify-center mx-auto shadow-lg shadow-sky-500/20 group-hover:rotate-6 transition-transform relative z-10">
+                <CheckCircle2 size={32} className="text-white" />
+              </div>
+              <div className="space-y-1 relative z-10">
+                <p className="text-[9px] font-black text-emerald-400 uppercase tracking-[0.4em]">DIÁRIO DE BORDO</p>
+                <h2 className="text-4xl font-black text-white tracking-tighter uppercase italic leading-none">Logs</h2>
+              </div>
+              <p className="text-white/70 text-sm font-bold leading-relaxed px-4 opacity-80 group-hover:opacity-100 transition-opacity relative z-10">
+                O registro histórico do seu mapeamento de hábitos e reflexão diária. Acompanhe cada milha na sua jornada.
+              </p>
             </div>
-            <p className="text-slate-500 text-sm font-bold leading-relaxed px-4 opacity-80 group-hover:opacity-100 transition-opacity">
-              O registro histórico da sua navegação. Acompanhe cada milha na sua jornada pessoal.
-            </p>
           </motion.div>
 
           {/* Respiração Section */}
           <motion.div 
-            initial={{ opacity: 0, scale: 0.8 }}
-            whileInView={{ opacity: 1, scale: 1 }}
+            initial={{ opacity: 0, y: 30 }}
+            whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
-            transition={{ duration: 0.8 }}
-            className="pt-16 pb-6 text-center space-y-6 relative overflow-hidden"
-          >
-            <div className="absolute inset-0 bg-sky-500/[0.03] blur-3xl -z-10" />
-            <div className="space-y-1">
-              <p className="text-[10px] font-black text-sky-400 uppercase tracking-[0.4em]">RESPIRE FUNDO</p>
-              <h3 className="text-4xl md:text-5xl font-black text-sky-600 uppercase tracking-tighter italic bg-gradient-to-b from-sky-600 to-sky-400 bg-clip-text text-transparent">
-                Respiração
-              </h3>
+            transition={{ duration: 0.8, delay: 0.9 }}
+            style={{ '--card-index': 5 } as React.CSSProperties}
+            onClick={(e) => handleNavigate(e, '/respiracao/')}
+            className="group p-6 rounded-3xl bg-[#131b2c] hover:bg-[#1a2333] border border-white/5 active:scale-[0.98] transition-all relative overflow-hidden cursor-pointer shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] text-center space-y-6"
+          >            <div className="space-y-1 relative z-10">
+              <p className="text-[10px] font-black text-sky-400 uppercase tracking-[0.4em]">RESPIRAÇÃO & FOCO</p>
             </div>
             
-            <div className="flex flex-col items-center pt-4">
+            <div className="flex flex-col items-center pt-4 relative z-10">
               <motion.div
                 animate={{ 
                   scale: [1, 1.3, 1],
                 }}
                 transition={{ duration: 4.5, repeat: Infinity, ease: "easeInOut" }}
-                className="w-52 h-52 rounded-full bg-white border-2 border-sky-100 flex items-center justify-center relative overflow-hidden shadow-xl"
+                className="w-52 h-52 rounded-full bg-white/5 border border-white/15 flex items-center justify-center relative overflow-hidden shadow-2xl mx-auto transform-gpu"
+                style={{ willChange: 'transform' }}
               >
-                <div className="absolute inset-0 bg-gradient-to-tr from-sky-50 to-transparent opacity-30" />
+                <div className="absolute inset-0 bg-gradient-to-tr from-sky-500/10 to-transparent opacity-40" />
                 
                 {/* Compass Icon with rotating needle effect */}
                 <div className="relative z-10 w-24 h-24 flex items-center justify-center">
-                  <Compass className="text-sky-500 opacity-40 absolute" size={80} strokeWidth={1} />
+                  <Compass className="text-sky-400 opacity-55 absolute" size={80} strokeWidth={1} />
                   <motion.div
                     animate={{ rotate: [0, 360] }}
                     transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
                     className="relative"
                   >
-                    <div className="w-1 h-12 bg-gradient-to-t from-sky-500 to-transparent rounded-full" />
+                    <div className="w-1 h-12 bg-gradient-to-t from-sky-400 to-transparent rounded-full" />
                   </motion.div>
-                  <div className="absolute w-2 h-2 bg-sky-500 rounded-full shadow-[0_0_10px_rgba(14,165,233,0.5)]" />
+                  <div className="absolute w-2 h-2 bg-sky-400 rounded-full shadow-[0_0_10px_rgba(56,189,248,0.5)]" />
                 </div>
               </motion.div>
-              <p className="text-[11px] font-bold text-slate-600 uppercase tracking-widest mt-8 opacity-80 italic">Sincronize seu fluxo vital</p>
+              <p className="text-[11px] font-bold text-white/60 uppercase tracking-widest mt-10 opacity-80 italic">Sincronize sua respiração e ritmo vital</p>
             </div>
           </motion.div>
         </div>
@@ -468,146 +726,193 @@ export default function Home() {
           }} 
         />
       )}
+      <style dangerouslySetInnerHTML={{ __html: `
+        @keyframes breath {
+          0%, 100% {
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.4), 0 0 0 0px rgba(16, 185, 129, 0.2);
+          }
+          50% {
+            box-shadow: 0 0 25px rgba(16, 185, 129, 0.7), 0 0 0 10px rgba(16, 185, 129, 0);
+          }
+        }
+        @keyframes breath-rose {
+          0%, 100% {
+            box-shadow: 0 0 15px rgba(244, 63, 94, 0.4), 0 0 0 0px rgba(244, 63, 94, 0.2);
+          }
+          50% {
+            box-shadow: 0 0 25px rgba(244, 63, 94, 0.7), 0 0 0 10px rgba(244, 63, 94, 0);
+          }
+        }
+        .breath-pulse {
+          animation: breath 3s infinite ease-in-out !important;
+        }
+        .breath-pulse-rose {
+          animation: breath-rose 3s infinite ease-in-out !important;
+        }
+      ` }} />
     </main>
   );
 }
 
   return (
-    <main className="h-[100dvh] w-full bg-[#080D19] flex flex-col items-center justify-center p-6 relative overflow-hidden font-sans selection:bg-[#00D88B]/30 touch-none overscroll-none">
-      <AnimatedBackground subtle={false} />
-      
-      <motion.div variants={containerVariants} initial="hidden" animate="visible" className="w-full max-w-[380px] flex flex-col items-center z-10 pointer-events-auto scale-[0.95] md:scale-100">
-        
-        <motion.div 
-          variants={logoVariants} 
-          animate={{ y: [0, -5, 0] }}
-          transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-          className="relative mb-6 shrink-0"
-        >
-          <div className="w-20 h-20 bg-[#00D88B] rounded-full flex items-center justify-center shadow-[0_0_40px_rgba(0,216,139,0.25)] border-4 border-[#080D19]">
-            <Anchor size={36} className="text-[#080D19]" strokeWidth={2.5} />
+    <main className="fixed inset-0 w-full h-full flex items-center justify-center p-4 md:p-8 overflow-y-auto overflow-x-hidden bg-[#080d19] selection:bg-emerald-500/30 overscroll-none">
+      <LoginBackground />
+
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="w-full max-w-[400px] mx-auto relative z-10"
+      >
+        <div className="text-center mb-8 relative">
+          <h1 className="text-3xl font-black tracking-tighter text-white uppercase italic leading-none drop-shadow-md">
+            Porto Seguro
+          </h1>
+          <p className="text-emerald-500/80 font-bold text-[10px] uppercase tracking-[0.3em] mt-3">Nórica • Mental Navigation</p>
+        </div>
+
+        <div className="w-full bg-[#0d1424]/80 backdrop-blur-md rounded-3xl p-8 shadow-[0_20px_40px_rgba(0,0,0,0.4)] relative overflow-hidden">
+          <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none z-20 flex">
+            <svg className="absolute inset-0 w-full h-full block overflow-visible" xmlns="http://www.w3.org/2000/svg">
+              <motion.rect
+                x="0" y="0" width="100%" height="100%" rx="24" fill="none" stroke="#00D88B" strokeWidth="4"
+                initial={{ pathLength: 0, pathOffset: 0 }}
+                animate={{ pathLength: [0, 0.5, 0], pathOffset: [0, 2, 2] }}
+                transition={{ duration: 6, repeat: Infinity, ease: "linear" }}
+                style={{ opacity: 0.85 }}
+              />
+            </svg>
           </div>
-        </motion.div>
+          {/* Subtle top glow line */}
+          <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-[#00D88B]/50 to-transparent" />
 
-        <motion.div variants={itemVariants} className="text-center mb-8 shrink-0">
-          <h1 className="text-[36px] font-black text-white italic tracking-tighter mb-1 uppercase leading-none drop-shadow-[0_2px_10px_rgba(255,255,255,0.1)]">PORTO SEGURO</h1>
-          <p className="text-[9px] font-black text-[#00D88B] tracking-[0.3em] uppercase opacity-80">Nórica • Navegação Mental</p>
-        </motion.div>
-
-        <motion.div 
-          variants={itemVariants} 
-          className="w-full bg-[#101726]/85 backdrop-blur-3xl rounded-[2.5rem] p-6 md:p-8 border border-white/5 shadow-2xl flex-none"
-        >
-          <div className="space-y-5">
-            <motion.button 
-              whileHover={{ scale: 1.02 }}
+          <motion.div 
+            className="space-y-6 relative z-10"
+            variants={loginContainerVariants}
+            initial="hidden"
+            animate="visible"
+          >
+            {/* Google Button */}
+            <motion.div variants={loginItemVariants}>
+              <motion.button 
+              whileHover={{ scale: 1.01, backgroundColor: 'rgba(255,255,255,0.1)' }}
               whileTap={{ scale: 0.98 }}
               onClick={handleGoogleLogin} 
               disabled={googleLoading} 
-              className="w-full h-[58px] bg-white rounded-full flex items-center justify-center gap-3 font-black text-[10px] text-black transition-all shadow-xl active:scale-[0.98]"
+              className="w-full h-[50px] bg-white/5 border border-white/10 rounded-xl flex items-center justify-center gap-3 font-bold text-[11px] text-white transition-all shadow-sm active:scale-[0.98]"
             >
-              <img src="https://www.google.com/favicon.ico" alt="Google" className="w-4 h-4" />
-              ENTRAR COM GOOGLE
-            </motion.button>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" className="w-4 h-4">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+              </svg>
+              CONTINUAR COM GOOGLE
+              </motion.button>
+            </motion.div>
 
-            <div className="flex items-center gap-3 py-1">
+            <motion.div variants={loginItemVariants} className="flex items-center gap-3 py-2">
               <div className="flex-1 h-[1px] bg-white/10" />
-              <span className="text-[8px] font-black text-white/20 uppercase tracking-[0.2em]">OU E-MAIL</span>
+              <span className="text-[9px] font-bold text-white/40 uppercase tracking-widest">Ou acesse com e-mail</span>
               <div className="flex-1 h-[1px] bg-white/10" />
-            </div>
+            </motion.div>
 
             <form onSubmit={handleLogin} className="space-y-4">
-              <div className="relative group">
-                <Mail className="absolute left-6 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-[#00D88B] transition-colors" size={16} />
+              <motion.div variants={loginItemVariants} className="relative group">
+                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40 group-focus-within:text-[#00D88B] transition-colors" size={18} />
                 <input 
                   type="email" 
-                  placeholder="E-mail"
+                  placeholder="Seu E-mail"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full h-[58px] bg-white/5 border border-white/10 rounded-full pl-14 pr-6 text-sm font-bold text-white outline-none focus:border-[#00D88B]/40 focus:bg-white/10 transition-all placeholder:text-white/10"
+                  className="w-full h-[50px] bg-black/30 border border-white/10 rounded-xl pl-12 pr-4 text-sm text-white outline-none focus:border-[#00D88B]/60 focus:bg-black/50 transition-all placeholder:text-white/30"
                 />
-              </div>
+              </motion.div>
 
-              <div className="relative group">
-                <Lock className="absolute left-6 top-1/2 -translate-y-1/2 text-white/20 group-focus-within:text-[#00D88B] transition-colors" size={16} />
+              <motion.div variants={loginItemVariants} className="relative group">
+                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40 group-focus-within:text-[#00D88B] transition-colors" size={18} />
                 <input 
                   type={showPassword ? "text" : "password"} 
-                  placeholder="Senha"
+                  placeholder="Sua Senha"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full h-[58px] bg-white/5 border border-white/10 rounded-full pl-14 pr-14 text-sm font-bold text-white outline-none focus:border-[#00D88B]/40 focus:bg-white/10 transition-all placeholder:text-white/10"
+                  className="w-full h-[50px] bg-black/30 border border-white/10 rounded-xl pl-12 pr-12 text-sm text-white outline-none focus:border-[#00D88B]/60 focus:bg-black/50 transition-all placeholder:text-white/30"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-6 top-1/2 -translate-y-1/2 text-white/20 hover:text-white transition-colors"
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-white/30 hover:text-white transition-colors"
                 >
                   {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
-              </div>
+              </motion.div>
 
-              <div className="flex justify-end px-4">
+              <motion.div variants={loginItemVariants} className="flex justify-between items-center px-1 py-2">
+                <label className="flex items-center gap-2 cursor-pointer group">
+                  <div className="relative w-4 h-4 rounded-md bg-black/40 border border-white/20 flex items-center justify-center transition-all group-hover:border-[#00D88B]/60">
+                    <input type="checkbox" className="peer absolute opacity-0 w-full h-full cursor-pointer" />
+                    <div className="w-2 h-2 rounded-[2px] bg-[#00D88B] opacity-0 peer-checked:opacity-100 transition-opacity" />
+                  </div>
+                  <span className="text-[10px] font-bold text-white/60 group-hover:text-white/90 transition-colors">Lembrar de mim</span>
+                </label>
                 <button 
                   type="button"
                   onClick={() => router.push('/auth/forgot-password/')}
-                  className="text-[8px] font-black text-[#00D88B] uppercase tracking-widest hover:text-[#00D88B]/70 transition-colors"
+                  className="text-[10px] font-bold text-emerald-400 hover:text-emerald-300 transition-colors"
                 >
-                  Esqueci a senha
+                  Esqueceu a senha?
                 </button>
-              </div>
+              </motion.div>
 
               {error && (
                 <motion.div 
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-rose-400 text-[9px] font-black uppercase tracking-widest text-center"
+                  variants={loginItemVariants}
+                  className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-[11px] font-bold text-center"
                 >
                   {error}
                 </motion.div>
               )}
 
-              <motion.button 
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
+              <motion.div variants={loginItemVariants}>
+                <motion.button 
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
                 type="submit" 
                 disabled={loading}
-                className="w-full h-[60px] bg-[#00D88B] rounded-full flex items-center justify-center gap-3 font-black text-[10px] text-[#080D19] transition-all shadow-xl shadow-[#00D88B]/10 active:scale-[0.98] uppercase tracking-widest"
+                className="w-full h-[54px] bg-[#00D88B] hover:bg-emerald-400 rounded-xl flex items-center justify-center gap-2 font-black text-[12px] text-[#080d19] transition-all shadow-[0_5px_20px_rgba(0,216,139,0.25)] uppercase tracking-wider"
               >
-                {loading ? "Entrando..." : "Entrar na Nórica"}
-                <ArrowRight size={16} />
-              </motion.button>
+                  {loading ? "Conectando..." : "Entrar"}
+                  <ArrowRight size={16} />
+                </motion.button>
+              </motion.div>
             </form>
 
-            <div className="text-center pt-2">
-              <span className="text-[9px] font-bold text-white/20 uppercase tracking-widest">Novo por aqui? </span>
+            <motion.div variants={loginItemVariants} className="text-center pt-6">
+              <span className="text-[11px] font-medium text-white/50">Não tem uma conta? </span>
               <button 
+                type="button"
                 onClick={() => router.push('/auth/signup/')}
-                className="text-[9px] font-black text-[#00D88B] uppercase tracking-widest hover:underline"
+                className="text-[11px] font-bold text-white hover:text-[#00D88B] transition-colors ml-1"
               >
-                Criar Conta
+                Criar conta
               </button>
-            </div>
-          </div>
-        </motion.div>
+            </motion.div>
+          </motion.div>
+        </div>
       </motion.div>
     </main>
   );
 }
 
-const logoVariants = {
-  hidden: { scale: 0.9, opacity: 0 },
+const loginContainerVariants = {
+  hidden: { opacity: 0 },
   visible: {
-    scale: 1,
     opacity: 1,
-    transition: { duration: 0.5, ease: "backOut" }
+    transition: { staggerChildren: 0.1, delayChildren: 0.2 }
   }
 };
 
-const itemVariants = {
-  hidden: { y: 10, opacity: 0 },
-  visible: {
-    y: 0,
-    opacity: 1,
-    transition: { duration: 0.4, ease: "easeOut" }
-  }
+const loginItemVariants = {
+  hidden: { opacity: 0, y: 15 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: "easeOut" } }
 };
+

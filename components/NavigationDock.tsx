@@ -85,25 +85,25 @@ export default function NavigationDock() {
             <motion.div 
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={() => setIsHubOpen(false)}
-              className="fixed inset-0 z-[998] bg-black/20 backdrop-blur-sm"
+              className="fixed inset-0 z-[998] bg-black/40 backdrop-blur-sm"
             />
             <motion.div 
               initial={{ opacity: 0, y: 20, scale: 0.95 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 20, scale: 0.95 }}
-              className="fixed bottom-24 left-6 right-6 z-[999] bg-white/95 backdrop-blur-2xl rounded-[2.5rem] p-6 shadow-2xl border border-slate-100 max-w-sm mx-auto"
+              className="fixed bottom-24 left-6 right-6 z-[999] bg-[#031c20]/80 backdrop-blur-3xl rounded-[2.5rem] p-6 shadow-[0_8px_32px_0_rgba(0,0,0,0.5)] border border-white/10 max-w-sm mx-auto"
             >
               <div className="grid grid-cols-3 gap-4">
                 {hubItems.map((item) => (
                   <button 
                     key={item.href} 
                     onClick={(e) => handleNavigate(e, item.href)}
-                    className="flex flex-col items-center gap-2 p-2"
+                    className="flex flex-col items-center gap-2 p-2 group"
                   >
-                    <div className="p-4 bg-emerald-500/10 text-emerald-500 rounded-2xl">
+                    <div className="p-4 bg-emerald-500/10 text-emerald-400 rounded-2xl transition-all duration-300 hover:bg-emerald-500/20 group-hover:scale-105">
                       <item.icon size={24} />
                     </div>
-                    <span className="text-[10px] font-black uppercase text-slate-800">{item.label}</span>
+                    <span className="text-[10px] font-black uppercase text-white/80">{item.label}</span>
                   </button>
                 ))}
               </div>
@@ -112,8 +112,8 @@ export default function NavigationDock() {
         )}
       </AnimatePresence>
 
-      <nav className="fixed bottom-0 left-0 right-0 z-[999] bg-white/95 backdrop-blur-xl border-t border-slate-100 px-2 pb-[env(safe-area-inset-bottom,0px)] shadow-[0_-5px_20px_rgba(0,0,0,0.03)]">
-        <div className="max-w-md mx-auto flex items-center justify-around h-[4.5rem]">
+      <nav className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-sm bg-[#021013]/60 backdrop-blur-3xl border border-white/10 rounded-full px-4 py-2 shadow-[0_10px_40px_rgba(0,0,0,0.37)] flex justify-between items-center z-[999]">
+        <div className="w-full flex items-center justify-around h-12">
           {navItems.map((item) => {
             const isActive = item.href === 'hub' ? isHubOpen : (pathname === item.href || (item.href !== '/' && pathname?.startsWith(item.href)));
             return (
@@ -121,17 +121,17 @@ export default function NavigationDock() {
                 key={item.label}
                 onClick={(e) => handleNavigate(e, item.href)}
                 whileTap={{ y: 3, scale: 0.96 }}
-                className="flex flex-col items-center justify-center gap-1 w-full h-full relative"
+                className="flex flex-col items-center justify-center gap-1 w-full h-full relative pb-2"
               >
-                <div className={`transition-all duration-300 ${isActive ? 'text-emerald-500' : 'text-slate-400'}`}>
+                <div className={`transition-all duration-300 ${isActive ? 'text-emerald-400 filter drop-shadow-[0_0_8px_rgba(52,211,153,0.5)]' : 'text-white/40 hover:text-white/70'}`}>
                   <item.icon size={22} strokeWidth={isActive ? 2.5 : 2} />
                 </div>
-                <span className={`text-[9px] font-black uppercase tracking-widest transition-all duration-300 ${isActive ? 'text-emerald-500' : 'text-slate-400/60'}`}>
+                <span className={`text-[9px] font-black uppercase tracking-widest transition-all duration-300 ${isActive ? 'text-emerald-400' : 'text-white/30'}`}>
                   {item.label}
                 </span>
                 
                 {isActive && !isHubOpen && (
-                  <div className="absolute -top-[1px] w-8 h-[2px] bg-emerald-500 rounded-full" />
+                  <div className="absolute bottom-[2px] w-1.5 h-1.5 bg-emerald-400 shadow-[0_0_8px_#34d399] rounded-full" />
                 )}
               </motion.button>
             );

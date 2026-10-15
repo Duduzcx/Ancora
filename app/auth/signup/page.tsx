@@ -6,6 +6,8 @@ import { createClient } from '@/lib/supabase-client';
 import { useRouter } from 'next/navigation';
 import { Mail, Lock, ArrowRight, Anchor, ArrowLeft, Sparkles, User, CheckCircle2 } from 'lucide-react';
 import AnimatedBackground from '@/components/AnimatedBackground';
+import MovingGlow from '@/components/MovingGlow';
+import ParticleCoalesce from '@/components/ParticleCoalesce';
 
 export default function SignupPage() {
   const [step, setStep] = useState(1);
@@ -119,6 +121,7 @@ export default function SignupPage() {
   return (
     <div className="h-[100dvh] w-full bg-[#080D19] flex flex-col items-center justify-start p-6 relative overflow-hidden font-sans selection:bg-[#00D88B]/30 touch-none overscroll-none">
       <AnimatedBackground subtle={false} />
+      <MovingGlow />
       
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
@@ -127,7 +130,13 @@ export default function SignupPage() {
       >
         <div className="w-full flex justify-between items-center mb-6 px-2 shrink-0">
           <button 
-            onClick={() => step > 1 && step < 4 ? setStep(step - 1) : router.push('/')}
+            onClick={() => {
+              if (step > 1 && step < 4) {
+                setStep(step - 1);
+              } else {
+                router.push('/');
+              }
+            }}
             className="flex items-center gap-2 text-[10px] font-black text-white/40 uppercase tracking-widest hover:text-[#00D88B] transition-colors"
           >
             <ArrowLeft size={16} /> Voltar
@@ -139,7 +148,7 @@ export default function SignupPage() {
           </div>
         </div>
 
-        <div className="w-full bg-[#101726]/80 backdrop-blur-3xl rounded-[2.5rem] p-6 md:p-8 border border-white/5 shadow-2xl flex-none overflow-hidden">
+        <ParticleCoalesce className="w-full bg-[#101726]/80 backdrop-blur-3xl rounded-[2.5rem] p-6 md:p-8 border border-white/5 shadow-2xl flex-none overflow-hidden">
           <form onSubmit={handleSignup} className="space-y-4">
             <AnimatePresence mode="wait">
               {step === 1 && (
@@ -307,19 +316,27 @@ export default function SignupPage() {
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 disabled={loading || (step === 3 && !referral)}
-                className="w-full bg-[#00D88B] text-[#080D19] font-black h-[60px] rounded-full flex items-center justify-center gap-3 transition-all shadow-xl shadow-[#00D88B]/10 disabled:opacity-50"
+                className="relative w-full h-[60px] bg-gradient-to-r from-[#00D88B] to-teal-400 rounded-2xl flex items-center justify-center gap-3 font-black text-[11px] text-[#040810] transition-all shadow-[0_0_30px_rgba(0,216,139,0.3)] hover:shadow-[0_0_40px_rgba(0,216,139,0.5)] active:scale-[0.98] uppercase tracking-[0.2em] overflow-hidden group disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <span className="text-[10px] uppercase tracking-widest">
+                {/* Dynamic Glare */}
+                <motion.div 
+                  className="absolute inset-0 w-[50%] h-full bg-gradient-to-r from-transparent via-white/40 to-transparent skew-x-12"
+                  animate={{ x: ['-200%', '400%'] }}
+                  transition={{ duration: 3, repeat: Infinity, ease: "easeInOut", repeatDelay: 1.5 }}
+                />
+                <span className="relative z-10">
                   {loading ? 'Sincronizando...' : (step < 3 ? 'Continuar' : 'Finalizar Cadastro')}
                 </span>
-                {!loading && <ArrowRight size={18} />}
+                {!loading && <ArrowRight size={18} className="relative z-10" />}
               </motion.button>
             )}
 
             {step === 4 && (
               <motion.button
                 type="button"
-                onClick={() => router.push('/')}
+                onClick={() => {
+                  router.push('/');
+                }}
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 className="w-full bg-white text-[#080D19] rounded-full h-[60px] font-black uppercase tracking-widest text-[10px] shadow-xl transition-all"
@@ -328,7 +345,7 @@ export default function SignupPage() {
               </motion.button>
             )}
           </form>
-        </div>
+        </ParticleCoalesce>
       </motion.div>
     </div>
   );

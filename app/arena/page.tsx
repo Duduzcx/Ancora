@@ -5,13 +5,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Sword, Briefcase, Heart, ArrowLeft, Send, User, X, Loader2, Sparkles, ArrowRight, Mic, MicOff, Bot } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import AnimatedBackground from '@/components/AnimatedBackground';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import SafeMarkdown from '@/components/SafeMarkdown';
+import { MensagemIA } from '@/components/MensagemIA';
 
 const scenarios = [
-  { id: 1, title: "Reunião de Feedback", desc: "Pratique como lidar com críticas construtivas e pedir aumento.", icon: Briefcase, color: "text-blue-500", bg: "bg-blue-50" },
-  { id: 2, title: "Conflito Familiar", desc: "Resolva desentendimentos com comunicação não-violenta.", icon: Heart, color: "text-rose-500", bg: "bg-rose-50" },
-  { id: 3, title: "Primeiro Encontro", desc: "Quebre o gelo e mantenha a autenticidade sob pressão.", icon: Heart, color: "text-rose-500", bg: "bg-rose-50" },
+  { id: 1, title: "Reunião de Feedback", desc: "Pratique como lidar com críticas construtivas e pedir aumento.", icon: Briefcase, color: "text-blue-400", bg: "bg-blue-500/10" },
+  { id: 2, title: "Conflito Familiar", desc: "Resolva desentendimentos com comunicação não-violenta.", icon: Heart, color: "text-rose-400", bg: "bg-rose-500/10" },
+  { id: 3, title: "Primeiro Encontro", desc: "Quebre o gelo e mantenha a autenticidade sob pressão.", icon: Heart, color: "text-rose-400", bg: "bg-rose-500/10" },
 ];
 
 const ARENA_PROMPT = `Você é o Simulador Tático da Arena Nórica. 
@@ -22,12 +22,33 @@ Regras:
 3. Após cada fala do usuário, responda como o personagem e mantenha o diálogo vivo.
 4. Use emojis que combinem com a emoção do personagem.`;
 
+const gridVariants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.15
+    }
+  }
+};
+
+const cardVariants = {
+  hidden: { opacity: 0, y: 35, scale: 0.95 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    scale: 1,
+    transition: { type: "spring", stiffness: 100, damping: 15 }
+  }
+};
+
 export default function ArenaPage() {
   const router = useRouter();
   const [selected, setSelected] = useState(null);
   const [isMounted, setIsMounted] = useState(false);
   const scrollRef = useRef(null);
   const textareaRef = useRef(null);
+  const cancelarRef = useRef(false);
   
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
@@ -157,7 +178,7 @@ export default function ArenaPage() {
   const visibleMessages = messages.filter(m => !m.content.startsWith('SISTEMA:'));
 
   return (
-    <main className="fixed inset-0 flex flex-col overflow-hidden bg-[#FDFCF7] z-10">
+    <main className="fixed inset-0 flex flex-col overflow-hidden bg-transparent z-10">
       <AnimatedBackground subtle />
       <AnimatePresence mode="wait">
         {!selected ? (
@@ -168,86 +189,101 @@ export default function ArenaPage() {
           >
             <div className="max-w-4xl mx-auto space-y-12">
               <div className="flex items-center justify-between">
-                <button onClick={() => router.push('/')} className="p-3 bg-white border border-slate-200 rounded-2xl text-slate-900 shadow-sm active:scale-95">
-                  <ArrowLeft size={20} />
+                <button 
+                  onClick={() => router.push('/')} 
+                  className="p-2.5 rounded-full bg-white/5 backdrop-blur-md border border-white/10 shadow-sm active:scale-90 transition-all text-rose-400 hover:bg-white/10 flex items-center justify-center"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
+                  </svg>
                 </button>
-                <div className="flex items-center gap-2 px-4 py-2 bg-rose-500/10 rounded-full border border-rose-500/20">
-                  <Sparkles size={14} className="text-rose-500" />
-                  <span className="text-[10px] font-black text-rose-600 uppercase tracking-widest">Premium Arena</span>
+                <div className="flex items-center gap-2 px-4 py-2 bg-rose-500/10 rounded-full border border-rose-500/20 backdrop-blur-md">
+                  <Sparkles size={14} className="text-rose-400" />
+                  <span className="text-[10px] font-black text-rose-400 uppercase tracking-widest">Premium Arena</span>
                 </div>
               </div>
 
               <div className="text-center space-y-4">
-                <h2 className="text-4xl md:text-7xl font-black text-slate-900 tracking-tighter leading-none">A Arena <span className="text-rose-600 italic">Social.</span></h2>
-                <p className="text-slate-500 font-bold max-w-xl mx-auto text-sm">Simule conversas difíceis em um ambiente de treinamento seguro e receba feedback em tempo real.</p>
+                <h2 className="text-4xl md:text-7xl font-black text-white tracking-tighter leading-none">A Arena <span className="text-rose-400 italic">Social.</span></h2>
+                <p className="text-white/70 font-bold max-w-xl mx-auto text-sm">Simule conversas difíceis em um ambiente de treinamento seguro e receba feedback em tempo real.</p>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-8 pt-8">
+              <motion.div 
+                variants={gridVariants}
+                initial="hidden"
+                animate="visible"
+                className="grid grid-cols-1 md:grid-cols-3 gap-8 pt-8"
+              >
                 {scenarios.map((s) => (
-                  <button
+                  <motion.button
                     key={s.id}
+                    variants={cardVariants}
                     onClick={() => setSelected(s)}
-                    className="group bg-white border border-slate-200 p-8 rounded-[3rem] text-left hover:border-rose-500/30 transition-all shadow-xl hover:shadow-2xl active:scale-95 relative overflow-hidden"
+                    className="group bg-white/5 border border-white/10 p-8 rounded-[3rem] text-left hover:bg-white/10 hover:border-white/20 transition-all shadow-[0_8px_32px_0_rgba(0,0,0,0.3)] active:scale-95 relative overflow-hidden"
                   >
                     <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-rose-500/5 to-transparent rounded-bl-full" />
                     <div className={`mb-6 p-5 rounded-2xl ${s.bg} ${s.color} w-fit shadow-inner group-hover:scale-110 transition-transform`}>
                       <s.icon size={32} />
                     </div>
-                    <h3 className="text-2xl font-black text-slate-900 mb-3 tracking-tighter">{s.title}</h3>
-                    <p className="text-slate-500 text-xs font-bold leading-relaxed opacity-80">{s.desc}</p>
-                    <div className="mt-8 flex items-center gap-2 text-rose-500 text-[10px] font-black uppercase tracking-widest">
+                    <h3 className="text-2xl font-black text-white mb-3 tracking-tighter">{s.title}</h3>
+                    <p className="text-white/60 text-xs font-bold leading-relaxed opacity-80">{s.desc}</p>
+                    <div className="mt-8 flex items-center gap-2 text-rose-400 text-[10px] font-black uppercase tracking-widest">
                       Iniciar Treino <ArrowRight size={14} />
                     </div>
-                  </button>
+                  </motion.button>
                 ))}
-              </div>
+              </motion.div>
             </div>
           </motion.div>
         ) : (
           <motion.div 
             key="chat"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="flex-1 flex flex-col overflow-hidden"
+            className="flex-1 flex flex-col overflow-hidden relative"
           >
-            <header className="flex-none p-6 border-b border-slate-100 flex items-center justify-between bg-white/80 backdrop-blur-xl z-30 pt-[calc(env(safe-area-inset-top)+1rem)]">
-              <button onClick={() => { setSelected(null); setMessages([]); }} className="p-3 bg-slate-50 border border-slate-200 rounded-2xl text-slate-900 active:scale-95 shadow-sm">
-                <X size={20} />
-              </button>
-              <div className="text-right">
-                <p className="text-[10px] font-black text-rose-600 uppercase tracking-[0.3em]">{selected.title}</p>
-                <p className="text-[8px] text-slate-400 font-bold uppercase tracking-widest leading-none mt-1">Sessão de Treinamento Ativa</p>
-              </div>
-            </header>
+            {/* Botão de Voltar - Flutuando no topo esquerdo */}
+            <button 
+              onClick={() => { setSelected(null); setMessages([]); }} 
+              className="absolute top-6 left-4 z-50 p-2.5 rounded-full bg-white/5 backdrop-blur-md border border-white/10 shadow-sm active:scale-90 transition-all text-rose-400 hover:bg-white/10 flex items-center justify-center"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
 
-            <div ref={scrollRef} className="flex-1 p-4 overflow-y-auto bg-slate-50/50 custom-scrollbar overscroll-contain">
+            <div ref={scrollRef} className="flex-1 p-4 overflow-y-auto bg-transparent custom-scrollbar overscroll-contain pt-20">
               <div className="max-w-3xl mx-auto space-y-8 py-8">
-                {visibleMessages.map((m) => (
-                  <motion.div key={m.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`flex gap-3 max-w-[90%] ${m.role === 'user' ? 'flex-row-reverse' : ''}`}>
-                      <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 shadow-lg ${m.role === 'user' ? 'bg-slate-900 text-white' : 'bg-white text-rose-600 border border-slate-100'}`}>
-                        {m.role === 'user' ? <User size={20} /> : <Bot size={20} />}
+                {visibleMessages.map((m, index) => {
+                  const isLastAssistantMessage = m.role === 'assistant' && index === visibleMessages.length - 1;
+                  return (
+                    <motion.div key={m.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`flex gap-3 max-w-[90%] ${m.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                        <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 shadow-lg ${m.role === 'user' ? 'bg-white/10 text-white border border-white/10' : 'bg-rose-950/20 text-rose-400 border border-rose-500/20 backdrop-blur-md'}`}>
+                          {m.role === 'user' ? <User size={20} /> : <Bot size={20} />}
+                        </div>
+                        {m.role === 'user' ? (
+                          <div className="p-5 rounded-[2rem] text-sm leading-relaxed shadow-xl border bg-white/10 text-white rounded-tr-none border-white/15 backdrop-blur-md">
+                            {m.content}
+                          </div>
+                        ) : (
+                          <MensagemIA 
+                            textoOriginal={m.content} 
+                            shouldAnimate={isLastAssistantMessage}
+                            cancelarRef={cancelarRef}
+                            onFinalizado={() => setIsLoading(false)} 
+                          />
+                        )}
                       </div>
-                      <div className={`p-5 rounded-[2rem] text-sm leading-relaxed shadow-xl border ${m.role === 'user' ? 'bg-slate-900 text-white rounded-tr-none border-slate-800' : 'bg-white text-slate-800 border-slate-100 rounded-tl-none'}`}>
-                        <ReactMarkdown 
-                          remarkPlugins={[remarkGfm]}
-                          components={{
-                            p: ({node, ...props}) => <p className="mb-3 last:mb-0" {...props} />,
-                            strong: ({node, ...props}) => <b className="font-black text-rose-600" {...props} />,
-                          }}
-                        >
-                          {m.content}
-                        </ReactMarkdown>
-                      </div>
-                    </div>
-                  </motion.div>
-                ))}
+                    </motion.div>
+                  );
+                })}
                 
                 {isLoading && (
                   <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex justify-start gap-3">
-                    <div className="w-10 h-10 rounded-2xl bg-white border border-slate-100 flex items-center justify-center shadow-sm">
-                      <Bot size={20} className="text-rose-500" />
+                    <div className="w-10 h-10 rounded-2xl bg-rose-950/20 border border-rose-500/20 text-rose-400 flex items-center justify-center shadow-sm backdrop-blur-md">
+                      <Bot size={20} className="text-rose-400" />
                     </div>
-                    <div className="bg-white p-5 rounded-[2rem] rounded-tl-none border border-slate-100 shadow-sm flex items-center justify-center min-w-[80px]">
+                    <div className="bg-rose-950/15 p-5 rounded-[2rem] rounded-tl-none border border-rose-500/10 shadow-lg flex items-center justify-center min-w-[80px] backdrop-blur-md">
                       <div className="flex gap-1.5">
                         <motion.span animate={{ scale: [1, 1.5, 1], opacity: [0.5, 1, 0.5] }} transition={{ repeat: Infinity, duration: 1 }} className="w-1.5 h-1.5 bg-rose-400 rounded-full" />
                         <motion.span animate={{ scale: [1, 1.5, 1], opacity: [0.5, 1, 0.5] }} transition={{ repeat: Infinity, duration: 1, delay: 0.2 }} className="w-1.5 h-1.5 bg-rose-400 rounded-full" />
@@ -260,14 +296,14 @@ export default function ArenaPage() {
                 <AnimatePresence>
                   {isRecording && (
                     <motion.div initial={{ opacity: 0, scale: 0.9, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.9, y: 10 }} className="flex justify-end gap-3">
-                      <div className="bg-slate-900 p-5 rounded-[2rem] rounded-tr-none shadow-xl flex items-center justify-center min-w-[80px] border border-slate-800">
+                      <div className="bg-white/10 p-5 rounded-[2rem] rounded-tr-none shadow-xl flex items-center justify-center min-w-[80px] border border-white/15 backdrop-blur-md">
                         <div className="flex gap-1.5">
                           <motion.span animate={{ scale: [1, 1.3, 1], opacity: [0.6, 1, 0.6] }} transition={{ repeat: Infinity, duration: 0.8 }} className="w-1.5 h-1.5 bg-white/60 rounded-full" />
                           <motion.span animate={{ scale: [1, 1.3, 1], opacity: [0.6, 1, 0.6] }} transition={{ repeat: Infinity, duration: 0.8, delay: 0.2 }} className="w-1.5 h-1.5 bg-white/60 rounded-full" />
                           <motion.span animate={{ scale: [1, 1.3, 1], opacity: [0.6, 1, 0.6] }} transition={{ repeat: Infinity, duration: 0.8, delay: 0.4 }} className="w-1.5 h-1.5 bg-white/60 rounded-full" />
                         </div>
                       </div>
-                      <div className="w-10 h-10 rounded-2xl bg-slate-900 text-rose-400 flex items-center justify-center shadow-lg border border-slate-800 animate-pulse">
+                      <div className="w-10 h-10 rounded-2xl bg-white/10 text-rose-400 flex items-center justify-center shadow-lg border border-white/10 animate-pulse">
                         <User size={20} />
                       </div>
                     </motion.div>
@@ -279,7 +315,7 @@ export default function ArenaPage() {
             <div className="flex-none p-4 md:p-6 bg-transparent z-40 pb-[calc(env(safe-area-inset-bottom)+1.5rem)]">
               <form 
                 onSubmit={handleSendMessage} 
-                className="max-w-3xl mx-auto flex items-center gap-2 bg-white border border-slate-200 shadow-[0_-10px_40px_rgba(0,0,0,0.03)] rounded-[2.5rem] p-1.5 focus-within:ring-4 ring-rose-500/20 transition-all min-h-[52px]"
+                className="max-w-3xl mx-auto flex items-center gap-2 bg-white/5 border border-white/10 shadow-[0_8px_32px_0_rgba(0,0,0,0.3)] backdrop-blur-2xl rounded-[2.5rem] p-1.5 focus-within:border-rose-500/40 transition-all min-h-[52px]"
               >
                 <textarea 
                   ref={textareaRef}
@@ -292,7 +328,7 @@ export default function ArenaPage() {
                     }
                   }}
                   placeholder={isRecording ? "Ouvindo você..." : isTranscribing ? "Processando voz..." : "Sua resposta tática..."} 
-                  className="flex-1 bg-transparent px-6 py-3 outline-none text-slate-800 text-sm font-semibold placeholder-slate-400/80 resize-none max-h-40 min-h-[44px] custom-scrollbar leading-relaxed overflow-y-auto" 
+                  className="flex-1 bg-transparent px-6 py-3 outline-none text-white text-sm font-semibold placeholder-white/20 resize-none max-h-40 min-h-[44px] custom-scrollbar leading-relaxed overflow-y-auto" 
                   rows={1}
                 />
                 
@@ -305,7 +341,7 @@ export default function ArenaPage() {
                         type="button"
                         whileTap={{ scale: 0.9 }}
                         onClick={isRecording ? stopRecording : startRecording}
-                        className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 transition-all ${isRecording ? 'bg-rose-500 text-white animate-pulse' : 'bg-slate-50 text-slate-400 hover:text-rose-500'}`}
+                        className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 transition-all ${isRecording ? 'bg-rose-500 text-white animate-pulse shadow-[0_0_15px_rgba(244,63,94,0.5)]' : 'bg-white/5 text-white/50 hover:text-rose-400 border border-white/10 hover:bg-white/10'}`}
                       >
                         {isRecording ? <MicOff size={20} /> : <Mic size={20} />}
                       </motion.button>
@@ -316,7 +352,7 @@ export default function ArenaPage() {
                         whileTap={{ scale: 0.90 }}
                         type="submit" 
                         disabled={isLoading || isTranscribing} 
-                        className="w-12 h-12 rounded-full flex items-center justify-center shrink-0 bg-slate-900 text-white shadow-lg shadow-slate-900/20"
+                        className="w-12 h-12 rounded-full flex items-center justify-center shrink-0 bg-rose-500 text-white shadow-lg shadow-rose-500/20 hover:bg-rose-400"
                       >
                         {isLoading ? <Loader2 className="animate-spin" size={20} /> : <Send size={20} />}
                       </motion.button>
@@ -329,11 +365,11 @@ export default function ArenaPage() {
         )}
       </AnimatePresence>
 
-      <style jsx global>{`
+      <style dangerouslySetInnerHTML={{ __html: `
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.05); border-radius: 10px; }
-      `}</style>
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 10px; }
+      ` }} />
     </main>
   );
 }

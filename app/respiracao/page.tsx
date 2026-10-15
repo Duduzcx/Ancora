@@ -1,109 +1,245 @@
 "use client";
 
-import React from 'react';
-import { motion } from 'framer-motion';
-import { Anchor, ArrowLeft } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { ArrowLeft, Compass, Wind, ShieldAlert } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import AnimatedBackground from '@/components/AnimatedBackground';
 
+type Phase = 'inspira' | 'prende' | 'expira';
+
+const PHASE_CONFIGS = {
+  inspira: {
+    title: "Inspira",
+    subtitle: "Inspire ar suavemente",
+    color: "text-emerald-400",
+    bgGradient: "from-emerald-500/20 to-teal-500/5",
+    glowColor: "rgba(16, 185, 129, 0.6)"
+  },
+  prende: {
+    title: "Prende",
+    subtitle: "Prenda a respiração e concentre-se",
+    color: "text-cyan-400",
+    bgGradient: "from-cyan-500/20 to-blue-500/5",
+    glowColor: "rgba(34, 211, 238, 0.6)"
+  },
+  expira: {
+    title: "Expira",
+    subtitle: "Expire o ar lentamente",
+    color: "text-sky-400",
+    bgGradient: "from-sky-500/15 to-indigo-500/5",
+    glowColor: "rgba(14, 165, 233, 0.4)"
+  }
+};
+
 export default function RespiracaoPage() {
   const router = useRouter();
+  const [phase, setPhase] = useState<Phase>('inspira');
+  const [timeLeft, setTimeLeft] = useState(4);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          if (phase === 'inspira') {
+            setPhase('prende');
+            return 7;
+          } else if (phase === 'prende') {
+            setPhase('expira');
+            return 8;
+          } else {
+            setPhase('inspira');
+            return 4;
+          }
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [phase]);
+
+  const config = PHASE_CONFIGS[phase];
+
+  const getOrbeAnimation = () => {
+    switch (phase) {
+      case 'inspira':
+        return {
+          scale: 1.6,
+          boxShadow: `0 0 80px ${config.glowColor}, inset 0 0 30px rgba(16, 185, 129, 0.3)`,
+          borderColor: 'rgba(52, 211, 153, 0.5)',
+          backgroundColor: 'rgba(16, 185, 129, 0.08)',
+          transition: { duration: 4, ease: "easeInOut" }
+        };
+      case 'prende':
+        return {
+          scale: 1.6,
+          boxShadow: `0 0 100px ${config.glowColor}, inset 0 0 45px rgba(34, 211, 238, 0.4)`,
+          borderColor: 'rgba(34, 211, 238, 0.6)',
+          backgroundColor: 'rgba(34, 211, 238, 0.1)',
+          transition: { duration: 7, ease: "easeInOut" }
+        };
+      case 'expira':
+        return {
+          scale: 1.0,
+          boxShadow: `0 0 40px ${config.glowColor}, inset 0 0 15px rgba(14, 165, 233, 0.1)`,
+          borderColor: 'rgba(14, 165, 233, 0.3)',
+          backgroundColor: 'rgba(14, 165, 233, 0.03)',
+          transition: { duration: 8, ease: "easeInOut" }
+        };
+    }
+  };
+
+  const getAuraAnimation = () => {
+    switch (phase) {
+      case 'inspira':
+        return {
+          scale: 2.2,
+          opacity: 0.3,
+          transition: { duration: 4, ease: "easeInOut" }
+        };
+      case 'prende':
+        return {
+          scale: 2.25,
+          opacity: 0.4,
+          transition: { duration: 7, ease: "easeInOut" }
+        };
+      case 'expira':
+        return {
+          scale: 1.0,
+          opacity: 0.08,
+          transition: { duration: 8, ease: "easeInOut" }
+        };
+    }
+  };
 
   return (
-    <main className="min-h-[100dvh] bg-white relative flex flex-col items-center justify-center overflow-hidden overscroll-none touch-none">
-      <AnimatedBackground subtle />
+    <main className="min-h-[100dvh] bg-[#021013] relative flex flex-col items-center justify-between overflow-hidden overscroll-none touch-none py-12 px-6 select-none font-sans">
+      <AnimatedBackground subtle={true} />
+      
+      {/* Background radial soft ambient glow */}
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(4,47,46,0.5)_0%,transparent_70%)] pointer-events-none z-0" />
       
       <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, ease: "easeOut" }}
-        className="flex flex-col items-center justify-center h-full w-full"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.5 }}
+        className="w-full max-w-md flex flex-col justify-between items-center h-full flex-1 z-10"
       >
-        {/* Back Button for non-tab navigation context */}
-        <motion.button 
-          whileTap={{ scale: 0.95 }}
-          onClick={() => router.back()}
-          className="absolute top-[calc(env(safe-area-inset-top)+1rem)] left-6 p-4 bg-slate-50 rounded-full text-slate-400 hover:text-emerald-500 transition-colors z-50"
-        >
-          <ArrowLeft size={24} />
-        </motion.button>
-
-        <div className="relative z-10 text-center space-y-8 px-6">
-          <div className="space-y-2">
-            <h1 className="text-4xl md:text-6xl font-black text-slate-900 tracking-tight italic">Respiração.</h1>
-            <p className="text-slate-500 font-bold max-w-xs mx-auto leading-relaxed">
-              Sincronize-se com o ritmo da Nórica.
-            </p>
+        {/* Header Navigation */}
+        <div className="w-full flex items-center justify-between relative shrink-0 pt-4">
+          <motion.button 
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => router.push('/')}
+            className="p-3 bg-white/5 border border-white/10 backdrop-blur-md rounded-full text-teal-400 hover:bg-white/10 active:scale-95 transition-all shadow-lg shadow-black/20"
+            title="Voltar para a Página Inicial"
+          >
+            <ArrowLeft size={20} />
+          </motion.button>
+          
+          <div className="flex flex-col items-end">
+            <span className="text-[9px] font-black text-teal-500/80 uppercase tracking-[0.25em]">Ciclo de Foco Ativo</span>
+            <span className="text-xs font-bold text-white/60">Pausa de Concentração 4-7-8</span>
           </div>
+        </div>
 
-          <div className="relative flex items-center justify-center w-full max-w-sm aspect-square mx-auto">
-            {/* Outer glow aura */}
+        {/* Central Display: Orbe & Countdown */}
+        <div className="relative flex items-center justify-center w-full aspect-square my-auto max-w-[280px] sm:max-w-[320px]">
+          {/* Outer glowing aura ring */}
+          <motion.div
+            animate={getAuraAnimation()}
+            className="absolute w-52 h-52 sm:w-60 sm:h-60 bg-teal-400/20 rounded-full blur-[60px] pointer-events-none"
+          />
+
+          {/* Technological breathing circle */}
+          <motion.div
+            animate={getOrbeAnimation()}
+            className="w-48 h-48 sm:w-56 sm:h-56 rounded-full border flex flex-col items-center justify-center relative backdrop-blur-2xl shadow-[0_0_50px_rgba(0,0,0,0.5)]"
+          >
+            {/* Spinning radar lines */}
             <motion.div
-              animate={{ 
-                scale: [1, 1.5, 1],
-                opacity: [0.1, 0.2, 0.1]
-              }}
-              transition={{ 
-                duration: 8, 
-                repeat: Infinity, 
-                ease: "easeInOut" 
-              }}
-              className="absolute inset-0 bg-emerald-400 rounded-full blur-[80px]"
+              animate={{ rotate: 360 }}
+              transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
+              className="absolute inset-2 border border-dashed border-teal-500/10 rounded-full pointer-events-none"
             />
 
-            {/* Pulsing Circle */}
-            <motion.div
-              animate={{ 
-                scale: [1, 2.2, 1],
-                backgroundColor: ['rgba(16, 185, 129, 0.05)', 'rgba(16, 185, 129, 0.4)', 'rgba(16, 185, 129, 0.05)'],
-                boxShadow: [
-                  '0 0 50px rgba(16, 185, 129, 0.1)',
-                  '0 0 160px rgba(16, 185, 129, 0.7)',
-                  '0 0 50px rgba(16, 185, 129, 0.1)'
-                ]
-              }}
-              transition={{ 
-                duration: 12, 
-                repeat: Infinity, 
-                ease: "easeInOut" 
-              }}
-              className="w-64 h-64 md:w-80 md:h-80 rounded-full border border-emerald-500/30 flex items-center justify-center relative z-10"
-            >
+            <AnimatePresence mode="wait">
               <motion.div
-                animate={{
-                  scale: [0.7, 1.3, 0.7],
-                  rotate: [0, 20, -20, 0]
-                }}
-                transition={{ 
-                  duration: 12, 
-                  repeat: Infinity, 
-                  ease: "easeInOut" 
-                }}
-                className="flex items-center justify-center w-32 h-32 bg-white rounded-full shadow-2xl border border-slate-50"
+                key={phase}
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 1.05 }}
+                transition={{ duration: 0.25 }}
+                className="flex flex-col items-center justify-center space-y-1 relative z-10"
               >
-                <Anchor size={64} className="text-emerald-500" strokeWidth={2.5} />
+                <span className={`text-[10px] font-black uppercase tracking-[0.3em] ${config.color}`}>
+                  {config.title}
+                </span>
+                
+                <span className="text-5xl font-black text-white tracking-tighter tabular-nums drop-shadow-[0_4px_12px_rgba(0,0,0,0.5)]">
+                  {timeLeft}s
+                </span>
+                
+                <Wind size={16} className={`${config.color} opacity-60 mt-1 animate-pulse`} />
               </motion.div>
-            </motion.div>
+            </AnimatePresence>
+            
+            {/* Compass rotating needle effect as technical backdrop */}
+            <div className="absolute inset-0 flex items-center justify-center opacity-[0.03] pointer-events-none">
+              <Compass size={140} strokeWidth={1} />
+            </div>
+          </motion.div>
+        </div>
+
+        {/* Text Guidance & Steps Indicator */}
+        <div className="w-full text-center space-y-6 shrink-0 pb-6">
+          <div className="h-12 flex flex-col justify-center">
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={phase}
+                initial={{ opacity: 0, y: 5 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -5 }}
+                transition={{ duration: 0.3 }}
+                className="space-y-1"
+              >
+                <p className="text-white text-base font-bold tracking-tight">
+                  {config.subtitle}
+                </p>
+              </motion.div>
+            </AnimatePresence>
           </div>
 
-          <div className="space-y-4 pt-10">
-            <motion.p 
-              animate={{ opacity: [0.4, 1, 0.4] }}
-              transition={{ duration: 4, repeat: Infinity }}
-              className="text-[10px] font-black text-emerald-600 uppercase tracking-[0.4em]"
-            >
-              Inspire • Segure • Expire
-            </motion.p>
-            <div className="flex justify-center gap-2">
-              {[1, 2, 3, 4].map((i) => (
-                <motion.div 
-                  key={i}
-                  animate={{ scale: [1, 1.5, 1], opacity: [0.3, 1, 0.3] }}
-                  transition={{ duration: 2, delay: i * 0.5, repeat: Infinity }}
-                  className="w-1.5 h-1.5 bg-emerald-500 rounded-full"
-                />
-              ))}
-            </div>
+          {/* Staggered progress bar for the technique */}
+          <div className="bg-white/5 border border-white/10 rounded-2xl p-4 max-w-xs mx-auto backdrop-blur-md shadow-inner flex justify-around items-center gap-3">
+            {[
+              { id: 'inspira', label: 'Inspira', duration: '4s' },
+              { id: 'prende', label: 'Foque', duration: '7s' },
+              { id: 'expira', label: 'Expira', duration: '8s' }
+            ].map((step) => {
+              const isActive = phase === step.id;
+              return (
+                <div 
+                  key={step.id} 
+                  className={`flex flex-col items-center space-y-1 transition-all duration-300 ${isActive ? 'scale-105 opacity-100' : 'opacity-40'}`}
+                >
+                  <span className={`text-[10px] font-black uppercase tracking-wider ${isActive ? PHASE_CONFIGS[step.id as Phase].color : 'text-white'}`}>
+                    {step.label}
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[9px] font-black text-white/50">{step.duration}</span>
+                  </div>
+                  {isActive && (
+                    <motion.div 
+                      layoutId="activeDot"
+                      className="w-1.5 h-1.5 bg-teal-400 rounded-full mt-1 shadow-[0_0_8px_rgba(52,211,153,0.8)]"
+                      transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                    />
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       </motion.div>

@@ -12,6 +12,7 @@ import {
   Waves, Star, X, Menu
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { StatusBar, Style } from '@capacitor/status-bar';
 import Link from 'next/link';
 import AnimatedBackground from '@/components/AnimatedBackground';
 
@@ -32,7 +33,7 @@ const defaultTasks: Task[] = [
   { id: 6, category: "Corpo", text: "Fiz um alongamento", completed: false, icon: StretchHorizontal },
   { id: 7, category: "Mente", text: "Respirei fundo", completed: false, icon: Wind },
   { id: 8, category: "Mente", text: "Fiquei longe das telas", completed: false, icon: Smartphone },
-  { id: 9, category: "Mente", text: "Anotei uma gratidão", completed: false, icon: PenLine },
+  { id: 9, category: "Mente", text: "Anotei minhas reflexões", completed: false, icon: PenLine },
   { id: 10, category: "Mente", text: "Fiz 5 minutos de silêncio", completed: false, icon: VolumeX },
   { id: 11, category: "Mente", text: "Reconheci o meu esforço", completed: false, icon: Heart },
   { id: 12, category: "Ambiente", text: "Abri a janela", completed: false, icon: Sun },
@@ -65,6 +66,8 @@ const reflections = [
   "Sua vulnerabilidade não é um vazamento no barco; é a água que te permite flutuar."
 ];
 
+
+
 export default function LogPage() {
   const [tasks, setTasks] = useState<Task[]>(defaultTasks);
   const [pearls, setPearls] = useState(0);
@@ -74,6 +77,8 @@ export default function LogPage() {
   const [currentReflection, setCurrentReflection] = useState("");
   const [feedback, setFeedback] = useState<string | null>(null);
   const [isMounted, setIsMounted] = useState(false);
+  const [streak, setStreak] = useState(0);
+  const [aiInsight, setAiInsight] = useState<string>("");
   
   // Estados para valores aleatórios estáveis (evita erro de hidratação)
   const [particlePos, setParticlePos] = useState<{top: number, left: number}[]>([]);
@@ -82,15 +87,14 @@ export default function LogPage() {
   useEffect(() => {
     setIsMounted(true);
     
-    // Ajuste da StatusBar para tema claro
-    const setLightStatus = async () => {
+    // Ajuste da StatusBar para tema escuro
+    const setDarkStatus = async () => {
       try {
-        const { StatusBar, Style } = await import('@capacitor/status-bar');
-        await StatusBar.setBackgroundColor({ color: '#f8fafc' });
-        await StatusBar.setStyle({ style: Style.Light });
+        await StatusBar.setBackgroundColor({ color: '#021013' });
+        await StatusBar.setStyle({ style: Style.Dark });
       } catch (e) {}
     };
-    setLightStatus();
+    setDarkStatus();
 
     // Gera posições aleatórias apenas no cliente
     const isMobile = window.innerWidth < 768;
@@ -125,6 +129,18 @@ export default function LogPage() {
           }
         }
       }
+
+      // Inicializar ofensiva (streak)
+      const savedStreak = parseInt(localStorage.getItem('norica-streak') || '0', 10);
+      const lastLoggedDate = localStorage.getItem('norica-last-logged-date');
+      const yesterday = new Date(Date.now() - 86400000).toLocaleDateString('en-CA');
+      
+      let currentStreak = savedStreak;
+      if (lastLoggedDate && lastLoggedDate !== today && lastLoggedDate !== yesterday) {
+        currentStreak = 0; // Streak quebrado
+        localStorage.setItem('norica-streak', '0');
+      }
+      setStreak(currentStreak);
     } catch (e) {
       console.error("Erro ao gerenciar tarefas diárias:", e);
     }
@@ -140,6 +156,35 @@ export default function LogPage() {
     localStorage.setItem('norica-tasks', JSON.stringify(tasks));
     localStorage.setItem('norica-progress', newProgress.toString());
 
+    // Lógica de Streak (Ofensiva)
+    const today = new Date().toLocaleDateString('en-CA');
+    const yesterday = new Date(Date.now() - 86400000).toLocaleDateString('en-CA');
+    const lastLogged = localStorage.getItem('norica-last-logged-date');
+    const currentStreak = parseInt(localStorage.getItem('norica-streak') || '0', 10);
+
+    if (count > 0) {
+      if (lastLogged !== today) {
+        const newStreak = lastLogged === yesterday ? currentStreak + 1 : 1;
+        localStorage.setItem('norica-streak', newStreak.toString());
+        localStorage.setItem('norica-last-logged-date', today);
+        localStorage.setItem('norica-prev-last-logged', lastLogged || '');
+        setStreak(newStreak);
+      }
+    } else {
+      if (lastLogged === today) {
+        const prevLastLogged = localStorage.getItem('norica-prev-last-logged') || '';
+        const newStreak = Math.max(0, currentStreak - 1);
+        localStorage.setItem('norica-streak', newStreak.toString());
+        if (prevLastLogged) {
+          localStorage.setItem('norica-last-logged-date', prevLastLogged);
+        } else {
+          localStorage.removeItem('norica-last-logged-date');
+        }
+        localStorage.removeItem('norica-prev-last-logged');
+        setStreak(newStreak);
+      }
+    }
+
     if (newProgress === 100 && !showVictory) {
       setTimeout(() => {
         confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
@@ -147,6 +192,72 @@ export default function LogPage() {
       }, 500);
     }
   }, [tasks, isMounted, showVictory]);
+
+  // Carregar/Gerar AI Insight (A cada 3 dias)
+  useEffect(() => {
+    if (!isMounted) return;
+    
+    const loadInsight = async () => {
+      const cachedInsight = localStorage.getItem('norica-log-insight');
+      const lastGeneratedTime = localStorage.getItem('norica-log-insight-time');
+      
+      const threeDaysInMs = 3 * 24 * 60 * 60 * 1000;
+      const now = Date.now();
+      
+      if (cachedInsight && lastGeneratedTime && (now - parseInt(lastGeneratedTime, 10)) < threeDaysInMs) {
+        setAiInsight(cachedInsight);
+      } else {
+        try {
+          const completedTasksNames = tasks.filter(t => t.completed).map(t => t.text).join(', ');
+          const prompt = `Com base nas seguintes tarefas de reflexão e hábitos que o usuário completou hoje: [${completedTasksNames || 'Nenhuma tarefa ainda'}], gere uma frase curta (máximo 15 palavras), calorosa, acolhedora e poética sobre os padrões de bem-estar e autoconhecimento dele. Use um tom acolhedor. Responda APENAS a frase, sem introduções ou aspas.`;
+          
+          if (process.env.NEXT_PUBLIC_GROQ_API_KEY) {
+            const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${process.env.NEXT_PUBLIC_GROQ_API_KEY}`,
+              },
+              body: JSON.stringify({
+                model: "llama-3.1-8b-instant",
+                messages: [
+                  { role: "system", content: "Você é a Nórica, assistente de bem-estar e autoconhecimento da Nórica. Gere insights curtos, calorosos e poéticos." },
+                  { role: "user", content: prompt }
+                ],
+                temperature: 0.7,
+                max_tokens: 60
+              })
+            });
+            
+            if (response.ok) {
+              const data = await response.json();
+              const text = data.choices?.[0]?.message?.content?.replace(/["']/g, '') || "";
+              if (text) {
+                localStorage.setItem('norica-log-insight', text);
+                localStorage.setItem('norica-log-insight-time', now.toString());
+                setAiInsight(text);
+                return;
+              }
+            }
+          }
+          throw new Error("API check failed or not set");
+        } catch (err) {
+          const fallbacks = [
+            "Cada pequena reflexão concluída é um farol que guia seu bem-estar de volta ao porto seguro.",
+            "Cuidar do seu bem-estar e hábitos é o primeiro passo para o autoconhecimento.",
+            "A reflexão constante constrói a embarcação mais forte para os mares desafiadores da vida.",
+            "A constância nas pequenas ações diárias é o que ancora seu bem-estar emocional.",
+            "Você está navegando com autoconhecimento. Continue nutrindo seu ritmo no seu próprio tempo."
+          ];
+          const randomFallback = fallbacks[Math.floor(Math.random() * fallbacks.length)];
+          localStorage.setItem('norica-log-insight', randomFallback);
+          localStorage.setItem('norica-log-insight-time', now.toString());
+          setAiInsight(randomFallback);
+        }
+      }
+    };
+    
+    loadInsight();
+  }, [isMounted, tasks]);
 
   const toggleTask = (id: number) => {
     setTasks(prev => prev.map(t => {
@@ -173,43 +284,53 @@ export default function LogPage() {
   if (!isMounted) return null;
 
   return (
-    <main className="flex flex-col h-[100dvh] overflow-hidden bg-slate-50 relative transition-all overscroll-none touch-pan-y">
+    <main className="flex flex-col h-[100dvh] overflow-hidden bg-transparent relative transition-all overscroll-none touch-pan-y">
       <AnimatedBackground subtle />
       
       {/* Background Watermark */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden flex items-center justify-center opacity-[0.03] z-0">
-        <Anchor size={800} strokeWidth={0.5} className="text-slate-900" />
+        <Anchor size={800} strokeWidth={0.5} className="text-white" />
       </div>
 
       <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, ease: "easeOut" }}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.2, ease: "linear" }}
         className="flex-1 overflow-y-auto w-full custom-scrollbar overscroll-contain p-4 pt-[calc(env(safe-area-inset-top,64px)+3rem)] md:p-8 md:pt-32 lg:p-12 lg:pt-32 pb-24 relative z-10"
       >
         <div className="max-w-[1400px] mx-auto space-y-8">
         
         {/* Status Section (Sem botão de voltar) */}
-        <div className="flex flex-col md:flex-row items-center justify-between gap-6 bg-white/40 backdrop-blur-3xl p-6 md:p-10 rounded-[3rem] border border-white shadow-2xl">
+        <div className="flex flex-col md:flex-row items-center justify-between gap-6 bg-white/5 backdrop-blur-2xl p-6 md:p-10 rounded-[3rem] border border-white/10 shadow-[0_8px_32px_0_rgba(0,0,0,0.37)]">
           <div className="flex flex-col text-center md:text-left">
-            <h1 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tighter">Ecossistema de Hoje</h1>
-            <p className="text-xs font-black text-emerald-600 uppercase tracking-widest mt-1">Status da sua Jornada</p>
+            <h1 className="text-2xl md:text-3xl font-black text-white tracking-tighter">Ecossistema de Hoje</h1>
+            <p className="text-xs font-black text-emerald-400 uppercase tracking-widest mt-1">Status da sua Jornada</p>
           </div>
 
           <div className="flex flex-wrap items-center justify-center gap-6">
-            {/* Display de Data Automática */}
-            <div className="bg-white/80 border border-slate-200 rounded-3xl px-8 py-4 flex items-center gap-3 shadow-sm min-w-[200px]">
+            {/* Display de Ofensiva (Streak) */}
+            <div className="bg-white/5 border border-amber-500/20 rounded-3xl px-8 py-4 flex items-center gap-3 shadow-sm min-w-[150px]">
               <div className="flex flex-col">
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Diário de</span>
-                <span className="text-slate-900 font-black text-sm">
+                <span className="text-[10px] font-black text-white/40 uppercase tracking-widest">Ofensiva</span>
+                <span className="text-white font-black text-sm">
+                  🔥 {streak} {streak === 1 ? 'Dia' : 'Dias'}
+                </span>
+              </div>
+            </div>
+
+            {/* Display de Data Automática */}
+            <div className="bg-white/5 border border-white/10 rounded-3xl px-8 py-4 flex items-center gap-3 shadow-sm min-w-[200px]">
+              <div className="flex flex-col">
+                <span className="text-[10px] font-black text-white/40 uppercase tracking-widest">Diário de</span>
+                <span className="text-white font-black text-sm">
                   {new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}
                 </span>
               </div>
-              <Sparkles size={16} className="text-emerald-500 ml-auto" />
+              <Sparkles size={16} className="text-emerald-400 ml-auto" />
             </div>
 
-            <div className="bg-slate-900 text-white px-8 py-4 rounded-3xl flex items-center gap-4 shadow-2xl border border-white/10">
-              <div className="w-8 h-8 bg-blue-400 rounded-full flex items-center justify-center shadow-lg">
+            <div className="bg-white/10 text-white px-8 py-4 rounded-3xl flex items-center gap-4 shadow-2xl border border-white/15">
+              <div className="w-8 h-8 bg-blue-450 rounded-full flex items-center justify-center shadow-lg border border-blue-400/30">
                 <div className="w-3 h-3 bg-white rounded-full opacity-80" />
               </div>
               <div className="flex flex-col">
@@ -223,8 +344,8 @@ export default function LogPage() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           
           {/* VISUAL ECOSSISTEMA */}
-          <div className="lg:col-span-5 lg:sticky lg:top-24 h-[400px] md:h-[600px] bg-slate-950 rounded-[4rem] overflow-hidden shadow-2xl border-4 border-white/10 relative group">
-            <div className="absolute inset-0 bg-gradient-to-b from-blue-900/20 via-slate-950 to-slate-950" />
+          <div className="lg:col-span-5 lg:sticky lg:top-24 h-[400px] md:h-[600px] bg-[#021418]/60 backdrop-blur-2xl rounded-[4rem] overflow-hidden shadow-2xl border-4 border-white/10 relative group">
+            <div className="absolute inset-0 bg-gradient-to-b from-blue-900/10 via-slate-950/80 to-slate-950/90" />
             
             {/* Partículas estáveis */}
             {particlePos.map((pos: any, i: number) => (
@@ -237,12 +358,12 @@ export default function LogPage() {
               />
             ))}
 
-            <div className="absolute bottom-0 inset-x-0 h-32 bg-amber-100/5 backdrop-blur-sm" />
+            <div className="absolute bottom-0 inset-x-0 h-32 bg-white/5 backdrop-blur-sm" />
             
             <motion.div 
               animate={{ y: [0, -15, 0] }}
               transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
-              className="absolute bottom-16 left-1/2 -translate-x-1/2 text-slate-800"
+              className="absolute bottom-16 left-1/2 -translate-x-1/2 text-emerald-500/20"
             >
               <Anchor size={140} strokeWidth={1} className="opacity-40" />
             </motion.div>
@@ -256,7 +377,7 @@ export default function LogPage() {
                       key={`p-${i}`}
                       initial={{ scale: 0, y: 50 }}
                       animate={{ scale: 1, y: 0 }}
-                      className="absolute bottom-20 text-emerald-500/60"
+                      className="absolute bottom-20 text-emerald-400/60"
                       style={{ left: `${15 + i * 14}%` }}
                     >
                       <motion.div animate={{ rotate: [-8, 8, -8] }} transition={{ duration: 4 + i, repeat: Infinity }}>
@@ -284,7 +405,7 @@ export default function LogPage() {
                     initial={{ x: -100, opacity: 0 }}
                     animate={{ x: 600, opacity: 1 }}
                     transition={{ duration: 15 + i * 2, repeat: Infinity, ease: "linear", delay: i * 4 }}
-                    className="absolute text-blue-400/50"
+                    className="absolute text-blue-400/40"
                     style={{ top: `${25 + i * 15}%` }}
                   >
                     <Fish size={40} />
@@ -319,7 +440,7 @@ export default function LogPage() {
                 className={`
                   w-full py-4 md:py-5 rounded-2xl md:rounded-[2rem] font-black text-xs md:text-sm uppercase tracking-widest transition-all shadow-2xl flex items-center justify-center gap-3
                   ${pearls >= 10 
-                    ? 'bg-amber-400 text-slate-900 border-b-4 border-amber-600 shadow-amber-500/20' 
+                    ? 'bg-amber-400 text-slate-950 border-b-4 border-amber-600 shadow-amber-500/20 hover:bg-amber-300' 
                     : 'bg-white/5 text-white/20 border border-white/5 cursor-not-allowed'}
                 `}
               >
@@ -331,57 +452,68 @@ export default function LogPage() {
 
           {/* LISTA DE TAREFAS */}
           <div className="lg:col-span-7 space-y-10 pb-12">
+            {aiInsight && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.5, delay: 0.1 }}
+                className="p-6 bg-emerald-500/5 backdrop-blur-xl border border-emerald-500/20 rounded-3xl space-y-3 relative overflow-hidden shadow-[0_8px_32px_0_rgba(16,185,129,0.05)]"
+              >
+                <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/[0.02] rounded-bl-full pointer-events-none" />
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-2xl">
+                    <Sparkles size={18} className="animate-pulse" />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-black text-white uppercase tracking-wider">Insight da Bússola (IA)</h3>
+                    <p className="text-[9px] font-black text-emerald-400 uppercase tracking-widest">Sinal de Autocuidado</p>
+                  </div>
+                </div>
+                <p className="text-sm text-white/90 leading-relaxed font-semibold italic">
+                  "{aiInsight}"
+                </p>
+              </motion.div>
+            )}
+
             {categories.map((cat) => (
-              <div key={cat} className="space-y-6">
+              <div 
+                key={cat} 
+                className="space-y-6"
+              >
                 <div className="flex items-center gap-4 px-2">
-                  <h3 className="text-sm font-black text-slate-900 uppercase tracking-[0.3em] whitespace-nowrap">{cat}</h3>
-                  <div className="h-px w-full bg-slate-200" />
+                  <h3 className="text-sm font-black text-white uppercase tracking-[0.3em] whitespace-nowrap">{cat}</h3>
+                  <div className="h-px w-full bg-white/10" />
                 </div>
                 
-                <motion.div 
-                  variants={{
-                    hidden: { opacity: 0 },
-                    visible: {
-                      opacity: 1,
-                      transition: { staggerChildren: 0.05 }
-                    }
-                  }}
-                  initial="hidden"
-                  animate="visible"
-                  className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
-                >
+                <motion.div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {tasks.filter(t => t.category === cat).map((task) => (
                     <motion.div
                       key={task.id}
-                      variants={{
-                        hidden: { opacity: 0, y: 20 },
-                        visible: { opacity: 1, y: 0 }
-                      }}
                       onClick={() => toggleTask(task.id)}
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}
                       className={`
                         group relative flex items-center gap-4 p-5 rounded-[2.5rem] border transition-all cursor-pointer overflow-hidden
                         ${task.completed 
-                          ? 'bg-emerald-500/10 border-emerald-500/30' 
-                          : 'bg-white border-white shadow-xl hover:shadow-2xl'}
+                          ? 'bg-emerald-500/10 border-emerald-500/35 text-emerald-400' 
+                          : 'bg-white/5 border-white/10 text-white hover:bg-white/10 shadow-[0_8px_32px_0_rgba(0,0,0,0.2)]'}
                       `}
                     >
                       <div className={`
                         w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-500
-                        ${task.completed ? 'bg-emerald-500 text-white' : 'bg-slate-50 text-slate-400'}
+                        ${task.completed ? 'bg-emerald-500 text-slate-950 shadow-[0_0_15px_rgba(16,185,129,0.5)]' : 'bg-white/5 text-white/40'}
                       `}>
                         <task.icon size={20} />
                       </div>
 
                       <div className="flex-1">
-                        <p className={`font-black text-base transition-all ${task.completed ? 'opacity-30 line-through text-slate-500' : 'text-slate-800'}`}>
+                        <p className={`font-black text-base transition-all ${task.completed ? 'opacity-30 line-through text-white/45' : 'text-white'}`}>
                           {task.text}
                         </p>
                       </div>
 
                       <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-all
-                        ${task.completed ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-100'}
+                        ${task.completed ? 'bg-emerald-500 border-emerald-500 text-slate-950' : 'border-white/10'}
                       `}>
                         {task.completed && <CheckCircle2 size={16} />}
                       </div>
@@ -402,25 +534,25 @@ export default function LogPage() {
             <motion.div 
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={() => setShowReflection(false)}
-              className="absolute inset-0 bg-slate-900/60 backdrop-blur-xl"
+              className="absolute inset-0 bg-slate-950/80 backdrop-blur-xl"
             />
             <motion.div 
               initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
-              className="bg-white rounded-[4rem] p-12 md:p-20 max-w-2xl w-full relative z-10 text-center space-y-8 shadow-2xl border border-white"
+              className="bg-[#031d22]/90 backdrop-blur-3xl rounded-[4rem] p-12 md:p-20 max-w-2xl w-full relative z-10 text-center space-y-8 shadow-[0_8px_32px_0_rgba(0,0,0,0.5)] border border-white/10"
             >
-              <div className="w-20 h-20 bg-amber-400 text-slate-900 rounded-3xl mx-auto flex items-center justify-center shadow-xl">
+              <div className="w-20 h-20 bg-amber-400 text-slate-950 rounded-3xl mx-auto flex items-center justify-center shadow-xl">
                 <Sparkles size={40} />
               </div>
               <div className="space-y-4">
-                <h2 className="text-[10px] font-black text-amber-600 uppercase tracking-[0.5em]">Sinal Captado</h2>
-                <p className="text-2xl md:text-4xl font-black text-slate-900 tracking-tighter leading-tight italic">
+                <h2 className="text-[10px] font-black text-amber-400 uppercase tracking-[0.5em]">Sinal Captado</h2>
+                <p className="text-2xl md:text-4xl font-black text-white tracking-tighter leading-tight italic">
                   "{currentReflection}"
                 </p>
               </div>
               <motion.button
                 whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
                 onClick={() => setShowReflection(false)}
-                className="px-12 py-5 bg-slate-900 text-white rounded-full font-black shadow-xl"
+                className="px-12 py-5 bg-white/10 hover:bg-white/15 text-white border border-white/10 rounded-full font-black shadow-xl transition-colors"
               >
                 Voltar à Jornada
               </motion.button>

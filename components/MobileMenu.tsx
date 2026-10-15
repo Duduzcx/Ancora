@@ -7,8 +7,8 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 const menuItems = [
-  { icon: MessageCircle, label: 'O Porto', href: '/porto' },
-  { icon: Sword, label: 'A Arena', href: '/arena' },
+  { icon: MessageCircle, label: 'O Porto', href: '/porto/' },
+  { icon: Sword, label: 'A Arena', href: '/arena/' },
   { icon: CheckCircle, label: 'Logs de Sobrevivência', href: '/log' },
   { icon: Shield, label: 'O Cofre', href: '/cofre' },
   { icon: Lightbulb, label: 'O Farol', href: '/farol' },

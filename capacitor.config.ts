@@ -21,7 +21,8 @@ const config: CapacitorConfig = {
       splashFullScreen: true,
       splashImmersive: true
     }
-  }
+  },
+  backgroundColor: '#020e10'
 };
 
 export default config;

@@ -7,7 +7,11 @@ import { useRouter } from 'next/navigation';
 import { Mail, Lock, ArrowRight, ArrowLeft, User } from 'lucide-react';
 import AppLogo from '@/components/AppLogo';
 import { Browser } from '@capacitor/browser';
-import AnimatedBackground from '@/components/AnimatedBackground';
+import { Capacitor } from '@capacitor/core';
+import { GoogleSignIn } from '@capawesome/capacitor-google-sign-in';
+import LoginBackground from '@/components/LoginBackground';
+import MovingGlow from '@/components/MovingGlow';
+import PixelShadow from '@/components/PixelShadow';
 
 const GoogleIcon = () => (
   <svg viewBox="0 0 24 24" width="20" height="20" xmlns="http://www.w3.org/2000/svg">
@@ -38,20 +42,43 @@ export default function AuthPage() {
     setLoading(true);
     setError(null);
     try {
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: 'com.zcx.norica://login-callback',
-          queryParams: { prompt: 'select_account' },
-          skipBrowserRedirect: true
-        },
-      });
-      if (error) throw error;
-      if (data?.url) {
-        await Browser.open({ url: data.url, windowName: '_self' });
+      if (Capacitor.isNativePlatform()) {
+        const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+        if (!clientId || clientId.startsWith("YOUR_GOOGLE_WEB_CLIENT_ID")) {
+          throw new Error("Client ID do Google não configurado no arquivo de ambiente.");
+        }
+        await GoogleSignIn.initialize({
+          clientId: clientId,
+          serverClientId: clientId, // Faltava isso para o Supabase!
+          scopes: ['email', 'profile'],
+          offlineAccess: true, // Faltava isso para gerar o token corretamente
+        });
+        const result = await GoogleSignIn.signIn();
+        if (!result.idToken) {
+          throw new Error("Não foi possível obter o token do Google Sign-In.");
+        }
+        const { data, error: signInError } = await supabase.auth.signInWithIdToken({
+          provider: 'google',
+          token: result.idToken,
+        });
+        if (signInError) throw signInError;
+        router.replace('/');
+      } else {
+        const { data, error } = await supabase.auth.signInWithOAuth({
+          provider: 'google',
+          options: {
+            redirectTo: 'com.zcx.norica://login-callback',
+            queryParams: { prompt: 'select_account' },
+            skipBrowserRedirect: true
+          },
+        });
+        if (error) throw error;
+        if (data?.url) {
+          await Browser.open({ url: data.url, windowName: '_self' });
+        }
       }
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message || "Falha na conexão Google.");
       setLoading(false);
     }
   };
@@ -82,133 +109,186 @@ export default function AuthPage() {
   };
 
   return (
-    <div className="min-h-[100dvh] relative flex items-center justify-center p-4 md:p-8 overflow-hidden bg-[#0a0f1d] selection:bg-emerald-500/30">
-      <AnimatedBackground subtle />
-
+    <div className="min-h-[100dvh] relative flex items-center justify-center p-4 md:p-8 overflow-hidden selection:bg-emerald-500/30">
+      <LoginBackground />
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-lg mx-auto relative z-10"
+        className="w-full max-w-[400px] mx-auto relative z-10"
       >
-        <div className="text-center mb-10 relative">
-          {/* Brilho de fundo (Efeito Farol) */}
-          <motion.div 
-            animate={{ 
-              scale: [1, 1.4, 1],
-              opacity: [0.3, 0.6, 0.3]
-            }}
-            transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 bg-emerald-500/20 blur-[60px] rounded-full -z-10"
-          />
-
+        <div className="text-center mb-8 relative">
           <motion.div
-            initial={{ scale: 0, rotate: -45 }}
-            animate={{ 
-              scale: 1, 
-              rotate: 0,
-              y: [0, -10, 0] 
-            }}
-            transition={{ 
-              scale: { type: "spring", stiffness: 260, damping: 20 },
-              y: { duration: 3, repeat: Infinity, ease: "easeInOut" }
-            }}
-            className="inline-flex p-6 bg-emerald-500 text-slate-950 rounded-[2rem] mb-6 shadow-[0_20px_50px_rgba(16,185,129,0.3)]"
+            initial={{ scale: 0, y: 20 }}
+            animate={{ scale: 1, y: 0 }}
+            transition={{ type: "spring", stiffness: 260, damping: 20 }}
+            className="inline-flex mb-6"
           >
-            <AppLogo size={48} />
+            <motion.div
+              animate={{ 
+                boxShadow: [
+                  "0px 10px 30px rgba(16,185,129,0.2)", 
+                  "0px 15px 40px rgba(16,185,129,0.4)", 
+                  "0px 10px 30px rgba(16,185,129,0.2)"
+                ]
+              }}
+              transition={{ 
+                duration: 4, 
+                repeat: Infinity, 
+                ease: "easeInOut" 
+              }}
+              className="p-5 bg-emerald-500 text-[#080d19] rounded-[1.25rem]"
+            >
+              <AppLogo size={40} />
+            </motion.div>
           </motion.div>
-          <h1 className="text-4xl font-black tracking-tighter text-white uppercase italic leading-none">
+          <h1 className="text-3xl font-black tracking-tighter text-white uppercase italic leading-none drop-shadow-md">
             Porto Seguro
           </h1>
-          <p className="text-emerald-500/60 font-black text-[10px] uppercase tracking-[0.4em] mt-3">Nórica • Navegação Mental</p>
+          <p className="text-emerald-500/80 font-bold text-[10px] uppercase tracking-[0.3em] mt-3">Nórica • Mental Navigation</p>
         </div>
 
-        <div className="bg-slate-900/60 backdrop-blur-3xl border border-white/10 rounded-[2.5rem] p-6 md:p-10 shadow-2xl relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-emerald-500/50 to-transparent" />
+        <div className="relative w-full rounded-3xl p-[2px] overflow-hidden shadow-[0_20px_40px_rgba(0,0,0,0.4)] z-10">
           
-          <div className="space-y-6">
-            <motion.button
-              whileHover={{ scale: 1.02 }}
+          {/* Fundo da borda (bem suave) */}
+          <div className="absolute inset-0 bg-white/5" />
+          
+          {/* Luz Animada 1 (Vai para a direita) */}
+          <div
+            className="absolute top-1/2 left-1/2 w-[250%] aspect-square pointer-events-none animate-border-cw"
+            style={{
+              background: 'conic-gradient(from 180deg at 50% 50%, transparent 160deg, rgba(255,255,255,1) 180deg, transparent 200deg)'
+            }}
+          />
+
+          {/* Luz Animada 2 (Vai para a esquerda) */}
+          <div
+            className="absolute top-1/2 left-1/2 w-[250%] aspect-square pointer-events-none animate-border-ccw"
+            style={{
+              background: 'conic-gradient(from 180deg at 50% 50%, transparent 160deg, rgba(255,255,255,1) 180deg, transparent 200deg)'
+            }}
+          />
+
+          {/* Conteúdo interno do Card */}
+          <div className="relative w-full h-full bg-[#0d1424]/90 backdrop-blur-xl rounded-[22px] p-8">
+            <motion.div 
+              className="space-y-6 relative z-10"
+              variants={containerVariants}
+              initial="hidden"
+              animate="visible"
+            >
+            {/* Google Button */}
+            <motion.div variants={itemVariants}>
+              <motion.button 
+              whileHover={{ scale: 1.01, backgroundColor: 'rgba(255,255,255,0.1)' }}
               whileTap={{ scale: 0.98 }}
-              onClick={handleGoogleLogin}
-              disabled={loading}
-              className="w-full bg-white text-slate-950 py-4 rounded-full flex items-center justify-center gap-4 hover:bg-slate-50 transition-all font-black text-[10px] uppercase tracking-widest shadow-xl disabled:opacity-50"
+              onClick={handleGoogleLogin} 
+              disabled={loading} 
+              className="w-full h-[50px] bg-white/5 border border-white/10 rounded-xl flex items-center justify-center gap-3 font-bold text-[11px] text-white transition-all shadow-sm active:scale-[0.98]"
             >
               <GoogleIcon />
-              Entrar com Google
-            </motion.button>
+              CONTINUAR COM GOOGLE
+              </motion.button>
+            </motion.div>
 
-            <div className="relative flex items-center gap-4">
-              <div className="flex-1 h-px bg-white/10"></div>
-              <span className="text-[8px] font-black uppercase tracking-[0.3em] text-slate-600">ou e-mail</span>
-              <div className="flex-1 h-px bg-white/10"></div>
-            </div>
+            <motion.div variants={itemVariants} className="flex items-center gap-3 py-2">
+              <div className="flex-1 h-[1px] bg-white/10" />
+              <span className="text-[9px] font-bold text-white/40 uppercase tracking-widest">Ou acesse com e-mail</span>
+              <div className="flex-1 h-[1px] bg-white/10" />
+            </motion.div>
 
             <form onSubmit={handleAuth} className="space-y-4">
-              <div className="space-y-3">
-                <div className="group relative">
-                  <Mail className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-600 group-focus-within:text-emerald-400 transition-colors" size={16} />
-                  <input
-                    required
-                    type="email"
-                    placeholder="E-mail"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="w-full bg-white/5 border border-white/10 rounded-full px-14 py-4 outline-none focus:border-emerald-500/50 focus:bg-white/10 transition-all text-white font-bold text-sm"
-                  />
-                </div>
-                <div className="group relative">
-                  <Lock className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-600 group-focus-within:text-emerald-400 transition-colors" size={16} />
-                  <input
-                    required
-                    type="password"
-                    placeholder="Senha"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full bg-white/5 border border-white/10 rounded-full px-14 py-4 outline-none focus:border-emerald-500/50 focus:bg-white/10 transition-all text-white font-bold text-sm"
-                  />
-                </div>
-                <div className="flex justify-end px-4">
-                  <button 
-                    type="button" 
-                    onClick={() => router.push('/auth/forgot-password')}
-                    className="text-[9px] font-black uppercase tracking-widest text-emerald-500/40 hover:text-emerald-400 transition-colors"
-                  >
-                    Esqueci a senha
-                  </button>
-                </div>
-              </div>
+              <motion.div variants={itemVariants} className="relative group">
+                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40 group-focus-within:text-[#00D88B] transition-colors" size={18} />
+                <input 
+                  type="email" 
+                  placeholder="Seu E-mail"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full h-[50px] bg-black/30 border border-white/10 rounded-xl pl-12 pr-4 text-sm text-white outline-none focus:border-[#00D88B]/60 focus:bg-black/50 transition-all placeholder:text-white/30"
+                />
+              </motion.div>
+
+              <motion.div variants={itemVariants} className="relative group">
+                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40 group-focus-within:text-[#00D88B] transition-colors" size={18} />
+                <input 
+                  type="password" 
+                  placeholder="Sua Senha"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full h-[50px] bg-black/30 border border-white/10 rounded-xl pl-12 pr-4 text-sm text-white outline-none focus:border-[#00D88B]/60 focus:bg-black/50 transition-all placeholder:text-white/30"
+                />
+              </motion.div>
+
+              <motion.div variants={itemVariants} className="flex justify-between items-center px-1 py-2">
+                <motion.label 
+                  whileTap={{ scale: 0.92 }}
+                  className="flex items-center gap-2 cursor-pointer group"
+                >
+                  <div className="relative w-4 h-4 rounded-md bg-black/40 border border-white/20 flex items-center justify-center transition-all group-hover:border-[#00D88B]/60">
+                    <input type="checkbox" className="peer absolute opacity-0 w-full h-full cursor-pointer" />
+                    <div className="w-2 h-2 rounded-[2px] bg-[#00D88B] opacity-0 peer-checked:opacity-100 transition-opacity" />
+                  </div>
+                  <span className="text-[10px] font-bold text-white/60 group-hover:text-white/90 transition-colors">Lembrar de mim</span>
+                </motion.label>
+                <button 
+                  type="button"
+                  onClick={() => router.push('/auth/forgot-password/')}
+                  className="text-[10px] font-bold text-emerald-400 hover:text-emerald-300 transition-colors"
+                >
+                  Esqueceu a senha?
+                </button>
+              </motion.div>
 
               {error && (
-                <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-2xl text-rose-400 text-[9px] font-black uppercase tracking-widest text-center">
+                <motion.div 
+                  variants={itemVariants}
+                  className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-[11px] font-bold text-center"
+                >
                   {error}
-                </div>
+                </motion.div>
               )}
 
-              <motion.button
-                whileHover={{ scale: 1.02, y: -2 }}
-                whileTap={{ scale: 0.98 }}
+              <motion.div variants={itemVariants}>
+                <motion.button 
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                type="submit" 
                 disabled={loading}
-                className="w-full bg-emerald-500 text-slate-950 font-black py-5 rounded-full flex items-center justify-center gap-3 hover:bg-emerald-400 transition-all shadow-[0_15px_30px_rgba(16,185,129,0.3)]"
+                className="w-full h-[54px] bg-[#00D88B] hover:bg-emerald-400 rounded-xl flex items-center justify-center gap-2 font-black text-[12px] text-[#080d19] transition-all shadow-[0_5px_20px_rgba(0,216,139,0.25)] uppercase tracking-wider"
               >
-                <span className="text-[10px] uppercase tracking-[0.3em]">
-                  {loading ? 'Acessando...' : 'Entrar na Nórica'}
-                </span>
-                {!loading && <ArrowRight size={16} />}
-              </motion.button>
+                  {loading ? "Conectando..." : "Entrar"}
+                  <ArrowRight size={16} />
+                </motion.button>
+              </motion.div>
             </form>
 
-            <div className="text-center pt-2">
-              <button
+            <motion.div variants={itemVariants} className="text-center pt-6">
+              <span className="text-[11px] font-medium text-white/50">Não tem uma conta? </span>
+              <button 
                 type="button"
-                onClick={() => router.push('/auth/signup')}
-                className="text-[9px] font-black uppercase tracking-widest text-slate-500 hover:text-emerald-400 transition-colors"
+                onClick={() => router.push('/auth/signup/')}
+                className="text-[11px] font-bold text-white hover:text-[#00D88B] transition-colors ml-1"
               >
-                Novo por aqui? <span className="text-emerald-500/60 font-black">Criar conta</span>
+                Criar conta
               </button>
-            </div>
+            </motion.div>
+          </motion.div>
           </div>
         </div>
       </motion.div>
     </div>
   );
 }
+
+const containerVariants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: { staggerChildren: 0.1, delayChildren: 0.2 }
+  }
+};
+
+const itemVariants = {
+  hidden: { opacity: 0, y: 15 },
+  visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: "easeOut" } }
+};

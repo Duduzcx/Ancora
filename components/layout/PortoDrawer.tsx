@@ -20,7 +20,6 @@ export default function PortoDrawer() {
   const handleLogout = async () => {
     await supabase.auth.signOut();
     router.push('/auth');
-    router.refresh();
   };
 
   // Escuta por eventos de abertura (caso queira abrir via botão no futuro)
@@ -119,8 +118,17 @@ export default function PortoDrawer() {
 }
 
 function DrawerItem({ icon: Icon, label, href, isActive }: any) {
+  const router = useRouter();
+  const handleClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    router.push(href);
+  };
+
   return (
-    <Link href={href}>
+    <button
+      onClick={handleClick}
+      className="w-full text-left"
+    >
       <motion.div
         whileHover={{ x: 5 }}
         whileTap={{ scale: 0.95 }}
@@ -137,6 +145,6 @@ function DrawerItem({ icon: Icon, label, href, isActive }: any) {
         </div>
         {!isActive && <ChevronRight size={16} className="opacity-30" />}
       </motion.div>
-    </Link>
+    </button>
   );
 }
