@@ -31,7 +31,24 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="com.zcx.norica" android:host="login-callback" />
             </intent-filter>
+            <!-- Widget "Como está o seu mar?": com.zcx.norica://humor/<humor> -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="com.zcx.norica" android:host="humor" />
+            </intent-filter>
         </activity>
+        <receiver
+            android:name=".MoodWidget"
+            android:exported="false"
+            android:label="@string/widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/mood_widget_info" />
+        </receiver>
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

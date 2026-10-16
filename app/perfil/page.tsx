@@ -9,13 +9,13 @@ import {
   Anchor, LifeBuoy, Mail, Calendar, 
   LogOut, Settings, Fingerprint, AlertCircle, Loader2,
   ChevronRight, BadgeCheck, Shield, Key, Sparkles,
-  ShipWheel, Compass, Waves, Camera, Crown, Trash2, Bell, Brain, ClipboardList
+  ShipWheel, Compass, Waves, Camera, Crown, Trash2, Bell, Brain, ClipboardList, Building2
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import AnimatedBackground from '@/components/AnimatedBackground';
 import { getAuthState, useAuth } from '@/lib/auth-store';
 import { cacheGet, cacheSet } from '@/lib/cache';
-import { DEFAULT_REMINDER, disableReminder, enableReminder, formatTime, getReminder, type ReminderSettings } from '@/lib/reminder';
+import { DEFAULT_REMINDER, disableReminder, enableReminder, formatTime, getReminder, setNotificationPref, type ReminderSettings } from '@/lib/reminder';
 
 // Foto do Google em alta resolução. A URL padrão vem com 96px ("=s96-c"),
 // que fica borrada no avatar grande em telas de celular.
@@ -302,6 +302,41 @@ export default function PerfilPage() {
       setMemoryError(err?.message || 'Não foi possível apagar agora.');
     } finally {
       setMemoryBusy(false);
+    }
+  };
+
+  // Instituição parceira (B2B)
+  const [isOrgOpen, setIsOrgOpen] = useState(false);
+  const [org, setOrg] = useState<{ name: string; role: 'member' | 'admin' } | null>(null);
+  const [orgLoaded, setOrgLoaded] = useState(false);
+  const [orgCode, setOrgCode] = useState('');
+  const [orgBusy, setOrgBusy] = useState(false);
+  const [orgError, setOrgError] = useState<string | null>(null);
+  useEffect(() => {
+    noricaApi.orgStatus().then((r) => setOrg(r.org)).catch(() => {}).finally(() => setOrgLoaded(true));
+  }, []);
+  const joinOrg = async () => {
+    setOrgBusy(true);
+    setOrgError(null);
+    try {
+      const r = await noricaApi.orgJoin(orgCode);
+      setOrg(r.org);
+      setOrgCode('');
+    } catch (err: any) {
+      setOrgError(err?.message || 'Não foi possível entrar agora.');
+    } finally {
+      setOrgBusy(false);
+    }
+  };
+  const leaveOrg = async () => {
+    setOrgBusy(true);
+    try {
+      await noricaApi.orgLeave();
+      setOrg(null);
+    } catch (err: any) {
+      setOrgError(err?.message || 'Não foi possível sair agora.');
+    } finally {
+      setOrgBusy(false);
     }
   };
 
@@ -628,9 +663,9 @@ export default function PerfilPage() {
                 <Bell size={24} />
              </div>
              <div className="text-left">
-                <h3 className="text-sm font-black text-white uppercase tracking-tighter italic">Lembrete Diário</h3>
+                <h3 className="text-sm font-black text-white uppercase tracking-tighter italic">Notificações</h3>
                 <p className="text-[9px] font-black text-sky-400 uppercase tracking-widest leading-none mt-1">
-                  {reminder.enabled ? `Todo dia às ${formatTime(reminder)}` : 'Desligado'}
+                  {reminder.enabled ? `Lembrete todo dia às ${formatTime(reminder)}` : 'Lembrete diário desligado'}
                 </p>
              </div>
           </div>
@@ -676,6 +711,30 @@ export default function PerfilPage() {
              <div className="text-left">
                 <h3 className="text-sm font-black text-white uppercase tracking-tighter italic">Plano de Segurança</h3>
                 <p className="text-[9px] font-black text-rose-300 uppercase tracking-widest leading-none mt-1">Pessoas de confiança e o que te acalma</p>
+             </div>
+          </div>
+          <ChevronRight size={20} className="text-white/40 group-hover:translate-x-1 transition-transform" />
+        </motion.button>
+
+        {/* Instituição parceira (escola, cursinho, empresa) */}
+        <motion.button 
+          initial={{ opacity: 0, y: 15 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.5, delay: 0.24 }}
+          whileTap={{ scale: 0.96 }}
+          onClick={() => { setOrgError(null); setIsOrgOpen(true); }}
+          className="w-full flex items-center justify-between p-7 bg-white/5 border border-white/10 rounded-[2.5rem] shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] hover:bg-amber-500/10 hover:border-amber-500/20 transition-all group"
+        >
+          <div className="flex items-center gap-4">
+             <div className="w-12 h-12 bg-amber-500/10 text-amber-300 border border-amber-500/20 rounded-2xl flex items-center justify-center group-hover:rotate-12 transition-transform">
+                <Building2 size={24} />
+             </div>
+             <div className="text-left">
+                <h3 className="text-sm font-black text-white uppercase tracking-tighter italic">Instituição Parceira</h3>
+                <p className="text-[9px] font-black text-amber-300 uppercase tracking-widest leading-none mt-1">
+                  {!orgLoaded ? '...' : org ? org.name : 'Escola, cursinho ou empresa'}
+                </p>
              </div>
           </div>
           <ChevronRight size={20} className="text-white/40 group-hover:translate-x-1 transition-transform" />
@@ -735,6 +794,63 @@ export default function PerfilPage() {
           Verificar sistema
         </button>
       </motion.div>
+      <AnimatePresence>
+        {isOrgOpen && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => !orgBusy && setIsOrgOpen(false)} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[1000]" />
+            <motion.div
+              initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 28, stiffness: 260 }}
+              className="fixed inset-x-0 bottom-0 z-[1001] bg-[#0b0f19] border-t border-white/10 rounded-t-[2.5rem] p-6 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] shadow-2xl max-w-lg mx-auto max-h-[85dvh] overflow-y-auto"
+            >
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-12 h-12 rounded-2xl bg-amber-500/15 text-amber-300 flex items-center justify-center"><Building2 size={22} /></div>
+                <div>
+                  <h3 className="text-sm font-black text-white uppercase tracking-tighter leading-none">Instituição parceira</h3>
+                  <p className="text-[9px] font-black text-amber-300 uppercase tracking-widest mt-1">Escola, cursinho ou empresa</p>
+                </div>
+              </div>
+              {org ? (
+                <div className="space-y-4">
+                  <p className="text-sm text-white/70 font-semibold leading-relaxed">
+                    Você faz parte de <b className="text-white">{org.name}</b>. A instituição vê apenas números somados de todo o grupo (por exemplo, "30% marcaram ansioso esta semana"), nunca o que você escreve ou marca.
+                  </p>
+                  {org.role === 'admin' && (
+                    <button onClick={() => router.push('/painel/')} className="w-full py-4 rounded-2xl bg-amber-400 text-slate-950 font-black uppercase tracking-widest text-[10px]">
+                      Abrir painel da instituição
+                    </button>
+                  )}
+                  {org.role === 'member' && (
+                    <button onClick={leaveOrg} disabled={orgBusy} className="w-full py-4 rounded-2xl bg-white/5 border border-white/10 text-white/60 font-black uppercase tracking-widest text-[10px]">
+                      Sair da instituição
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <p className="text-sm text-white/60 font-semibold leading-relaxed">
+                    Se a sua escola, cursinho ou empresa é parceira da Nórica, digite o código que ela passou. A instituição verá só números anônimos do grupo — nunca suas conversas, Cofre, diário ou o seu humor individual.
+                  </p>
+                  <input
+                    value={orgCode}
+                    onChange={(e) => setOrgCode(e.target.value.toUpperCase())}
+                    placeholder="CÓDIGO"
+                    className="w-full bg-black/30 border border-white/10 rounded-2xl p-4 text-center text-lg font-black tracking-[0.3em] text-white outline-none focus:border-amber-400/50 placeholder:text-white/20"
+                  />
+                  <button onClick={joinOrg} disabled={orgBusy || orgCode.trim().length < 4} className="w-full py-4 rounded-2xl bg-amber-400 text-slate-950 font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-2 disabled:opacity-40">
+                    {orgBusy && <Loader2 size={14} className="animate-spin" />} Entrar
+                  </button>
+                </div>
+              )}
+              {orgError && <p className="text-rose-400 text-xs font-bold mt-4">{orgError}</p>}
+              <button onClick={() => setIsOrgOpen(false)} className="w-full mt-4 py-3 text-white/40 font-black uppercase tracking-widest text-[10px]">
+                Fechar
+              </button>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
       <AnimatePresence>
         {isMemoryOpen && (
           <>
@@ -826,7 +942,7 @@ export default function PerfilPage() {
               <div className="flex items-center gap-3 mb-5">
                 <div className="w-12 h-12 rounded-2xl bg-sky-500/15 text-sky-400 flex items-center justify-center"><Bell size={22} /></div>
                 <div>
-                  <h3 className="text-sm font-black text-white uppercase tracking-tighter leading-none">Lembrete diário</h3>
+                  <h3 className="text-sm font-black text-white uppercase tracking-tighter leading-none">Notificações</h3>
                   <p className="text-[9px] font-black text-sky-400 uppercase tracking-widest mt-1">“Como está o seu mar hoje?”</p>
                 </div>
               </div>
@@ -855,6 +971,28 @@ export default function PerfilPage() {
                 />
               </label>
               {reminderMsg && <p className="text-xs font-bold text-sky-300 mb-4 leading-relaxed">{reminderMsg}</p>}
+              <p className="text-[10px] font-black text-white/40 uppercase tracking-widest mb-3">Outros avisos</p>
+              <div className="space-y-2 mb-5">
+                {([
+                  ['weekly', 'Resumo da semana', 'Domingo às 19h'],
+                  ['streak', 'Sequência dos Logs', 'Para não perder seus dias seguidos'],
+                  ['comeback', 'Sentimos sua falta', 'Depois de 3 dias sem abrir o app'],
+                ] as const).map(([key, label, hint]) => (
+                  <button
+                    key={key}
+                    onClick={async () => { await setNotificationPref(key, !reminder[key]); setReminder({ ...getReminder() }); }}
+                    className="w-full flex items-center justify-between gap-3 p-4 rounded-2xl bg-white/5 border border-white/10 text-left"
+                  >
+                    <span>
+                      <span className="block text-[11px] font-black text-white/80 uppercase tracking-widest">{label}</span>
+                      <span className="block text-[10px] text-white/40 font-semibold mt-0.5">{hint}</span>
+                    </span>
+                    <span className={`w-12 h-7 rounded-full p-1 shrink-0 transition-colors ${reminder[key] ? 'bg-sky-500' : 'bg-white/15'}`}>
+                      <span className={`block w-5 h-5 rounded-full bg-white transition-transform ${reminder[key] ? 'translate-x-5' : ''}`} />
+                    </span>
+                  </button>
+                ))}
+              </div>
               <div className="flex flex-col gap-3">
                 <motion.button
                   whileTap={{ scale: 0.97 }}

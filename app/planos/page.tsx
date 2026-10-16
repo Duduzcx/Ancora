@@ -32,6 +32,7 @@ const PRO_FEATURES: Feature[] = [
   { text: 'Porto sem limite diário: converse com a Nórica sempre que precisar' },
   { text: 'Arena com retornos ilimitados para treinar conversas difíceis' },
   { text: 'Farol com o mapa emocional dos últimos 30 dias' },
+  { text: 'Resumo da semana escrito pela Nórica, todo domingo' },
   { text: 'Relatório mensal do seu mar em PDF para levar ao psicólogo', soon: true },
   { text: 'Novos cenários de treino na Arena', soon: true },
   { text: 'Você apoia um app brasileiro de cuidado emocional 💚' },

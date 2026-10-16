@@ -56,6 +56,19 @@ export default function ArenaPage() {
 
   useEffect(() => {
     setIsMounted(true);
+    // Vindo do exercício "Preparar uma conversa difícil": já abre o treino com o cenário da pessoa.
+    const params = new URLSearchParams(window.location.search);
+    const cenario = params.get('cenario');
+    if (cenario) {
+      setSelected({
+        id: 99,
+        title: cenario.slice(0, 120),
+        desc: params.get('contexto')?.slice(0, 200) || 'Treino personalizado',
+        icon: Sword,
+        color: 'text-emerald-400',
+        bg: 'bg-emerald-500/10',
+      });
+    }
   }, []);
 
   const [crisis, setCrisis] = useState(false);

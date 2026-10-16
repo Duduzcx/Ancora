@@ -18,6 +18,7 @@ import { cachedPlan, refreshPlan } from '@/lib/norica-api';
 import { getAuthState } from '@/lib/auth-store';
 import { cacheGet, cacheSet } from '@/lib/cache';
 import { loadFarolReading, EMPTY_FAROL, type FarolReading } from '@/lib/farol';
+import ResumoSemanal from '@/components/ResumoSemanal';
 
 export default function FarolPage() {
   const [progress, setProgress] = useState<number>(0);
@@ -415,6 +416,9 @@ export default function FarolPage() {
             <RespiracaoFarolConsertada />
           </div>
         </div>
+
+        {/* RESUMO DA SEMANA (Pro) */}
+        <ResumoSemanal />
 
         {/* BOTTOM CARDS */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">

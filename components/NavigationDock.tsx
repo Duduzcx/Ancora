@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { usePathname, useRouter } from 'next/navigation';
-import { Anchor, LifeBuoy, Clock, User, Compass, Sword, Shield, CheckCircle } from 'lucide-react';
+import { Anchor, LifeBuoy, Clock, User, Compass, Sword, Shield, CheckCircle, Leaf } from 'lucide-react';
 import { useAuth } from '@/lib/auth-store';
 
 const LighthouseIcon = (props: any) => (
@@ -28,6 +28,7 @@ const hubItems = [
   { icon: Sword, label: 'Arena', href: '/arena/', desc: 'Praticar' },
   { icon: Shield, label: 'O Cofre', href: '/cofre/', desc: 'Segurança' },
   { icon: CheckCircle, label: 'Logs', href: '/log/', desc: 'Histórico' },
+  { icon: Leaf, label: 'Exercícios', href: '/exercicios/', desc: 'Guiados' },
 ];
 
 export default function NavigationDock() {
@@ -78,7 +79,7 @@ export default function NavigationDock() {
               exit={{ opacity: 0, y: 20, scale: 0.95 }}
               className="fixed bottom-24 left-6 right-6 z-[999] bg-[#031c20]/90 backdrop-blur-xl rounded-[2.5rem] p-6 shadow-[0_8px_32px_0_rgba(0,0,0,0.5)] border border-white/10 max-w-sm mx-auto"
             >
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-4 gap-2">
                 {hubItems.map((item) => (
                   <button 
                     key={item.href} 
@@ -88,7 +89,7 @@ export default function NavigationDock() {
                     <div className="p-4 bg-emerald-500/10 text-emerald-400 rounded-2xl transition-all duration-300 hover:bg-emerald-500/20 group-hover:scale-105">
                       <item.icon size={24} />
                     </div>
-                    <span className="text-[10px] font-black uppercase text-white/80">{item.label}</span>
+                    <span className="text-[9px] font-black uppercase text-white/80">{item.label}</span>
                   </button>
                 ))}
               </div>

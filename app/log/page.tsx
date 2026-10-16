@@ -16,6 +16,8 @@ import { StatusBar, Style } from '@capacitor/status-bar';
 import Link from 'next/link';
 import AnimatedBackground from '@/components/AnimatedBackground';
 import { usePendingSync } from '@/lib/offline-sync';
+import DiarioVoz from '@/components/DiarioVoz';
+import { scheduleStreak } from '@/lib/reminder';
 import { fetchDailyLog, saveDailyLog, todayKey, noricaApi, type CustomTask } from '@/lib/norica-api';
 
 // Tarefas sugeridas pela IA no Porto entram numa categoria própria.
@@ -110,6 +112,10 @@ export default function LogPage() {
     const t = setTimeout(() => setPendingSync(pendingCount), 3000);
     return () => clearTimeout(t);
   }, [pendingCount]);
+  // Sequência de dias: amanhã à noite, um lembrete para não perder a ofensiva.
+  useEffect(() => {
+    if (streak > 0) scheduleStreak(streak).catch(() => {});
+  }, [streak]);
   // Se a pessoa marcar algo antes da conta responder, o que ela marcou vale mais.
   const touchedRef = React.useRef(false);
   const [aiInsight, setAiInsight] = useState<string>("");
@@ -286,6 +292,18 @@ export default function LogPage() {
     
     loadInsight();
   }, [isMounted, tasks]);
+
+  // Passos sugeridos pelo diário por voz entram na categoria "Da Nórica".
+  const addAiTasks = (texts: string[]) => {
+    touchedRef.current = true;
+    setTasks(prev => {
+      const existing = new Set(prev.map(t => t.text.toLowerCase()));
+      const fresh = texts
+        .filter(t => !existing.has(t.toLowerCase()))
+        .map(text => ({ id: `ia-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, category: AI_CATEGORY, text, completed: false, icon: Sparkles }));
+      return [...prev, ...fresh];
+    });
+  };
 
   const toggleTask = (id: number | string) => {
     touchedRef.current = true;
@@ -475,6 +493,9 @@ export default function LogPage() {
 
           {/* LISTA DE TAREFAS */}
           <div className="lg:col-span-7 space-y-10 pb-12">
+            {/* Diário por voz: o passo sugerido entra na lista "Da Nórica" */}
+            <DiarioVoz onAddTasks={addAiTasks} />
+
             {aiInsight && (
               <motion.div
                 initial={{ opacity: 0 }}

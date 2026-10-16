@@ -98,6 +98,16 @@ $env:GROQ_API_KEY="gsk_..."; npx tsx supabase/tests/avaliar-ia.mts
 ```
 Rode antes e depois de mudar o prompt ou o modelo e compare as médias. O relatório completo fica em `supabase/tests/relatorios/`.
 
+## Engajamento e parceiros
+
+- **Resumo da semana (Pro):** Farol → Resumo da semana. Ação `weekly_summary` (tabela `weekly_summaries`, criptografada). Notificação aos domingos, 19h.
+- **Diário por voz:** Logs → Diário por voz (até 1 minuto, ou escrito). Ação `journal_voice` → resumo, humor e um passo para os Logs (`journal_entries`, criptografada).
+- **Exercícios guiados:** `/exercicios/` (hub da Bússola) — aterramento 5-4-3-2-1, três coisas boas e preparar conversa difícil (abre a Arena com o cenário da pessoa).
+- **Pessoa de confiança:** botão "Avisar" no S.O.S e no painel de ajuda (vem do plano de segurança).
+- **Notificações:** lembrete diário, resumo de domingo, sequência dos Logs e "sentimos sua falta" (3 dias sem abrir). Convite na Início a partir da 2ª visita. Tudo local, configurável em Perfil → Notificações.
+- **Widget Android:** "Como está o seu mar?" com 4 humores (`MoodWidget.java`, `res/layout/widget_mood.xml`). Abre o app com `com.zcx.norica://humor/<humor>`, que registra e confirma.
+- **Painel B2B:** a pessoa digita o código em Perfil → Instituição Parceira; a equipe (role `admin`) vê `/painel/` com números agregados e anônimos (mínimo de 5 pessoas ativas; temas só com 3+ pessoas). Como cadastrar: veja o fim de `supabase/migrations/20261016180000_norica_engajamento.sql`.
+
 ## Logs e humor sem internet
 
 `lib/offline-sync.ts`: o que a pessoa marca vai primeiro para uma fila no aparelho e é enviado ao Supabase

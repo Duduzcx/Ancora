@@ -27,6 +27,7 @@ export default function Privacidade() {
               <li><strong>Registros de rotina:</strong> os hábitos marcados na aba Logs e as tarefas que você adiciona a partir do Porto.</li>
               <li><strong>Áudio:</strong> quando você usa o microfone, o áudio é enviado apenas para ser transcrito em texto. O arquivo de áudio não é guardado.</li>
               <li><strong>Memória da Nórica:</strong> um resumo curto das suas conversas (pessoas importantes, temas e o que costuma te ajudar), para a IA lembrar nas próximas conversas. Você vê, desliga e apaga em <strong>Perfil → Memória da Nórica</strong>.</li>
+              <li><strong>Diário e exercícios:</strong> o que você grava ou escreve no diário por voz, na gratidão e na preparação de conversas, e o resumo semanal que a IA escreve para você. O áudio do diário não é guardado, só o texto.</li>
               <li><strong>Plano de segurança:</strong> o que você escrever no seu plano, incluindo nomes e telefones das suas pessoas de confiança. Esses contatos só são usados quando você mesmo(a) toca para avisá-los.</li>
               <li><strong>Avaliações e registros técnicos:</strong> quando você toca em 👍/👎 numa resposta, guardamos só a nota e o motivo escolhido (não o texto da conversa). O app também registra erros técnicos e lentidão (tela, versão do app e modelo do celular) para corrigirmos problemas.</li>
             </ul>
@@ -48,6 +49,7 @@ export default function Privacidade() {
             <ul className="list-disc pl-5 mt-3 space-y-2">
               <li><strong>Supabase</strong> — hospedagem do banco de dados, login e servidor do app.</li>
               <li><strong>Groq</strong> — processamento da inteligência artificial (respostas do Porto e da Arena, títulos das conversas e transcrição de voz).</li>
+              <li><strong>Instituição parceira</strong> (escola, cursinho ou empresa) — só se você digitar o código dela no app. Ela vê apenas números somados e anônimos de grupos com pelo menos 5 pessoas (por exemplo, a porcentagem de marcações "ansioso" na semana). Nunca recebe suas conversas, Cofre, diário, plano de segurança ou o seu humor individual. Você pode sair a qualquer momento em Perfil → Instituição Parceira.</li>
               <li><strong>Google</strong> — se você escolher entrar com a conta Google e, no caso do plano Pro, para processar o pagamento da assinatura pela Google Play. Não recebemos nem guardamos dados do seu cartão.</li>
             </ul>
             <p className="mt-3">Esses fornecedores podem processar dados fora do Brasil (inclusive nos Estados Unidos). Essa transferência internacional ocorre apenas para prestar o serviço e com garantias de segurança compatíveis com a LGPD.</p>

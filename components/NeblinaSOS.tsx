@@ -3,7 +3,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
-import { HelpButton, HelpSheet } from '@/components/AjudaAgora';
+import { HelpButton, HelpSheet, QuickTrustedButton } from '@/components/AjudaAgora';
 
 interface NeblinaSOSProps {
   onClareou: () => void;
@@ -371,6 +371,11 @@ export default function NeblinaSOS({ onClareou }: NeblinaSOSProps) {
           </button>
         </motion.div>
       )}
+
+      {/* PESSOA DE CONFIANÇA: um toque abre o WhatsApp com a mensagem pronta */}
+      <div className="absolute top-[calc(env(safe-area-inset-top)+1rem)] left-4 z-[60]">
+        <QuickTrustedButton />
+      </div>
 
       {/* AJUDA HUMANA: sempre ao alcance durante o S.O.S (CVV 188 / SAMU 192) */}
       <div className="absolute top-[calc(env(safe-area-inset-top)+1rem)] right-4 z-[60]">

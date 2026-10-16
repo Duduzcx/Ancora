@@ -63,6 +63,32 @@ export type SafetyPlan = {
   motivos: string; // meus motivos para seguir
 };
 
+export type WeeklySummary = {
+  weekStart: string;
+  empty: boolean;
+  locked: boolean; // plano Gratuito: vê só os números
+  summary: string | null;
+  stats: { moods: Record<string, number>; daysWithLogs: number; conversations: number; journalEntries: number };
+};
+export type JournalKind = 'voz' | 'gratidao' | 'conversa' | 'aterramento';
+export type JournalEntry = { id: string; kind: JournalKind; mood: string | null; created_at: string; summary: string; content: string; title?: string };
+export type OrgInfo = { name: string; role: 'member' | 'admin' } | null;
+export type OrgWeek = {
+  active: number;
+  moodPct: Record<string, number>;
+  hardPeoplePct: number;
+  logsPct: number;
+  topics: { topic: string; pct: number }[];
+};
+export type OrgDashboard = {
+  org: string;
+  members: number;
+  minGroup: number;
+  current: OrgWeek | null;
+  previous: OrgWeek | null;
+  weeks: { label: string; active: number | null; hardPeoplePct: number | null }[];
+};
+
 export const MOODS = ['calmo', 'ansioso', 'agitado', 'sos'] as const;
 export type Mood = (typeof MOODS)[number];
 
@@ -130,6 +156,22 @@ export const noricaApi = {
 
   safetyPlanGet: () => call<{ plan: SafetyPlan | null; updatedAt: string | null }>('safety_plan_get'),
   safetyPlanSave: (plan: SafetyPlan) => call<{ ok: boolean; plan: SafetyPlan }>('safety_plan_save', { plan }),
+
+  weeklySummary: (refresh = false) => call<WeeklySummary>('weekly_summary', { refresh }),
+
+  journalVoice: (text: string) =>
+    call<{ entry: JournalEntry; crisis: boolean; tasks: string[] }>('journal_voice', { text }),
+  journalSave: (kind: Exclude<JournalKind, 'voz'>, content: string, summary?: string) =>
+    call<{ entry: JournalEntry; crisis: boolean }>('journal_save', { kind, content, summary }),
+  journalList: (limit = 10, kind?: JournalKind) => call<{ entries: JournalEntry[] }>('journal_list', { limit, kind }),
+  journalDelete: (id: string) => call<{ ok: boolean }>('journal_delete', { id }),
+  prepConversation: (data: { pessoa: string; objetivo: string; sentimento: string; pedido: string }) =>
+    call<{ aberturas: string[]; dica: string; crisis: boolean; cenario: string }>('prep_conversation', data),
+
+  orgStatus: () => call<{ org: OrgInfo }>('org_status'),
+  orgJoin: (code: string) => call<{ org: OrgInfo }>('org_join', { code }),
+  orgLeave: () => call<{ ok: boolean }>('org_leave'),
+  orgDashboard: () => call<OrgDashboard>('org_dashboard'),
 
   async transcribe(blob: Blob): Promise<string> {
     const supabase = createClient();

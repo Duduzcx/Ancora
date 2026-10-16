@@ -109,6 +109,29 @@ function TrustedContacts({ dark = true }: { dark?: boolean }) {
   );
 }
 
+/** Um toque para avisar a primeira pessoa de confiança (aparece só se ela estiver cadastrada). */
+export function QuickTrustedButton({ className = '' }: { className?: string }) {
+  const [contact, setContact] = useState<{ nome: string; telefone: string } | null>(null);
+  useEffect(() => {
+    const pick = (p: SafetyPlan | null) => setContact(p?.contatos?.find((c) => c.telefone) ?? null);
+    pick(cachedPlan());
+    loadPlan(pick).catch(() => {});
+  }, []);
+  if (!contact) return null;
+  const firstName = contact.nome.split(' ')[0] || 'contato';
+  return (
+    <motion.button
+      whileTap={{ scale: 0.95 }}
+      onClick={() => openExternal(`https://wa.me/${phoneDigits(contact.telefone)}?text=${encodeURIComponent(trustedMessage(firstName))}`)}
+      aria-label={`Avisar ${contact.nome} que preciso de ajuda`}
+      className={`p-3 rounded-2xl border flex items-center gap-2 bg-sky-500/20 border-sky-400/30 text-white ${className}`}
+    >
+      <Send size={18} />
+      <span className="text-[9px] font-black uppercase tracking-wider">Avisar {firstName}</span>
+    </motion.button>
+  );
+}
+
 /** Painel de ajuda que sobe por cima da tela. */
 export function HelpSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   return (

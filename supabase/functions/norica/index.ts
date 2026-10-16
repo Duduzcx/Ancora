@@ -29,6 +29,9 @@ import {
   type RiskLevel,
   TASKS_PROMPT,
   TITLE_PROMPT,
+  CONVERSATION_PREP_PROMPT,
+  VOICE_JOURNAL_PROMPT,
+  WEEKLY_PROMPT,
 } from "../_shared/safety.ts";
 
 const corsHeaders = {
@@ -655,6 +658,323 @@ async function vaultDelete(ctx: Ctx, body: Record<string, unknown>) {
 // ---------------------------------------------------------------------
 
 // ---------------------------------------------------------------------
+// Datas no fuso de Brasília
+// ---------------------------------------------------------------------
+
+const brtNow = () => new Date(Date.now() - 3 * 3600_000);
+const brtDay = (d = brtNow()) => d.toISOString().slice(0, 10);
+/** Segunda-feira da semana (Brasília) de um dia "AAAA-MM-DD". */
+function mondayOf(day: string): string {
+  const d = new Date(`${day}T12:00:00Z`);
+  const dow = (d.getUTCDay() + 6) % 7; // 0 = segunda
+  d.setUTCDate(d.getUTCDate() - dow);
+  return d.toISOString().slice(0, 10);
+}
+const addDays = (day: string, n: number) => {
+  const d = new Date(`${day}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+// Início do dia (Brasília) em ISO UTC, para filtrar created_at.
+const dayStartIso = (day: string) => new Date(`${day}T03:00:00Z`).toISOString();
+
+// ---------------------------------------------------------------------
+// Resumo semanal (Pro)
+// ---------------------------------------------------------------------
+
+async function weekStats(ctx: Ctx, start: string, end: string) {
+  const [{ data: moods }, { data: habits }, { data: days }, { data: chats }, { data: journal }] = await Promise.all([
+    ctx.db.from("mood_logs").select("mood, created_at").eq("user_id", ctx.userId).gte("created_at", dayStartIso(start)).lt("created_at", dayStartIso(addDays(end, 1))),
+    ctx.db.from("habit_logs").select("day, progress, completed").eq("user_id", ctx.userId).gte("day", start).lte("day", end),
+    ctx.db.from("daily_logs").select("date, humor, assunto, conselho").eq("user_id", ctx.userId).gte("date", start).lte("date", end),
+    ctx.db.from("chats").select("id, title, created_at").eq("user_id", ctx.userId).gte("created_at", dayStartIso(start)).limit(30),
+    ctx.db.from("journal_entries").select("kind, summary, mood, created_at").eq("user_id", ctx.userId).gte("created_at", dayStartIso(start)).limit(14),
+  ]);
+  const moodCount: Record<string, number> = { calmo: 0, ansioso: 0, agitado: 0, sos: 0 };
+  for (const m of moods ?? []) if (m.mood in moodCount) moodCount[m.mood]++;
+  for (const d of days ?? []) if (d.humor && d.humor in moodCount && !(moods ?? []).length) moodCount[d.humor]++;
+  const daysWithLogs = (habits ?? []).filter((h) => Number(h.progress) > 0).length;
+  return { moodCount, daysWithLogs, days: days ?? [], chats: chats ?? [], journal: journal ?? [] };
+}
+
+async function weeklySummary(ctx: Ctx, body: Record<string, unknown>) {
+  const today = brtDay();
+  const weekStart = mondayOf(today);
+  const info = await getPlan(ctx.admin, ctx.userId);
+  const stats = await weekStats(ctx, weekStart, today);
+  const publicStats = {
+    moods: stats.moodCount,
+    daysWithLogs: stats.daysWithLogs,
+    conversations: stats.chats.length,
+    journalEntries: stats.journal.length,
+  };
+  const hasData = Object.values(stats.moodCount).some((n) => n > 0) || stats.daysWithLogs > 0 || stats.chats.length > 0 || stats.journal.length > 0;
+  if (!hasData) return { weekStart, empty: true, locked: false, summary: null, stats: publicStats };
+  if (info.effective !== "pro") return { weekStart, empty: false, locked: true, summary: null, stats: publicStats };
+
+  // No máximo um resumo novo por dia (o de domingo fecha a semana).
+  const { data: existing } = await ctx.db.from("weekly_summaries").select("content, created_at")
+    .eq("user_id", ctx.userId).eq("week_start", weekStart).maybeSingle();
+  if (existing && body.refresh !== true && brtDay(new Date(new Date(existing.created_at).getTime() - 3 * 3600_000)) === today) {
+    return { weekStart, empty: false, locked: false, summary: await decrypt(existing.content), stats: publicStats };
+  }
+
+  const titles: string[] = [];
+  for (const c of stats.chats.slice(0, 12)) {
+    const t = await decrypt(c.title);
+    if (t && t !== "Nova conversa" && t !== "Momento difícil") titles.push(t);
+  }
+  const journalLines: string[] = [];
+  for (const j of stats.journal.slice(0, 7)) {
+    const sm = j.summary ? await decrypt(j.summary) : "";
+    if (sm) journalLines.push(`${j.kind}: ${sm.slice(0, 200)}`);
+  }
+  const lines = [
+    `Período: ${weekStart} a ${today}.`,
+    `Humor marcado: ${Object.entries(stats.moodCount).filter(([, n]) => n).map(([k, n]) => `${k} ${n}x`).join(", ") || "nenhum"}.`,
+    `Dias com hábitos marcados nos Logs: ${stats.daysWithLogs}.`,
+    `Assuntos das conversas: ${[...new Set([...stats.days.map((d) => d.assunto).filter(Boolean), ...titles])].slice(0, 8).join("; ") || "nenhum"}.`,
+    stats.days.length ? `Conselhos do dia já dados: ${stats.days.map((d) => d.conselho).filter(Boolean).slice(0, 3).join(" | ")}` : "",
+    journalLines.length ? `Diário:\n${journalLines.join("\n")}` : "",
+  ].filter(Boolean).join("\n");
+
+  const name = await personName(ctx);
+  let summary = "";
+  try {
+    summary = await groqChat(
+      [{ role: "system", content: WEEKLY_PROMPT }, { role: "user", content: `${name ? `Nome: ${name}\n` : ""}${lines}` }],
+      { temperature: 0.6, maxTokens: 300 },
+    );
+  } catch (e) {
+    console.error(e);
+  }
+  if (!summary) throw new HttpError(503, "Não foi possível escrever seu resumo agora. Tente daqui a pouco.");
+  await ctx.db.from("weekly_summaries").upsert({
+    user_id: ctx.userId,
+    week_start: weekStart,
+    content: await encrypt(summary),
+    created_at: new Date().toISOString(),
+  }, { onConflict: "user_id,week_start" });
+  return { weekStart, empty: false, locked: false, summary, stats: publicStats };
+}
+
+// ---------------------------------------------------------------------
+// Diário (voz, gratidão, preparação de conversa, aterramento)
+// ---------------------------------------------------------------------
+
+const JOURNAL_KINDS = ["voz", "gratidao", "conversa", "aterramento"];
+
+async function journalEntryOut(row: { id: string; kind: string; content: string; summary: string | null; mood: string | null; created_at: string }) {
+  const summary = row.summary ? await decrypt(row.summary) : "";
+  const content = await decrypt(row.content);
+  return { id: row.id, kind: row.kind, mood: row.mood, created_at: row.created_at, summary: summary || content.slice(0, 160), content };
+}
+
+async function journalVoice(ctx: Ctx, body: Record<string, unknown>) {
+  const text = cleanText(body.text, 4000);
+  const keywordRisk = detectRisk(text);
+  const [risk, raw] = await Promise.all([
+    keywordRisk ? Promise.resolve<RiskLevel>("alto") : withTimeout(classifyRisk([], text), 2500, "nenhum" as RiskLevel),
+    groqChat([{ role: "system", content: VOICE_JOURNAL_PROMPT }, { role: "user", content: text }], { model: FAST_MODEL, temperature: 0.3, maxTokens: 300 })
+      .catch(() => ""),
+  ]);
+  const parsed = parseJsonObject(raw) ?? {};
+  const crisis = risk === "alto";
+  let mood = typeof parsed.humor === "string" && VALID_MOODS.includes(parsed.humor) ? parsed.humor : null;
+  if (crisis) mood = "sos";
+  const titulo = typeof parsed.titulo === "string" ? parsed.titulo.slice(0, 60) : "Diário do dia";
+  const resumo = typeof parsed.resumo === "string" && parsed.resumo.trim() ? parsed.resumo.trim().slice(0, 400) : text.slice(0, 200);
+  const passos = crisis || !Array.isArray(parsed.passos) ? [] : (parsed.passos as unknown[])
+    .filter((t): t is string => typeof t === "string" && t.trim().length > 0).map((t) => t.trim().slice(0, 60)).slice(0, 2);
+
+  const { data: row, error } = await ctx.db.from("journal_entries").insert({
+    user_id: ctx.userId,
+    kind: "voz",
+    content: await encrypt(text),
+    summary: await encrypt(resumo),
+    mood,
+  }).select("id, kind, content, summary, mood, created_at").single();
+  if (error || !row) throw new HttpError(500, "Não foi possível salvar seu diário agora");
+
+  if (mood) await ctx.db.from("mood_logs").insert({ user_id: ctx.userId, mood });
+  // Se o Porto ainda não resumiu o dia, o diário vira o resumo de hoje (lido pelo Farol).
+  const today = brtDay();
+  const { data: daily } = await ctx.db.from("daily_logs").select("date").eq("user_id", ctx.userId).eq("date", today).maybeSingle();
+  if (!daily && mood) {
+    await ctx.db.from("daily_logs").upsert({ user_id: ctx.userId, date: today, humor: mood, assunto: titulo.split(" ").slice(0, 3).join(" "), conselho: null }, { onConflict: "user_id,date" });
+  }
+  return { entry: { ...(await journalEntryOut(row)), title: titulo }, crisis, risk, tasks: passos };
+}
+
+async function journalSave(ctx: Ctx, body: Record<string, unknown>) {
+  const kind = String(body.kind ?? "");
+  if (!JOURNAL_KINDS.includes(kind) || kind === "voz") throw new HttpError(400, "Tipo inválido");
+  const content = cleanText(body.content, 4000);
+  const summary = typeof body.summary === "string" ? body.summary.slice(0, 400) : null;
+  const { data: row, error } = await ctx.db.from("journal_entries").insert({
+    user_id: ctx.userId,
+    kind,
+    content: await encrypt(content),
+    summary: summary ? await encrypt(summary) : null,
+  }).select("id, kind, content, summary, mood, created_at").single();
+  if (error || !row) throw new HttpError(500, "Não foi possível salvar agora");
+  return { entry: await journalEntryOut(row), crisis: detectRisk(content) };
+}
+
+async function journalList(ctx: Ctx, body: Record<string, unknown>) {
+  const limit = Math.min(Math.max(Number(body.limit) || 10, 1), 50);
+  let query = ctx.db.from("journal_entries").select("id, kind, content, summary, mood, created_at")
+    .eq("user_id", ctx.userId).order("created_at", { ascending: false }).limit(limit);
+  if (typeof body.kind === "string" && JOURNAL_KINDS.includes(body.kind)) query = query.eq("kind", body.kind);
+  const { data, error } = await query;
+  if (error) throw new HttpError(500, "Não foi possível carregar o diário");
+  const entries = [];
+  for (const r of data ?? []) entries.push(await journalEntryOut(r));
+  return { entries };
+}
+
+async function journalDelete(ctx: Ctx, body: Record<string, unknown>) {
+  await ctx.db.from("journal_entries").delete().eq("id", String(body.id ?? "")).eq("user_id", ctx.userId);
+  return { ok: true };
+}
+
+async function prepConversation(_ctx: Ctx, body: Record<string, unknown>) {
+  const pessoa = cleanText(body.pessoa, 60);
+  const parts = ["objetivo", "sentimento", "pedido"].map((k) => (typeof body[k] === "string" ? String(body[k]).slice(0, 400) : ""));
+  const crisis = detectRisk(parts.join(" "));
+  const raw = await groqChat(
+    [
+      { role: "system", content: CONVERSATION_PREP_PROMPT },
+      { role: "user", content: `Com quem: ${pessoa}\nO que aconteceu / o que quero dizer: ${parts[0]}\nComo me sinto: ${parts[1]}\nO que vou pedir: ${parts[2]}` },
+    ],
+    { temperature: 0.6, maxTokens: 300 },
+  ).catch(() => "");
+  const parsed = parseJsonObject(raw) ?? {};
+  const aberturas = Array.isArray(parsed.aberturas)
+    ? (parsed.aberturas as unknown[]).filter((t): t is string => typeof t === "string").map((t) => t.trim().slice(0, 240)).slice(0, 2)
+    : [];
+  const dica = typeof parsed.dica === "string" ? parsed.dica.slice(0, 200) : "Respire antes de responder e fale do que você sente, não do que o outro é.";
+  return {
+    aberturas: aberturas.length ? aberturas : [`${pessoa}, posso conversar com você sobre uma coisa que tem me incomodado?`],
+    dica,
+    crisis,
+    cenario: `Conversa difícil com ${pessoa}`.slice(0, 120),
+  };
+}
+
+// ---------------------------------------------------------------------
+// Parceiros (B2B): instituição e painel com números agregados e anônimos
+// ---------------------------------------------------------------------
+
+const MIN_GROUP = 5; // abaixo disso, nenhum número é mostrado (evita identificar alguém)
+
+async function myMembership(ctx: Ctx, role?: "admin") {
+  let query = ctx.admin.from("org_members").select("org_id, role").eq("user_id", ctx.userId);
+  if (role) query = query.eq("role", role);
+  const { data: rows } = await query.order("role", { ascending: true }).limit(1);
+  const m = rows?.[0];
+  if (!m) return null;
+  const { data: org } = await ctx.admin.from("organizations").select("id, name").eq("id", m.org_id).maybeSingle();
+  return org ? { orgId: org.id as string, name: org.name as string, role: m.role as string } : null;
+}
+
+async function orgStatus(ctx: Ctx) {
+  const m = await myMembership(ctx);
+  return { org: m ? { name: m.name, role: m.role } : null };
+}
+
+async function orgJoin(ctx: Ctx, body: Record<string, unknown>) {
+  const code = String(body.code ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (code.length < 4) throw new HttpError(400, "Digite o código que a instituição passou para você");
+  const { data: org } = await ctx.admin.from("organizations").select("id, name").eq("code", code).maybeSingle();
+  if (!org) throw new HttpError(404, "Código não encontrado. Confira com a sua instituição.");
+  await ctx.admin.from("org_members").delete().eq("user_id", ctx.userId).neq("org_id", org.id).eq("role", "member");
+  const { error } = await ctx.admin.from("org_members").upsert({ org_id: org.id, user_id: ctx.userId }, { onConflict: "org_id,user_id", ignoreDuplicates: true });
+  if (error) throw new HttpError(500, "Não foi possível entrar agora");
+  return { org: { name: org.name, role: "member" } };
+}
+
+async function orgLeave(ctx: Ctx) {
+  await ctx.admin.from("org_members").delete().eq("user_id", ctx.userId).eq("role", "member");
+  return { ok: true };
+}
+
+async function orgDashboard(ctx: Ctx) {
+  const me = await myMembership(ctx, "admin");
+  if (!me) throw new HttpError(403, "Painel disponível só para a equipe da instituição");
+  const orgName = me.name;
+  const { data: members } = await ctx.admin.from("org_members").select("user_id, role").eq("org_id", me.orgId);
+  const ids = (members ?? []).filter((m) => m.role === "member").map((m) => m.user_id);
+
+  const today = brtDay();
+  const since = addDays(today, -27); // 4 semanas
+  const [{ data: moods }, { data: habits }, { data: days }] = ids.length
+    ? await Promise.all([
+      ctx.admin.from("mood_logs").select("user_id, mood, created_at").in("user_id", ids).gte("created_at", dayStartIso(since)),
+      ctx.admin.from("habit_logs").select("user_id, day, progress").in("user_id", ids).gte("day", since),
+      ctx.admin.from("daily_logs").select("user_id, date, humor, assunto").in("user_id", ids).gte("date", since),
+    ])
+    : [{ data: [] }, { data: [] }, { data: [] }];
+
+  const dayOf = (iso: string) => brtDay(new Date(new Date(iso).getTime() - 3 * 3600_000));
+  const weekIndex = (day: string) => Math.floor((Date.parse(`${today}T12:00:00Z`) - Date.parse(`${day}T12:00:00Z`)) / (7 * 86400_000));
+  type Week = { active: Set<string>; marks: Record<string, number>; hardPeople: Set<string>; logPeople: Set<string>; topics: Map<string, Set<string>> };
+  const weeks: Week[] = Array.from({ length: 4 }, () => ({ active: new Set(), marks: { calmo: 0, ansioso: 0, agitado: 0, sos: 0 }, hardPeople: new Set(), logPeople: new Set(), topics: new Map() }));
+  for (const m of moods ?? []) {
+    const w = weeks[weekIndex(dayOf(m.created_at))];
+    if (!w) continue;
+    w.active.add(m.user_id);
+    if (m.mood in w.marks) w.marks[m.mood]++;
+    if (m.mood !== "calmo") w.hardPeople.add(m.user_id);
+  }
+  for (const h of habits ?? []) {
+    const w = weeks[weekIndex(h.day)];
+    if (!w || !(Number(h.progress) > 0)) continue;
+    w.active.add(h.user_id);
+    w.logPeople.add(h.user_id);
+  }
+  for (const d of days ?? []) {
+    const w = weeks[weekIndex(d.date)];
+    if (!w) continue;
+    w.active.add(d.user_id);
+    if (d.humor && d.humor !== "calmo") w.hardPeople.add(d.user_id);
+    const topic = typeof d.assunto === "string" ? d.assunto.toLowerCase().trim() : "";
+    if (topic) {
+      if (!w.topics.has(topic)) w.topics.set(topic, new Set());
+      w.topics.get(topic)!.add(d.user_id);
+    }
+  }
+  const pct = (n: number, total: number) => (total ? Math.round((100 * n) / total) : 0);
+  const describe = (w: Week) => {
+    const total = Object.values(w.marks).reduce((a, b) => a + b, 0);
+    if (w.active.size < MIN_GROUP) return null;
+    return {
+      active: w.active.size,
+      moodPct: Object.fromEntries(Object.entries(w.marks).map(([k, n]) => [k, pct(n, total)])),
+      hardPeoplePct: pct(w.hardPeople.size, w.active.size),
+      logsPct: pct(w.logPeople.size, w.active.size),
+      topics: [...w.topics.entries()]
+        .filter(([, people]) => people.size >= 3) // tema só aparece se 3+ pessoas falaram dele
+        .sort((a, b) => b[1].size - a[1].size)
+        .slice(0, 5)
+        .map(([topic, people]) => ({ topic, pct: pct(people.size, w.active.size) })),
+    };
+  };
+  const current = describe(weeks[0]);
+  return {
+    org: orgName,
+    members: ids.length,
+    minGroup: MIN_GROUP,
+    current,
+    previous: describe(weeks[1]),
+    weeks: weeks.map((w, i) => {
+      const d = describe(w);
+      return { label: i === 0 ? "Esta semana" : `${i} sem. atrás`, active: d ? d.active : null, hardPeoplePct: d ? d.hardPeoplePct : null };
+    }).reverse(),
+  };
+}
+
+// ---------------------------------------------------------------------
 // Memória da Nórica (a pessoa vê, desliga e apaga no Perfil)
 // ---------------------------------------------------------------------
 
@@ -745,7 +1065,7 @@ async function deleteAccount(ctx: Ctx) {
   const chatIds = (chats ?? []).map((c) => c.id);
   if (chatIds.length) await admin.from("messages").delete().in("chat_id", chatIds);
   await admin.from("chats").delete().eq("user_id", uid);
-  for (const table of ["mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "usage_events", "user_plans", "user_memory", "safety_plans", "message_feedback", "app_errors"]) {
+  for (const table of ["mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "usage_events", "user_plans", "user_memory", "safety_plans", "message_feedback", "app_errors", "weekly_summaries", "journal_entries", "org_members"]) {
     await admin.from(table).delete().eq("user_id", uid);
   }
   await admin.from("profiles").delete().eq("id", uid);
@@ -827,7 +1147,7 @@ async function health(ctx: Ctx) {
     checks.criptografia = { ok: false, detail: String((e as Error).message) };
   }
 
-  for (const table of ["chats", "messages", "mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "user_plans", "usage_events", "app_errors", "user_memory", "safety_plans", "message_feedback"]) {
+  for (const table of ["chats", "messages", "mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "user_plans", "usage_events", "app_errors", "user_memory", "safety_plans", "message_feedback", "weekly_summaries", "journal_entries", "organizations", "org_members"]) {
     const { error } = await ctx.admin.from(table).select("*", { count: "exact", head: true });
     checks[`tabela_${table}`] = error ? { ok: false, detail: error.message } : { ok: true };
   }
@@ -874,6 +1194,16 @@ const actions: Record<string, (ctx: Ctx, body: Record<string, unknown>) => Promi
   memory_clear: memoryClear,
   safety_plan_get: safetyPlanGet,
   safety_plan_save: safetyPlanSave,
+  weekly_summary: weeklySummary,
+  journal_voice: journalVoice,
+  journal_save: journalSave,
+  journal_list: journalList,
+  journal_delete: journalDelete,
+  prep_conversation: prepConversation,
+  org_status: orgStatus,
+  org_join: orgJoin,
+  org_leave: orgLeave,
+  org_dashboard: orgDashboard,
   health,
 };
 

@@ -17,6 +17,8 @@ import LoginBackground from '@/components/LoginBackground';
 import NeblinaSOS from '@/components/NeblinaSOS';
 import { useAuth } from '@/lib/auth-store';
 import { cacheGet, cacheSet } from '@/lib/cache';
+import { dismissReminderInvite, enableReminder, shouldInviteReminder } from '@/lib/reminder';
+import { Bell, X } from 'lucide-react';
 
 // Luz que percorre a borda dos cards, um card de cada vez (Porto → Arena → Farol → Cofre → Logs).
 // Antes a página inteira era redesenhada a cada passo e a luz era animada por JavaScript, o que
@@ -154,6 +156,41 @@ export default function Home() {
         cacheSet(user.id, 'profileName', n);
       });
   }, [user?.id]);
+
+  // Convite para o lembrete diário (uma vez, a partir da 2ª visita) e registro vindo do widget.
+  const [showInvite, setShowInvite] = useState(false);
+  const [inviteMsg, setInviteMsg] = useState<string | null>(null);
+  const [widgetToast, setWidgetToast] = useState<string | null>(null);
+  useEffect(() => {
+    if (!user?.id) return;
+    setShowInvite(shouldInviteReminder());
+    let last = { value: '', at: 0 };
+    const fromWidget = (value: string | null) => {
+      // O mesmo toque pode chegar pelo link e pelo evento: registra uma vez só.
+      if (!value || (last.value === value && Date.now() - last.at < 3000)) return;
+      last = { value, at: Date.now() };
+      if (value === 'sos') { logMood('sos').catch(() => {}); setMostrarNeblina(true); return; }
+      const mood = toMood(value);
+      if (!mood) return;
+      logMood(mood).catch(() => {});
+      setWidgetToast(mood);
+      setTimeout(() => setWidgetToast(null), 8000);
+    };
+    const param = new URLSearchParams(window.location.search).get('widget');
+    const cleanUrl = () => { try { window.history.replaceState(window.history.state, '', '/'); } catch (_e) {} };
+    if (param) { fromWidget(param); cleanUrl(); }
+    const onWidget = (e: any) => { fromWidget(e.detail); setTimeout(cleanUrl, 300); };
+    window.addEventListener('norica-widget', onWidget);
+    return () => window.removeEventListener('norica-widget', onWidget);
+  }, [user?.id]);
+
+  const acceptInvite = async () => {
+    const r = await enableReminder(20, 0);
+    dismissReminderInvite();
+    if (r === 'ok') { setInviteMsg('Combinado! Todo dia às 20h. Você muda o horário em Perfil → Notificações.'); setTimeout(() => setShowInvite(false), 4000); }
+    else if (r === 'denied') { setInviteMsg('O celular bloqueou as notificações. Dá para liberar em Configurações → Apps → Nórica.'); setTimeout(() => setShowInvite(false), 6000); }
+    else setShowInvite(false);
+  };
 
   useEffect(() => {
     // Esconde o menu global quando a neblina está ativa
@@ -393,6 +430,32 @@ export default function Home() {
           </div>
         </motion.div>
 
+        {/* Convite: lembrete diário */}
+        {showInvite && (
+          <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mx-6 -mt-4 mb-6 relative z-20">
+            <div className="bg-slate-900/60 border border-sky-500/20 rounded-[2.5rem] p-6 shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] space-y-4">
+              <div className="flex items-start gap-3">
+                <div className="w-11 h-11 bg-sky-500/10 rounded-2xl flex items-center justify-center text-sky-300 border border-sky-500/20 shrink-0">
+                  <Bell size={18} />
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-base font-black text-white tracking-tight leading-tight">Quer que eu te lembre todo dia?</h3>
+                  <p className="text-xs text-white/55 font-semibold leading-relaxed mt-1">Um convite gentil por dia para registrar seu mar. Um minuto já faz diferença.</p>
+                </div>
+                <button onClick={() => { dismissReminderInvite(); setShowInvite(false); }} className="p-1 text-white/30" aria-label="Fechar"><X size={16} /></button>
+              </div>
+              {inviteMsg ? (
+                <p className="text-xs font-bold text-sky-300 leading-relaxed">{inviteMsg}</p>
+              ) : (
+                <div className="flex gap-2">
+                  <button onClick={acceptInvite} className="flex-1 py-3 rounded-2xl bg-sky-500 text-slate-950 font-black uppercase tracking-widest text-[10px]">Sim, às 20h</button>
+                  <button onClick={() => { dismissReminderInvite(); setShowInvite(false); }} className="px-5 py-3 rounded-2xl bg-white/5 border border-white/10 text-white/60 font-black uppercase tracking-widest text-[10px]">Agora não</button>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+
       {/* Divisor Visual */}
         <motion.div 
           initial={{ opacity: 0 }}
@@ -593,6 +656,25 @@ export default function Home() {
           </motion.div>
         </div>
       </motion.div>
+      {/* Confirmação do humor marcado pelo widget */}
+      <AnimatePresence>
+        {widgetToast && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}
+            className="fixed top-[calc(env(safe-area-inset-top)+1rem)] inset-x-4 z-[200] max-w-md mx-auto bg-[#0b0f19]/95 border border-emerald-500/30 rounded-[2rem] p-5 shadow-2xl"
+          >
+            <p className="text-sm font-black text-white">Seu mar foi registrado: <span className="text-emerald-400 capitalize">{widgetToast}</span> ✓</p>
+            {widgetToast !== 'calmo' ? (
+              <button onClick={() => { setWidgetToast(null); router.push(`/porto/?humor=${widgetToast}`); }} className="mt-3 text-[10px] font-black text-emerald-400 uppercase tracking-widest underline underline-offset-4">
+                Quer conversar com a Nórica?
+              </button>
+            ) : (
+              <p className="text-xs text-white/50 font-semibold mt-1">Que bom. Aproveite a maré mansa. 🌊</p>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {mostrarNeblina && (
         <NeblinaSOS 
           onClareou={() => {

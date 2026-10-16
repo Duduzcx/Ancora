@@ -13,7 +13,7 @@ import { useAuth } from '@/lib/auth-store';
 import { warmUpServer } from '@/lib/norica-api';
 import { flushOutbox, startOfflineSync } from '@/lib/offline-sync';
 import { reportError, reportSlow } from '@/lib/error-report';
-import { listenReminderTaps } from '@/lib/reminder';
+import { countAppOpen, listenReminderTaps, refreshEngagementNotifications } from '@/lib/reminder';
 
 const publicPages = ['/auth', '/auth/signup', '/auth/forgot-password', '/privacidade', '/excluir-conta'];
 
@@ -37,10 +37,22 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
   const openedRef = useRef(false);
   pathnameRef.current = pathname;
 
+  // Widget "Como está o seu mar?" (com.zcx.norica://humor/<humor>): a Início registra e confirma.
+  const openFromWidget = (url: string): boolean => {
+    const m = url.match(/:\/\/humor\/([a-z]+)/);
+    if (!m) return false;
+    if (m[1] !== 'abrir') {
+      try { window.dispatchEvent(new CustomEvent('norica-widget', { detail: m[1] })); } catch (_e) {}
+    }
+    router.push(m[1] === 'abrir' ? '/' : `/?widget=${m[1]}`);
+    return true;
+  };
+
   // Ouvintes registrados UMA vez (antes eram recriados a cada troca de tela,
   // o que podia tentar usar o mesmo código de login duas vezes e falhar).
   useEffect(() => {
     setIsMounted(true);
+    countAppOpen();
     log(`Montado! Pathname inicial: "${pathname}"`);
 
     const listeners: Promise<{ remove: () => void }>[] = [];
@@ -50,6 +62,7 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
       listeners.push(App.addListener('appUrlOpen', async (event: any) => {
         log(`DeepLink aberto: ${event.url}`);
         if (!(event.url.includes('com.zcx.norica') || event.url.includes('com.zcx.ancora'))) return;
+        if (openFromWidget(event.url)) return;
         if (!(event.url.includes('access_token') || event.url.includes('code='))) return;
         try {
           const url = new URL(event.url.replace('#', '?'));
@@ -70,6 +83,9 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
         } catch (_e) {}
         router.push('/');
       }));
+
+      // App aberto do zero por um toque no widget.
+      App.getLaunchUrl().then((launch) => { if (launch?.url) openFromWidget(launch.url); }).catch(() => {});
 
       // Mantém o login vivo: renova o token quando o app volta para a tela.
       listeners.push(App.addListener('appStateChange', ({ isActive }) => {
@@ -132,6 +148,7 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
         .forEach((href) => { try { router.prefetch(href); } catch (_e) {} });
       warmUpServer(userId);
       startOfflineSync(); // envia Logs/humor marcados sem internet
+      refreshEngagementNotifications().catch(() => {}); // resumo de domingo e "sentimos sua falta"
     }, 400);
     return () => clearTimeout(t);
   }, [userId, router]);
