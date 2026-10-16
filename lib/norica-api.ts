@@ -70,9 +70,10 @@ export type WeeklySummary = {
   summary: string | null;
   stats: { moods: Record<string, number>; daysWithLogs: number; conversations: number; journalEntries: number };
 };
-export type JournalKind = 'voz' | 'gratidao' | 'conversa' | 'aterramento';
+export type JournalKind = 'voz' | 'gratidao' | 'conversa' | 'aterramento' | 'noite';
 export type JournalEntry = { id: string; kind: JournalKind; mood: string | null; created_at: string; summary: string; content: string; title?: string };
-export type OrgInfo = { name: string; role: 'member' | 'admin' } | null;
+export type OrgSector = { id: string; name: string };
+export type OrgInfo = { name: string; role: 'member' | 'admin'; sectorId?: string | null; sectorLabel?: string; sectors?: OrgSector[] } | null;
 export type OrgWeek = {
   active: number;
   moodPct: Record<string, number>;
@@ -80,12 +81,35 @@ export type OrgWeek = {
   logsPct: number;
   topics: { topic: string; pct: number }[];
 };
+export type OrgSectorRow = { id: string; name: string; members: number; current: OrgWeek | null; previous: OrgWeek | null };
+export type AchievementStats = {
+  moodCount: number; moodDays: number; habitDays: number; careDays: number; bestStreak: number; currentStreak: number;
+  chats: number; voice: number; gratidao: number; conversa: number; aterramento: number; noite: number; arena: number; plan: number; weeks: number;
+};
+export type MonthlyReport = {
+  name: string | null;
+  start: string;
+  end: string;
+  series: { day: string; mood: string | null }[];
+  moodCount: Record<string, number>;
+  habitDays: number;
+  habitFreq: Record<string, number>;
+  topics: string[];
+  journalCount: number;
+  conversations: number;
+  letter: string | null;
+};
 export type OrgDashboard = {
   org: string;
+  sectorLabel: string;
   members: number;
   minGroup: number;
   current: OrgWeek | null;
   previous: OrgWeek | null;
+  sectors: OrgSectorRow[];
+  sectorList: OrgSector[];
+  alerts: string[];
+  actions: string[];
   weeks: { label: string; active: number | null; hardPeoplePct: number | null }[];
 };
 
@@ -172,6 +196,13 @@ export const noricaApi = {
   orgJoin: (code: string) => call<{ org: OrgInfo }>('org_join', { code }),
   orgLeave: () => call<{ ok: boolean }>('org_leave'),
   orgDashboard: () => call<OrgDashboard>('org_dashboard'),
+  orgSetSector: (sectorId: string | null) => call<{ org: OrgInfo }>('org_set_sector', { sectorId }),
+  orgSectorCreate: (name: string) => call<{ sectors: OrgSector[] }>('org_sector_create', { name }),
+  orgSectorDelete: (id: string) => call<{ sectors: OrgSector[] }>('org_sector_delete', { id }),
+  orgSetLabel: (label: string) => call<{ sectorLabel: string }>('org_set_label', { label }),
+
+  achievements: () => call<{ stats: AchievementStats }>('achievements'),
+  monthlyReport: (refresh = false) => call<MonthlyReport>('monthly_report', { refresh }),
 
   async transcribe(blob: Blob): Promise<string> {
     const supabase = createClient();

@@ -7,8 +7,8 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Building2, Loader2, ShieldCheck, Users, TrendingUp, TrendingDown, Minus, Lock } from 'lucide-react';
-import { noricaApi, type OrgDashboard, type OrgWeek } from '@/lib/norica-api';
+import { ArrowLeft, Building2, Loader2, ShieldCheck, Users, TrendingUp, TrendingDown, Minus, Lock, AlertTriangle, Lightbulb, Plus, X, Download, Layers } from 'lucide-react';
+import { noricaApi, type OrgDashboard, type OrgSector } from '@/lib/norica-api';
 import { MOOD_COLOR } from '@/lib/farol';
 
 const MOODS: { key: string; label: string }[] = [
@@ -23,9 +23,8 @@ export default function PainelPage() {
   const [data, setData] = useState<OrgDashboard | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    noricaApi.orgDashboard().then(setData).catch((err) => setError(err?.message || 'Não foi possível carregar o painel.'));
-  }, []);
+  const load = () => noricaApi.orgDashboard().then(setData).catch((err) => setError(err?.message || 'Não foi possível carregar o painel.'));
+  useEffect(() => { load(); }, []);
 
   const cur = data?.current ?? null;
   const prev = data?.previous ?? null;
@@ -126,6 +125,29 @@ export default function PainelPage() {
               </>
             )}
 
+            {(data.alerts.length > 0 || data.actions.length > 0) && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {data.alerts.length > 0 && (
+                  <section className="bg-amber-400/5 border border-amber-300/20 rounded-[2.5rem] p-6 space-y-3" data-testid="alertas">
+                    <h2 className="flex items-center gap-2 text-sm font-black text-amber-200 uppercase tracking-tighter"><AlertTriangle size={16} /> Pontos de atenção</h2>
+                    <ul className="space-y-2">
+                      {data.alerts.map((a) => <li key={a} className="text-[13px] text-white/80 font-semibold leading-snug">{a}</li>)}
+                    </ul>
+                  </section>
+                )}
+                {data.actions.length > 0 && (
+                  <section className="bg-emerald-500/5 border border-emerald-400/20 rounded-[2.5rem] p-6 space-y-3">
+                    <h2 className="flex items-center gap-2 text-sm font-black text-emerald-300 uppercase tracking-tighter"><Lightbulb size={16} /> Ações sugeridas</h2>
+                    <ul className="space-y-2">
+                      {data.actions.map((a) => <li key={a} className="text-[13px] text-white/80 font-semibold leading-snug">• {a}</li>)}
+                    </ul>
+                  </section>
+                )}
+              </div>
+            )}
+
+            <Setores data={data} onChanged={load} />
+
             <Card title="Últimas 4 semanas" subtitle="Pessoas ativas e quantas tiveram algum dia difícil">
               <div className="space-y-3">
                 {data.weeks.map((w) => (
@@ -190,6 +212,158 @@ function Stat({ label, value, prev, hint, goodWhenDown = false }: { label: strin
           <Icon size={12} /> {diff === 0 ? 'igual à semana anterior' : `${diff > 0 ? '+' : ''}${diff} pontos vs. semana anterior`}
         </p>
       )}
+    </div>
+  );
+}
+
+const LABELS = ['Setor', 'Turma', 'Equipe', 'Departamento', 'Unidade'];
+const plural = (l: string) => (l === 'Setor' ? 'Setores' : `${l}s`);
+const feminine = (l: string) => ['Turma', 'Equipe', 'Unidade'].includes(l);
+
+function toCsv(d: OrgDashboard) {
+  const head = [d.sectorLabel, 'Participantes', 'Ativos na semana', '% dia difícil', '% semana anterior', '% calmo', '% ansioso', '% agitado', '% S.O.S', '% cuidaram nos Logs', 'Assuntos'];
+  const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const rows = [
+    ['Geral', d.members, d.current?.active ?? '', d.current?.hardPeoplePct ?? '', d.previous?.hardPeoplePct ?? '', d.current?.moodPct.calmo ?? '', d.current?.moodPct.ansioso ?? '', d.current?.moodPct.agitado ?? '', d.current?.moodPct.sos ?? '', d.current?.logsPct ?? '', d.current?.topics.map((t) => t.topic).join('; ') ?? ''],
+    ...d.sectors.map((r) => [r.name, r.members, r.current?.active ?? 'oculto', r.current?.hardPeoplePct ?? '', r.previous?.hardPeoplePct ?? '', r.current?.moodPct.calmo ?? '', r.current?.moodPct.ansioso ?? '', r.current?.moodPct.agitado ?? '', r.current?.moodPct.sos ?? '', r.current?.logsPct ?? '', r.current?.topics.map((t) => t.topic).join('; ') ?? '']),
+  ];
+  return '\uFEFF' + [head, ...rows].map((r) => r.map(esc).join(';')).join('\n');
+}
+
+async function exportCsv(d: OrgDashboard) {
+  const name = `norica-painel-${new Date().toLocaleDateString('en-CA')}.csv`;
+  const csv = toCsv(d);
+  try {
+    const { Capacitor } = await import('@capacitor/core');
+    if (Capacitor.isNativePlatform()) {
+      const [{ Filesystem, Directory, Encoding }, { Share }] = await Promise.all([import('@capacitor/filesystem'), import('@capacitor/share')]);
+      const saved = await Filesystem.writeFile({ path: name, data: csv, directory: Directory.Cache, encoding: Encoding.UTF8 });
+      await Share.share({ title: 'Painel Nórica', url: saved.uri, dialogTitle: 'Exportar planilha' });
+      return;
+    }
+  } catch (_e) {}
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+function Setores({ data, onChanged }: { data: OrgDashboard; onChanged: () => void }) {
+  const [list, setList] = useState<OrgSector[]>(data.sectorList);
+  const [label, setLabel] = useState(data.sectorLabel || 'Setor');
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [manage, setManage] = useState(false);
+  useEffect(() => { setList(data.sectorList); setLabel(data.sectorLabel || 'Setor'); }, [data]);
+
+  const run = async (fn: () => Promise<void>) => {
+    setBusy(true); setErr(null);
+    try { await fn(); onChanged(); } catch (e: any) { setErr(e?.message || 'Não foi possível salvar.'); } finally { setBusy(false); }
+  };
+  const add = () => run(async () => { const r = await noricaApi.orgSectorCreate(name.trim()); setList(r.sectors); setName(''); });
+  const del = (id: string) => run(async () => { const r = await noricaApi.orgSectorDelete(id); setList(r.sectors); });
+  const changeLabel = (l: string) => run(async () => { await noricaApi.orgSetLabel(l); setLabel(l); });
+
+  const avg = data.current?.hardPeoplePct ?? null;
+
+  return (
+    <section className="bg-white/5 border border-white/10 rounded-[2.5rem] p-6 space-y-5" data-testid="setores">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="flex items-center gap-2 text-sm font-black text-white uppercase tracking-tighter"><Layers size={16} className="text-sky-300" /> Por {label.toLowerCase()}</h2>
+          <p className="text-[11px] text-white/45 font-semibold mt-1">Cada pessoa escolhe {feminine(label) ? 'a própria' : 'o próprio'} {label.toLowerCase()} no Perfil. Grupos com menos de {data.minGroup} pessoas ativas entram em &quot;Outros&quot;.</p>
+        </div>
+        <button onClick={() => exportCsv(data)} className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-[10px] font-black uppercase tracking-widest text-white/70">
+          <Download size={12} /> CSV
+        </button>
+      </div>
+
+      {data.sectors.length === 0 ? (
+        <p className="text-sm text-white/50 font-semibold">
+          {list.length === 0 ? `Crie ${plural(label).toLowerCase()} abaixo (ex.: Vendas, RH, Tecnologia ou 3º A, 3º B) para comparar como cada grupo está.` : `Ainda não há ${plural(label).toLowerCase()} com ${data.minGroup}+ pessoas ativas nesta semana.`}
+        </p>
+      ) : (
+        <div className="space-y-3">
+          {data.sectors.map((r) => {
+            const c = r.current;
+            const diff = c && r.previous ? c.hardPeoplePct - r.previous.hardPeoplePct : null;
+            const above = c && avg !== null ? c.hardPeoplePct - avg : 0;
+            return (
+              <div key={r.id} className="p-4 rounded-2xl bg-black/25 border border-white/5 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-black text-white">{r.name}</span>
+                  <span className="text-[10px] font-black text-white/45 uppercase tracking-widest">{c ? `${c.active} ativas` : 'oculto'} · {r.members} no total</span>
+                </div>
+                {c ? (
+                  <>
+                    <div className="flex h-2.5 rounded-full overflow-hidden bg-white/5 gap-[2px]" role="img" aria-label={MOODS.map((m) => `${m.label} ${c.moodPct[m.key] ?? 0}%`).join(', ')}>
+                      {MOODS.map((m) => (c.moodPct[m.key] ?? 0) > 0 && (
+                        <div key={m.key} style={{ width: `${c.moodPct[m.key]}%`, background: MOOD_COLOR[m.key as keyof typeof MOOD_COLOR] }} />
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                      <Mini v={`${c.hardPeoplePct}%`} l="dia difícil" tone={above >= 15 ? 'warn' : undefined} sub={diff === null || diff === 0 ? undefined : `${diff > 0 ? '+' : ''}${diff} pts`} />
+                      <Mini v={`${c.moodPct.ansioso ?? 0}%`} l="ansioso" />
+                      <Mini v={`${c.logsPct}%`} l="nos Logs" />
+                    </div>
+                    {c.topics.length > 0 && <p className="text-[11px] text-white/50 font-semibold">Assuntos: <span className="capitalize">{c.topics.map((t) => t.topic).join(', ')}</span></p>}
+                  </>
+                ) : (
+                  <p className="text-[11px] text-white/35 font-semibold">Menos de {data.minGroup} pessoas ativas nesta semana — números ocultos.</p>
+                )}
+              </div>
+            );
+          })}
+          <div className="flex flex-wrap gap-3 pt-1">
+            {MOODS.map((m) => (
+              <span key={m.key} className="flex items-center gap-1.5 text-[10px] font-bold text-white/50">
+                <span className="w-2 h-2 rounded-full" style={{ background: MOOD_COLOR[m.key as keyof typeof MOOD_COLOR] }} /> {m.label}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="border-t border-white/5 pt-4 space-y-3">
+        <button onClick={() => setManage((v) => !v)} className="text-[10px] font-black uppercase tracking-widest text-sky-300">
+          {manage ? 'Fechar' : `Gerenciar ${plural(label).toLowerCase()} (${list.length})`}
+        </button>
+        {manage && (
+          <div className="space-y-3">
+            <div className="flex flex-wrap gap-2">
+              {LABELS.map((l) => (
+                <button key={l} disabled={busy} onClick={() => changeLabel(l)} className={`px-3 py-1.5 rounded-full text-[10px] font-black border ${label === l ? 'bg-sky-500/20 border-sky-400/40 text-sky-200' : 'border-white/10 text-white/50'}`}>{l}</button>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {list.map((sec) => (
+                <span key={sec.id} className="flex items-center gap-1.5 pl-3 pr-1.5 py-1.5 rounded-full bg-white/5 border border-white/10 text-xs font-bold text-white/80">
+                  {sec.name}
+                  <button disabled={busy} onClick={() => del(sec.id)} aria-label={`Remover ${sec.name}`} className="p-0.5 rounded-full text-white/40 hover:text-rose-300"><X size={12} /></button>
+                </span>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <input value={name} onChange={(e) => setName(e.target.value)} maxLength={40} placeholder={label === 'Turma' ? 'Ex.: 3º ano A' : 'Ex.: Vendas'} className="flex-1 bg-black/30 border border-white/10 rounded-2xl px-4 py-3 text-sm text-white outline-none focus:border-sky-400/50 placeholder:text-white/25" />
+              <button disabled={busy || !name.trim()} onClick={add} className="px-4 rounded-2xl bg-sky-400 text-slate-950 font-black disabled:opacity-40 flex items-center gap-1 text-[10px] uppercase tracking-widest">
+                {busy ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Criar
+              </button>
+            </div>
+            {err && <p className="text-xs font-bold text-rose-300">{err}</p>}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function Mini({ v, l, sub, tone }: { v: string; l: string; sub?: string; tone?: 'warn' }) {
+  return (
+    <div className={`p-2 rounded-xl border ${tone === 'warn' ? 'bg-amber-400/10 border-amber-300/30' : 'bg-white/5 border-white/5'}`}>
+      <p className="text-lg font-black text-white tabular-nums leading-none">{v}</p>
+      <p className="text-[9px] font-black text-white/45 uppercase tracking-widest mt-1">{l}</p>
+      {sub && <p className="text-[9px] font-bold text-white/40 mt-0.5">{sub}</p>}
     </div>
   );
 }

@@ -2,9 +2,10 @@
 
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Compass, Wind, ShieldAlert } from 'lucide-react';
+import { ArrowLeft, Compass, Wind, ShieldAlert, Moon } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import AnimatedBackground from '@/components/AnimatedBackground';
+import SonsAmbiente from '@/components/SonsAmbiente';
 
 type Phase = 'inspira' | 'prende' | 'expira';
 
@@ -114,7 +115,7 @@ export default function RespiracaoPage() {
   };
 
   return (
-    <main className="min-h-[100dvh] bg-[#021013] relative flex flex-col items-center justify-between overflow-hidden overscroll-none touch-none py-12 px-6 select-none font-sans">
+    <main className="min-h-[100dvh] bg-[#021013] relative flex flex-col items-center justify-between overflow-x-hidden py-12 px-6 select-none font-sans">
       <AnimatedBackground subtle={true} />
       
       {/* Background radial soft ambient glow */}
@@ -241,6 +242,13 @@ export default function RespiracaoPage() {
               );
             })}
           </div>
+
+          <div className="max-w-xs mx-auto w-full touch-auto text-left">
+            <SonsAmbiente compact />
+          </div>
+          <button onClick={() => router.push('/noite/')} className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-indigo-300/80">
+            <Moon size={12} /> Sem sono? Modo noite
+          </button>
         </div>
       </motion.div>
     </main>

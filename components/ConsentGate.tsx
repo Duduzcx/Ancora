@@ -34,6 +34,7 @@ export default function ConsentGate({ userId }: { userId: string | null }) {
       if (error) return; // tabela ainda não migrada: não bloqueia o app
       if (data?.version === CONSENT_VERSION) {
         try { localStorage.setItem(LOCAL_KEY, userId); } catch (_e) {}
+        try { window.dispatchEvent(new Event('norica-consent-ok')); } catch (_e) {}
       } else {
         setOpen(true);
       }
@@ -52,6 +53,7 @@ export default function ConsentGate({ userId }: { userId: string | null }) {
     if (error) { setError('Não foi possível salvar. Verifique sua conexão.'); return; }
     try { localStorage.setItem(LOCAL_KEY, userId); } catch (_e) {}
     setOpen(false);
+    try { window.dispatchEvent(new Event('norica-consent-ok')); } catch (_e) {} // abre o começo guiado
   };
 
   const decline = async () => {

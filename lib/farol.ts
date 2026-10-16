@@ -19,7 +19,7 @@ export const MOOD_COLOR: Record<Mood, string> = {
 };
 
 // Mesmos hábitos da aba Logs (ids 1–21).
-const TASK_LABELS: Record<number, string> = {
+export const TASK_LABELS: Record<number, string> = {
   1: 'Bebi água', 2: 'Comi algo nutritivo', 3: 'Tomei banho', 4: 'Vesti roupa limpa',
   5: 'Tomei medicamentos', 6: 'Fiz um alongamento', 7: 'Respirei fundo', 8: 'Fiquei longe das telas',
   9: 'Anotei uma gratidão', 10: 'Fiz 5 minutos de silêncio', 11: 'Reconheci o meu esforço',

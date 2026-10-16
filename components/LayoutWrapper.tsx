@@ -9,6 +9,7 @@ import { Capacitor } from '@capacitor/core';
 import { motion, AnimatePresence } from 'framer-motion';
 import NavigationDock from '@/components/NavigationDock';
 import ConsentGate from '@/components/ConsentGate';
+import Onboarding from '@/components/Onboarding';
 import { useAuth } from '@/lib/auth-store';
 import { warmUpServer } from '@/lib/norica-api';
 import { flushOutbox, startOfflineSync } from '@/lib/offline-sync';
@@ -53,13 +54,6 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
   useEffect(() => {
     setIsMounted(true);
     countAppOpen();
-    // Modo leve para celulares mais simples (até 4 núcleos ou 4 GB): menos efeitos contínuos.
-    try {
-      const nav = navigator as any;
-      if ((nav.hardwareConcurrency && nav.hardwareConcurrency <= 4) || (nav.deviceMemory && nav.deviceMemory <= 4)) {
-        document.documentElement.dataset.lite = '1';
-      }
-    } catch (_e) {}
     log(`Montado! Pathname inicial: "${pathname}"`);
 
     const listeners: Promise<{ remove: () => void }>[] = [];
@@ -151,7 +145,7 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
   useEffect(() => {
     if (!userId) return;
     const t = setTimeout(() => {
-      ['/porto/', '/farol/', '/perfil/', '/log/', '/arena/', '/cofre/', '/respiracao/', '/planos/']
+      ['/porto/', '/farol/', '/perfil/', '/log/', '/arena/', '/cofre/', '/respiracao/', '/planos/', '/noite/']
         .forEach((href) => { try { router.prefetch(href); } catch (_e) {} });
       warmUpServer(userId);
       startOfflineSync(); // envia Logs/humor marcados sem internet
@@ -197,6 +191,8 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
       </AnimatePresence>
       {/* Consentimento LGPD para dados emocionais (uma vez por conta) */}
       {!isPublic && <ConsentGate userId={session?.user?.id ?? null} />}
+      {/* Começo guiado (uma vez por conta, depois do consentimento) */}
+      {!isPublic && !loading && <Onboarding />}
     </div>
   );
 }

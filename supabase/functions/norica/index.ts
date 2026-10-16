@@ -32,6 +32,7 @@ import {
   CONVERSATION_PREP_PROMPT,
   VOICE_JOURNAL_PROMPT,
   WEEKLY_PROMPT,
+  MONTHLY_PROMPT,
 } from "../_shared/safety.ts";
 
 const corsHeaders = {
@@ -762,7 +763,7 @@ async function weeklySummary(ctx: Ctx, body: Record<string, unknown>) {
 // Diário (voz, gratidão, preparação de conversa, aterramento)
 // ---------------------------------------------------------------------
 
-const JOURNAL_KINDS = ["voz", "gratidao", "conversa", "aterramento"];
+const JOURNAL_KINDS = ["voz", "gratidao", "conversa", "aterramento", "noite"];
 
 async function journalEntryOut(row: { id: string; kind: string; content: string; summary: string | null; mood: string | null; created_at: string }) {
   const summary = row.summary ? await decrypt(row.summary) : "";
@@ -863,24 +864,188 @@ async function prepConversation(_ctx: Ctx, body: Record<string, unknown>) {
 }
 
 // ---------------------------------------------------------------------
+// Conquistas da jornada (calculadas a partir dos registros; nada novo é guardado)
+// ---------------------------------------------------------------------
+
+function longestRun(days: string[]): { best: number; current: number } {
+  const set = [...new Set(days)].sort();
+  let best = 0;
+  let run = 0;
+  let prev = "";
+  for (const d of set) {
+    run = prev && addDays(prev, 1) === d ? run + 1 : 1;
+    best = Math.max(best, run);
+    prev = d;
+  }
+  const today = brtDay();
+  let current = 0;
+  const has = new Set(set);
+  let cursor = has.has(today) ? today : addDays(today, -1);
+  while (has.has(cursor)) { current++; cursor = addDays(cursor, -1); }
+  return { best, current };
+}
+
+async function achievements(ctx: Ctx) {
+  const count = async (table: string, filter?: (q: any) => any) => {
+    let q = ctx.db.from(table).select("*", { count: "exact", head: true }).eq("user_id", ctx.userId);
+    if (filter) q = filter(q);
+    const { count: n } = await q;
+    return n ?? 0;
+  };
+  const [{ data: moods }, { data: habits }, chats, voice, gratidao, conversa, aterramento, noite, arena, plan, weeks] = await Promise.all([
+    ctx.db.from("mood_logs").select("created_at").eq("user_id", ctx.userId).limit(2000),
+    ctx.db.from("habit_logs").select("day, progress").eq("user_id", ctx.userId).limit(2000),
+    count("chats"),
+    count("journal_entries", (q) => q.eq("kind", "voz")),
+    count("journal_entries", (q) => q.eq("kind", "gratidao")),
+    count("journal_entries", (q) => q.eq("kind", "conversa")),
+    count("journal_entries", (q) => q.eq("kind", "aterramento")),
+    count("journal_entries", (q) => q.eq("kind", "noite")),
+    ctx.admin.from("usage_events").select("*", { count: "exact", head: true }).eq("user_id", ctx.userId).eq("kind", "arena_feedback").then((r) => r.count ?? 0),
+    count("safety_plans"),
+    count("weekly_summaries"),
+  ]);
+  const moodDays = [...new Set((moods ?? []).map((m) => brtDay(new Date(new Date(m.created_at).getTime() - 3 * 3600_000))))];
+  const habitDays = (habits ?? []).filter((h) => Number(h.progress) > 0).map((h) => h.day as string);
+  const careDays = [...new Set([...moodDays, ...habitDays])];
+  const streak = longestRun(careDays);
+  return {
+    stats: {
+      moodCount: (moods ?? []).length,
+      moodDays: moodDays.length,
+      habitDays: habitDays.length,
+      careDays: careDays.length,
+      bestStreak: streak.best,
+      currentStreak: streak.current,
+      chats,
+      voice,
+      gratidao,
+      conversa,
+      aterramento,
+      noite,
+      arena,
+      plan: plan > 0 ? 1 : 0,
+      weeks,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------
+// Relatório mensal (Pro) — dados para o PDF que a pessoa leva ao psicólogo
+// ---------------------------------------------------------------------
+
+async function monthlyReport(ctx: Ctx, body: Record<string, unknown>) {
+  const info = await getPlan(ctx.admin, ctx.userId);
+  if (info.effective !== "pro") throw new HttpError(402, "O relatório mensal faz parte do Nórica Pro");
+  const today = brtDay();
+  const start = addDays(today, -29);
+  const [{ data: moods }, { data: habits }, { data: days }, { data: chats }, { data: journal }] = await Promise.all([
+    ctx.db.from("mood_logs").select("mood, created_at").eq("user_id", ctx.userId).gte("created_at", dayStartIso(start)).order("created_at", { ascending: true }),
+    ctx.db.from("habit_logs").select("day, progress, completed").eq("user_id", ctx.userId).gte("day", start),
+    ctx.db.from("daily_logs").select("date, humor, assunto").eq("user_id", ctx.userId).gte("date", start),
+    ctx.db.from("chats").select("title").eq("user_id", ctx.userId).gte("created_at", dayStartIso(start)).limit(40),
+    ctx.db.from("journal_entries").select("kind, summary, mood, created_at").eq("user_id", ctx.userId).gte("created_at", dayStartIso(start)).limit(30),
+  ]);
+
+  // Humor por dia (o último marcado vence; sem marcação, vale o resumo do Porto).
+  const byDay: Record<string, string> = {};
+  for (const d of days ?? []) if (d.humor) byDay[d.date] = d.humor;
+  for (const m of moods ?? []) byDay[brtDay(new Date(new Date(m.created_at).getTime() - 3 * 3600_000))] = m.mood;
+  const series = Array.from({ length: 30 }, (_, i) => {
+    const day = addDays(start, i);
+    return { day, mood: byDay[day] ?? null };
+  });
+  const moodCount: Record<string, number> = { calmo: 0, ansioso: 0, agitado: 0, sos: 0 };
+  for (const p of series) if (p.mood && p.mood in moodCount) moodCount[p.mood]++;
+  const habitFreq: Record<string, number> = {};
+  for (const h of habits ?? []) for (const id of (h.completed ?? []) as number[]) habitFreq[id] = (habitFreq[id] ?? 0) + 1;
+  const habitDays = (habits ?? []).filter((h) => Number(h.progress) > 0).length;
+  const topics: string[] = [];
+  for (const d of days ?? []) if (d.assunto) topics.push(String(d.assunto).toLowerCase());
+  for (const c of chats ?? []) {
+    const t = await decrypt(c.title);
+    if (t && t !== "Nova conversa" && t !== "Momento difícil") topics.push(t.toLowerCase());
+  }
+  const topicCount = new Map<string, number>();
+  for (const t of topics) topicCount.set(t, (topicCount.get(t) ?? 0) + 1);
+  const topTopics = [...topicCount.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([t]) => t);
+  const journalLines: string[] = [];
+  for (const j of (journal ?? []).slice(0, 12)) {
+    const sm = j.summary ? await decrypt(j.summary) : "";
+    if (sm) journalLines.push(`${j.created_at.slice(0, 10)} (${j.kind}): ${sm.slice(0, 160)}`);
+  }
+
+  const month = `${today.slice(0, 7)}-01`;
+  let letter = "";
+  const { data: cached } = await ctx.db.from("monthly_reports").select("content, created_at").eq("user_id", ctx.userId).eq("month", month).maybeSingle();
+  if (cached && body.refresh !== true && brtDay(new Date(new Date(cached.created_at).getTime() - 3 * 3600_000)) === today) {
+    letter = await decrypt(cached.content);
+  } else {
+    const facts = [
+      `Período: ${start} a ${today}.`,
+      `Dias por humor: ${Object.entries(moodCount).map(([k, n]) => `${k} ${n}`).join(", ")}; dias sem registro: ${series.filter((p) => !p.mood).length}.`,
+      `Primeira quinzena: ${series.slice(0, 15).map((p) => p.mood ?? "-").join(" ")}`,
+      `Segunda quinzena: ${series.slice(15).map((p) => p.mood ?? "-").join(" ")}`,
+      `Dias com hábitos marcados: ${habitDays}.`,
+      `Assuntos: ${topTopics.join("; ") || "nenhum"}.`,
+      journalLines.length ? `Diário:\n${journalLines.join("\n")}` : "",
+    ].filter(Boolean).join("\n");
+    try {
+      letter = await groqChat([{ role: "system", content: MONTHLY_PROMPT }, { role: "user", content: facts }], { temperature: 0.4, maxTokens: 500 });
+    } catch (e) {
+      console.error(e);
+    }
+    if (letter) {
+      await ctx.db.from("monthly_reports").upsert({ user_id: ctx.userId, month, content: await encrypt(letter), created_at: new Date().toISOString() }, { onConflict: "user_id,month" });
+    }
+  }
+  return {
+    name: await personName(ctx),
+    start,
+    end: today,
+    series,
+    moodCount,
+    habitDays,
+    habitFreq,
+    topics: topTopics,
+    journalCount: (journal ?? []).length,
+    conversations: (chats ?? []).length,
+    letter: letter || null,
+  };
+}
+
+// ---------------------------------------------------------------------
 // Parceiros (B2B): instituição e painel com números agregados e anônimos
 // ---------------------------------------------------------------------
 
 const MIN_GROUP = 5; // abaixo disso, nenhum número é mostrado (evita identificar alguém)
 
-async function myMembership(ctx: Ctx, role?: "admin") {
-  let query = ctx.admin.from("org_members").select("org_id, role").eq("user_id", ctx.userId);
+type Membership = { orgId: string; name: string; role: string; sectorId: string | null; sectorLabel: string };
+
+async function myMembership(ctx: Ctx, role?: "admin"): Promise<Membership | null> {
+  let query = ctx.admin.from("org_members").select("org_id, role, sector_id").eq("user_id", ctx.userId);
   if (role) query = query.eq("role", role);
   const { data: rows } = await query.order("role", { ascending: true }).limit(1);
   const m = rows?.[0];
   if (!m) return null;
-  const { data: org } = await ctx.admin.from("organizations").select("id, name").eq("id", m.org_id).maybeSingle();
-  return org ? { orgId: org.id as string, name: org.name as string, role: m.role as string } : null;
+  const { data: org } = await ctx.admin.from("organizations").select("id, name, sector_label").eq("id", m.org_id).maybeSingle();
+  return org
+    ? { orgId: org.id as string, name: org.name as string, role: m.role as string, sectorId: (m.sector_id as string) ?? null, sectorLabel: (org.sector_label as string) || "Setor" }
+    : null;
+}
+
+async function sectorsOf(ctx: Ctx, orgId: string) {
+  const { data } = await ctx.admin.from("org_sectors").select("id, name").eq("org_id", orgId).order("name", { ascending: true });
+  return (data ?? []) as { id: string; name: string }[];
+}
+
+async function orgOut(ctx: Ctx, m: Membership | null) {
+  if (!m) return { org: null };
+  return { org: { name: m.name, role: m.role, sectorId: m.sectorId, sectorLabel: m.sectorLabel, sectors: await sectorsOf(ctx, m.orgId) } };
 }
 
 async function orgStatus(ctx: Ctx) {
-  const m = await myMembership(ctx);
-  return { org: m ? { name: m.name, role: m.role } : null };
+  return orgOut(ctx, await myMembership(ctx));
 }
 
 async function orgJoin(ctx: Ctx, body: Record<string, unknown>) {
@@ -891,7 +1056,19 @@ async function orgJoin(ctx: Ctx, body: Record<string, unknown>) {
   await ctx.admin.from("org_members").delete().eq("user_id", ctx.userId).neq("org_id", org.id).eq("role", "member");
   const { error } = await ctx.admin.from("org_members").upsert({ org_id: org.id, user_id: ctx.userId }, { onConflict: "org_id,user_id", ignoreDuplicates: true });
   if (error) throw new HttpError(500, "Não foi possível entrar agora");
-  return { org: { name: org.name, role: "member" } };
+  return orgOut(ctx, await myMembership(ctx));
+}
+
+async function orgSetSector(ctx: Ctx, body: Record<string, unknown>) {
+  const m = await myMembership(ctx);
+  if (!m) throw new HttpError(404, "Você não faz parte de uma instituição");
+  const sectorId = typeof body.sectorId === "string" && body.sectorId ? body.sectorId : null;
+  if (sectorId) {
+    const { data: sec } = await ctx.admin.from("org_sectors").select("id").eq("id", sectorId).eq("org_id", m.orgId).maybeSingle();
+    if (!sec) throw new HttpError(404, "Setor não encontrado");
+  }
+  await ctx.admin.from("org_members").update({ sector_id: sectorId }).eq("org_id", m.orgId).eq("user_id", ctx.userId);
+  return orgOut(ctx, await myMembership(ctx));
 }
 
 async function orgLeave(ctx: Ctx) {
@@ -899,12 +1076,73 @@ async function orgLeave(ctx: Ctx) {
   return { ok: true };
 }
 
+async function orgSectorCreate(ctx: Ctx, body: Record<string, unknown>) {
+  const me = await myMembership(ctx, "admin");
+  if (!me) throw new HttpError(403, "Só a equipe da instituição pode criar setores");
+  const name = cleanText(body.name, 40);
+  const { error } = await ctx.admin.from("org_sectors").insert({ org_id: me.orgId, name });
+  if (error) throw new HttpError(409, "Já existe um setor com esse nome");
+  return { sectors: await sectorsOf(ctx, me.orgId) };
+}
+
+async function orgSectorDelete(ctx: Ctx, body: Record<string, unknown>) {
+  const me = await myMembership(ctx, "admin");
+  if (!me) throw new HttpError(403, "Só a equipe da instituição pode remover setores");
+  await ctx.admin.from("org_members").update({ sector_id: null }).eq("org_id", me.orgId).eq("sector_id", String(body.id ?? ""));
+  await ctx.admin.from("org_sectors").delete().eq("org_id", me.orgId).eq("id", String(body.id ?? ""));
+  return { sectors: await sectorsOf(ctx, me.orgId) };
+}
+
+const SECTOR_LABELS = ["Setor", "Turma", "Equipe", "Departamento", "Unidade"];
+async function orgSetLabel(ctx: Ctx, body: Record<string, unknown>) {
+  const me = await myMembership(ctx, "admin");
+  if (!me) throw new HttpError(403, "Só a equipe da instituição pode mudar isso");
+  const label = String(body.label ?? "");
+  if (!SECTOR_LABELS.includes(label)) throw new HttpError(400, "Nome de grupo inválido");
+  await ctx.admin.from("organizations").update({ sector_label: label }).eq("id", me.orgId);
+  return { sectorLabel: label };
+}
+
+type Week = { active: Set<string>; marks: Record<string, number>; hardPeople: Set<string>; logPeople: Set<string>; topics: Map<string, Set<string>> };
+const newWeek = (): Week => ({ active: new Set(), marks: { calmo: 0, ansioso: 0, agitado: 0, sos: 0 }, hardPeople: new Set(), logPeople: new Set(), topics: new Map() });
+const pct = (n: number, total: number) => (total ? Math.round((100 * n) / total) : 0);
+
+function describeWeek(w: Week) {
+  const total = Object.values(w.marks).reduce((a, b) => a + b, 0);
+  if (w.active.size < MIN_GROUP) return null;
+  return {
+    active: w.active.size,
+    moodPct: Object.fromEntries(Object.entries(w.marks).map(([k, n]) => [k, pct(n, total)])),
+    hardPeoplePct: pct(w.hardPeople.size, w.active.size),
+    logsPct: pct(w.logPeople.size, w.active.size),
+    topics: [...w.topics.entries()]
+      .filter(([, people]) => people.size >= 3) // tema só aparece se 3+ pessoas falaram dele
+      .sort((a, b) => b[1].size - a[1].size)
+      .slice(0, 5)
+      .map(([topic, people]) => ({ topic, pct: pct(people.size, w.active.size) })),
+  };
+}
+
+/** Junta pessoas de um subconjunto numa semana (para calcular um setor). */
+function subsetWeek(w: Week, people: Set<string>): Week {
+  const out = newWeek();
+  for (const u of w.active) if (people.has(u)) out.active.add(u);
+  for (const u of w.hardPeople) if (people.has(u)) out.hardPeople.add(u);
+  for (const u of w.logPeople) if (people.has(u)) out.logPeople.add(u);
+  for (const [t, ps] of w.topics) {
+    const f = new Set([...ps].filter((u) => people.has(u)));
+    if (f.size) out.topics.set(t, f);
+  }
+  return out;
+}
+
 async function orgDashboard(ctx: Ctx) {
   const me = await myMembership(ctx, "admin");
   if (!me) throw new HttpError(403, "Painel disponível só para a equipe da instituição");
-  const orgName = me.name;
-  const { data: members } = await ctx.admin.from("org_members").select("user_id, role").eq("org_id", me.orgId);
-  const ids = (members ?? []).filter((m) => m.role === "member").map((m) => m.user_id);
+  const { data: members } = await ctx.admin.from("org_members").select("user_id, role, sector_id").eq("org_id", me.orgId);
+  const people = (members ?? []).filter((m) => m.role === "member");
+  const ids = people.map((m) => m.user_id as string);
+  const sectors = await sectorsOf(ctx, me.orgId);
 
   const today = brtDay();
   const since = addDays(today, -27); // 4 semanas
@@ -918,8 +1156,7 @@ async function orgDashboard(ctx: Ctx) {
 
   const dayOf = (iso: string) => brtDay(new Date(new Date(iso).getTime() - 3 * 3600_000));
   const weekIndex = (day: string) => Math.floor((Date.parse(`${today}T12:00:00Z`) - Date.parse(`${day}T12:00:00Z`)) / (7 * 86400_000));
-  type Week = { active: Set<string>; marks: Record<string, number>; hardPeople: Set<string>; logPeople: Set<string>; topics: Map<string, Set<string>> };
-  const weeks: Week[] = Array.from({ length: 4 }, () => ({ active: new Set(), marks: { calmo: 0, ansioso: 0, agitado: 0, sos: 0 }, hardPeople: new Set(), logPeople: new Set(), topics: new Map() }));
+  const weeks: Week[] = Array.from({ length: 4 }, newWeek);
   for (const m of moods ?? []) {
     const w = weeks[weekIndex(dayOf(m.created_at))];
     if (!w) continue;
@@ -944,31 +1181,87 @@ async function orgDashboard(ctx: Ctx) {
       w.topics.get(topic)!.add(d.user_id);
     }
   }
-  const pct = (n: number, total: number) => (total ? Math.round((100 * n) / total) : 0);
-  const describe = (w: Week) => {
-    const total = Object.values(w.marks).reduce((a, b) => a + b, 0);
-    if (w.active.size < MIN_GROUP) return null;
-    return {
-      active: w.active.size,
-      moodPct: Object.fromEntries(Object.entries(w.marks).map(([k, n]) => [k, pct(n, total)])),
-      hardPeoplePct: pct(w.hardPeople.size, w.active.size),
-      logsPct: pct(w.logPeople.size, w.active.size),
-      topics: [...w.topics.entries()]
-        .filter(([, people]) => people.size >= 3) // tema só aparece se 3+ pessoas falaram dele
-        .sort((a, b) => b[1].size - a[1].size)
-        .slice(0, 5)
-        .map(([topic, people]) => ({ topic, pct: pct(people.size, w.active.size) })),
-    };
+  // Humor por pessoa (marcações) para dividir entre setores.
+  const marksByUser = new Map<string, Record<string, number>[]>();
+  for (const m of moods ?? []) {
+    const wi = weekIndex(dayOf(m.created_at));
+    if (wi < 0 || wi > 3) continue;
+    if (!marksByUser.has(m.user_id)) marksByUser.set(m.user_id, Array.from({ length: 4 }, () => ({ calmo: 0, ansioso: 0, agitado: 0, sos: 0 })));
+    marksByUser.get(m.user_id)![wi][m.mood] = (marksByUser.get(m.user_id)![wi][m.mood] ?? 0) + 1;
+  }
+  const weekFor = (wi: number, group: Set<string>) => {
+    const w = subsetWeek(weeks[wi], group);
+    for (const u of group) {
+      const mk = marksByUser.get(u)?.[wi];
+      if (mk) for (const k of Object.keys(w.marks)) w.marks[k] += mk[k] ?? 0;
+    }
+    return w;
   };
-  const current = describe(weeks[0]);
+
+  // Setores: só aparecem com 5+ pessoas ativas na semana. Os pequenos (e quem não escolheu setor)
+  // viram "Outros". Se "Outros" ficar entre 1 e 4 pessoas, o menor setor visível entra junto,
+  // para que ninguém seja descoberto por subtração (total − setores).
+  const groups = sectors.map((sec) => ({ id: sec.id, name: sec.name, people: new Set(people.filter((p) => p.sector_id === sec.id).map((p) => p.user_id as string)) }));
+  const noSector = new Set(people.filter((p) => !p.sector_id || !sectors.some((s) => s.id === p.sector_id)).map((p) => p.user_id as string));
+  const activeNow = (g: Set<string>) => [...g].filter((u) => weeks[0].active.has(u)).length;
+  let shown = groups.filter((g) => activeNow(g.people) >= MIN_GROUP).sort((a, b) => activeNow(a.people) - activeNow(b.people));
+  const hidden = new Set<string>([...noSector, ...groups.filter((g) => !shown.includes(g)).flatMap((g) => [...g.people])]);
+  while (shown.length && activeNow(hidden) > 0 && activeNow(hidden) < MIN_GROUP) {
+    const smallest = shown.shift()!;
+    for (const u of smallest.people) hidden.add(u);
+  }
+  const sectorRows = [
+    ...shown.sort((a, b) => a.name.localeCompare(b.name)).map((g) => ({
+      id: g.id,
+      name: g.name,
+      members: g.people.size,
+      current: describeWeek(weekFor(0, g.people)),
+      previous: describeWeek(weekFor(1, g.people)),
+    })),
+    ...(sectors.length && activeNow(hidden) >= MIN_GROUP
+      ? [{ id: "outros", name: "Outros", members: hidden.size, current: describeWeek(weekFor(0, hidden)), previous: describeWeek(weekFor(1, hidden)) }]
+      : []),
+  ];
+
+  const current = describeWeek(weeks[0]);
+  const previous = describeWeek(weeks[1]);
+
+  // Sinais de atenção e ações sugeridas (sempre sobre o grupo, nunca sobre pessoas).
+  const alerts: string[] = [];
+  for (const r of sectorRows) {
+    if (r.current && r.previous && r.current.hardPeoplePct - r.previous.hardPeoplePct >= 10) {
+      alerts.push(`${r.name}: dias difíceis subiram de ${r.previous.hardPeoplePct}% para ${r.current.hardPeoplePct}% das pessoas.`);
+    }
+    if (r.current && current && r.current.hardPeoplePct - current.hardPeoplePct >= 15) {
+      alerts.push(`${r.name} está ${r.current.hardPeoplePct - current.hardPeoplePct} pontos acima da média em dias difíceis.`);
+    }
+  }
+  if (current && previous && current.hardPeoplePct - previous.hardPeoplePct >= 10) {
+    alerts.unshift(`No geral, dias difíceis subiram de ${previous.hardPeoplePct}% para ${current.hardPeoplePct}% das pessoas.`);
+  }
+  const actions: string[] = [];
+  if (current) {
+    if (current.hardPeoplePct >= 50) actions.push("Abrir um momento de escuta (roda de conversa ou plantão) nesta semana.");
+    if ((current.moodPct.ansioso ?? 0) >= 35) actions.push("Rever prazos e entregas concentrados; ansiedade alta costuma acompanhar picos de demanda.");
+    if ((current.moodPct.sos ?? 0) > 0) actions.push("Divulgar de novo os canais de ajuda: CVV 188 (24h, gratuito) e o apoio psicológico da instituição.");
+    if (current.logsPct < 30) actions.push("Incentivar pausas curtas de autocuidado (água, alongamento, 5 minutos longe das telas).");
+    if (current.topics.some((t) => /prova|vestibular|enem|simulado/.test(t.topic))) actions.push("Semana de provas: reforçar técnicas de estudo e de respiração antes das avaliações.");
+    if (!actions.length) actions.push("O grupo está estável. Mantenha os canais de escuta abertos e celebre o cuidado coletivo.");
+  }
+
   return {
-    org: orgName,
+    org: me.name,
+    sectorLabel: me.sectorLabel,
     members: ids.length,
     minGroup: MIN_GROUP,
     current,
-    previous: describe(weeks[1]),
+    previous,
+    sectors: sectorRows,
+    sectorList: sectors,
+    alerts,
+    actions,
     weeks: weeks.map((w, i) => {
-      const d = describe(w);
+      const d = describeWeek(w);
       return { label: i === 0 ? "Esta semana" : `${i} sem. atrás`, active: d ? d.active : null, hardPeoplePct: d ? d.hardPeoplePct : null };
     }).reverse(),
   };
@@ -1065,7 +1358,7 @@ async function deleteAccount(ctx: Ctx) {
   const chatIds = (chats ?? []).map((c) => c.id);
   if (chatIds.length) await admin.from("messages").delete().in("chat_id", chatIds);
   await admin.from("chats").delete().eq("user_id", uid);
-  for (const table of ["mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "usage_events", "user_plans", "user_memory", "safety_plans", "message_feedback", "app_errors", "weekly_summaries", "journal_entries", "org_members"]) {
+  for (const table of ["mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "usage_events", "user_plans", "user_memory", "safety_plans", "message_feedback", "app_errors", "weekly_summaries", "journal_entries", "org_members", "monthly_reports"]) {
     await admin.from(table).delete().eq("user_id", uid);
   }
   await admin.from("profiles").delete().eq("id", uid);
@@ -1147,7 +1440,7 @@ async function health(ctx: Ctx) {
     checks.criptografia = { ok: false, detail: String((e as Error).message) };
   }
 
-  for (const table of ["chats", "messages", "mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "user_plans", "usage_events", "app_errors", "user_memory", "safety_plans", "message_feedback", "weekly_summaries", "journal_entries", "organizations", "org_members"]) {
+  for (const table of ["chats", "messages", "mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "user_plans", "usage_events", "app_errors", "user_memory", "safety_plans", "message_feedback", "weekly_summaries", "journal_entries", "organizations", "org_members", "org_sectors", "monthly_reports"]) {
     const { error } = await ctx.admin.from(table).select("*", { count: "exact", head: true });
     checks[`tabela_${table}`] = error ? { ok: false, detail: error.message } : { ok: true };
   }
@@ -1204,6 +1497,12 @@ const actions: Record<string, (ctx: Ctx, body: Record<string, unknown>) => Promi
   org_join: orgJoin,
   org_leave: orgLeave,
   org_dashboard: orgDashboard,
+  org_set_sector: orgSetSector,
+  org_sector_create: orgSectorCreate,
+  org_sector_delete: orgSectorDelete,
+  org_set_label: orgSetLabel,
+  achievements,
+  monthly_report: monthlyReport,
   health,
 };
 

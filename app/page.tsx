@@ -12,6 +12,7 @@ import { App } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { GoogleSignIn } from '@capawesome/capacitor-google-sign-in';
 import AnimatedBackground from '@/components/AnimatedBackground';
+import NoiteCard from '@/components/NoiteCard';
 import RevealOnScroll from '@/components/RevealOnScroll';
 import LoginBackground from '@/components/LoginBackground';
 import NeblinaSOS from '@/components/NeblinaSOS';
@@ -290,7 +291,7 @@ export default function Home() {
         <AnimatedBackground subtle />
         
         {/* Sombra Se Movendo Lentamente - Efeito Fundo do Mar */}
-        <div className="fixed inset-0 pointer-events-none z-[-5] opacity-60"
+        <div className="fixed inset-[-15%] pointer-events-none z-[-5] opacity-60 sea-shadow"
           style={{ backgroundImage: `radial-gradient(ellipse at 50% 50%, transparent 0%, rgba(2,10,16,0.6) 100%)` }}
         />
         
@@ -597,6 +598,8 @@ export default function Home() {
               </p>
             </div>
           </RevealOnScroll>
+
+          <NoiteCard />
 
           {/* Respiração Section */}
           <RevealOnScroll

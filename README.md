@@ -108,6 +108,17 @@ Rode antes e depois de mudar o prompt ou o modelo e compare as médias. O relat�
 - **Widget Android:** "Como está o seu mar?" com 4 humores (`MoodWidget.java`, `res/layout/widget_mood.xml`). Abre o app com `com.zcx.norica://humor/<humor>`, que registra e confirma.
 - **Painel B2B:** a pessoa digita o código em Perfil → Instituição Parceira; a equipe (role `admin`) vê `/painel/` com números agregados e anônimos (mínimo de 5 pessoas ativas; temas só com 3+ pessoas). Como cadastrar: veja o fim de `supabase/migrations/20261016180000_norica_engajamento.sql`.
 
+- **Setores / turmas (B2B):** a equipe cria grupos no `/painel/` (Gerenciar setores) e escolhe como chamar: Setor, Turma, Equipe, Departamento ou Unidade. Cada pessoa escolhe o seu em Perfil → Instituição Parceira. O painel mostra cada grupo (humor, % com dia difícil, ansiedade, Logs, assuntos), pontos de atenção (alta de 10+ pontos ou 15+ acima da média), ações sugeridas e exporta CSV. Grupos com menos de 5 pessoas ativas entram em "Outros", e o menor grupo visível vai junto se "Outros" ficar pequeno (ninguém é descoberto por subtração). Tabela `org_sectors` (migration `20261016200000_norica_jornada.sql`).
+
+## Jornada (1.3.0)
+
+- **Começo guiado:** 3 telas depois do consentimento (o que é a Nórica, lembrete diário, pessoa de confiança). `components/Onboarding.tsx`.
+- **Conquistas:** Farol → Conquistas, 15 marcos calculados no servidor (ação `achievements`). `components/Conquistas.tsx`.
+- **Sons para acalmar:** mar, chuva, ruído branco e marrom gerados no aparelho (Web Audio, sem arquivos, funciona offline), com volume e timer que abaixa devagar. Na Respiração e no Modo noite. `lib/ambient.ts`.
+- **Relatório mensal em PDF (Pro):** Farol → Relatório do mês. Ação `monthly_report` (carta da IA guardada criptografada em `monthly_reports`); o PDF é montado no celular (jsPDF) e aberto no menu de compartilhar.
+- **Modo noite:** `/noite/` — tela bem escura, respiração 4-6, "esvaziar a mente" (diário do tipo `noite`) e sons com timer de 30 min. Card na Início das 21h às 5h.
+- **Relógio (Wear OS):** módulo opcional `android/wear` com Respiração 4-7-8 (vibra a cada fase) e S.O.S (188/192 + aterramento). Para gerar: `norica.wear=true` em `android/gradle.properties` e `gradlew :wear:bundleRelease`; envie no mesmo app do Play Console (faixa Wear OS). O app do celular não muda.
+
 ## Logs e humor sem internet
 
 `lib/offline-sync.ts`: o que a pessoa marca vai primeiro para uma fila no aparelho e é enviado ao Supabase

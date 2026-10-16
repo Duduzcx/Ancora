@@ -19,6 +19,8 @@ import { getAuthState } from '@/lib/auth-store';
 import { cacheGet, cacheSet } from '@/lib/cache';
 import { loadFarolReading, EMPTY_FAROL, type FarolReading } from '@/lib/farol';
 import ResumoSemanal from '@/components/ResumoSemanal';
+import Conquistas from '@/components/Conquistas';
+import RelatorioMensal from '@/components/RelatorioMensal';
 
 export default function FarolPage() {
   const [progress, setProgress] = useState<number>(0);
@@ -406,8 +408,14 @@ export default function FarolPage() {
         {/* RESUMO DA SEMANA (Pro) */}
         <ResumoSemanal />
 
+        {/* RELATÓRIO MENSAL EM PDF (Pro) */}
+        <RelatorioMensal />
+
+        {/* CONQUISTAS DA JORNADA */}
+        <Conquistas />
+
         {/* BOTTOM CARDS */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 stagger-in">
           <InsightCard icon={Compass} title="Norte" desc={reading.insights.norte} index={0} />
           <InsightCard icon={Star} title="Brilho" desc={reading.insights.brilho} index={1} />
           <InsightCard icon={ShieldCheck} title="Proteção" desc={reading.insights.protecao} index={2} />

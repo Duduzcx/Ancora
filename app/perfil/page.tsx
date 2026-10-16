@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { createClient } from '@/lib/supabase-client';
-import { noricaApi, type HealthReport } from '@/lib/norica-api';
+import { noricaApi, type HealthReport, type OrgInfo } from '@/lib/norica-api';
 import { 
   User, Save, CheckCircle2, ArrowLeft, ShieldCheck, 
   Anchor, LifeBuoy, Mail, Calendar, 
@@ -339,7 +339,7 @@ export default function PerfilPage() {
 
   // Instituição parceira (B2B)
   const [isOrgOpen, setIsOrgOpen] = useState(false);
-  const [org, setOrg] = useState<{ name: string; role: 'member' | 'admin' } | null>(null);
+  const [org, setOrg] = useState<OrgInfo>(null);
   const [orgLoaded, setOrgLoaded] = useState(false);
   const [orgCode, setOrgCode] = useState('');
   const [orgBusy, setOrgBusy] = useState(false);
@@ -360,6 +360,19 @@ export default function PerfilPage() {
       setOrgBusy(false);
     }
   };
+  const pickSector = async (sectorId: string | null) => {
+    setOrgBusy(true);
+    setOrgError(null);
+    try {
+      const r = await noricaApi.orgSetSector(sectorId);
+      setOrg(r.org);
+    } catch (err: any) {
+      setOrgError(err?.message || 'Não foi possível salvar agora.');
+    } finally {
+      setOrgBusy(false);
+    }
+  };
+
   const leaveOrg = async () => {
     setOrgBusy(true);
     try {
@@ -458,7 +471,7 @@ export default function PerfilPage() {
       <motion.div
         animate={isExiting ? { scale: 0.8, opacity: 0, y: 100 } : { scale: 1, opacity: 1, y: 0 }}
         transition={{ duration: 1.2, ease: "easeInOut" }}
-        className="max-w-md mx-auto px-6 pt-32 relative z-10 space-y-8"
+        className="max-w-md mx-auto px-6 pt-32 relative z-10 space-y-8 stagger-in"
       >
         
         {/* Avatar Card */}
@@ -890,6 +903,24 @@ export default function PerfilPage() {
                   <p className="text-sm text-white/70 font-semibold leading-relaxed">
                     Você faz parte de <b className="text-white">{org.name}</b>. A instituição vê apenas números somados de todo o grupo (por exemplo, "30% marcaram ansioso esta semana"), nunca o que você escreve ou marca.
                   </p>
+                  {!!org.sectors?.length && (
+                    <div className="space-y-2" data-testid="escolher-setor">
+                      <p className="text-[10px] font-black text-white/50 uppercase tracking-widest">{['Turma', 'Equipe', 'Unidade'].includes(org.sectorLabel || 'Setor') ? 'Sua' : 'Seu'} {(org.sectorLabel || 'Setor').toLowerCase()}</p>
+                      <div className="flex flex-wrap gap-2">
+                        {org.sectors.map((sec) => (
+                          <button
+                            key={sec.id}
+                            disabled={orgBusy}
+                            onClick={() => pickSector(org.sectorId === sec.id ? null : sec.id)}
+                            className={`px-3 py-2 rounded-full text-xs font-black border ${org.sectorId === sec.id ? 'bg-amber-400/20 border-amber-300/40 text-amber-200' : 'bg-white/5 border-white/10 text-white/60'}`}
+                          >
+                            {sec.name}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-[10px] text-white/40 font-semibold">Serve só para os números somados do grupo. Ninguém vê o que você marca.</p>
+                    </div>
+                  )}
                   {org.role === 'admin' && (
                     <button onClick={() => router.push('/painel/')} className="w-full py-4 rounded-2xl bg-amber-400 text-slate-950 font-black uppercase tracking-widest text-[10px]">
                       Abrir painel da instituição

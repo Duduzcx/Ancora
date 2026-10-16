@@ -1,0 +1,30 @@
+// Nórica para relógio (Wear OS): Respiração 4-7-8 com vibração e S.O.S (CVV 188 / SAMU 192).
+// Módulo opcional: só entra no build quando gradle.properties tem norica.wear=true.
+// Gere o pacote com:  gradlew :wear:bundleRelease  (envie no mesmo app do Play Console, faixa "Wear OS").
+apply plugin: 'com.android.application'
+
+android {
+    namespace = "com.zcx.ancora.wear"
+    compileSdk = rootProject.ext.compileSdkVersion
+    defaultConfig {
+        // Mesmo applicationId do app do celular: o Play trata como o mesmo app.
+        applicationId "com.zcx.ancora"
+        minSdkVersion 30
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        // versionCode do relógio precisa ser diferente do celular (celular 42 → relógio 1000042).
+        versionCode 1000042
+        versionName "1.3.0-wear"
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+}
