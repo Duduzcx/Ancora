@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { createClient } from '@/lib/supabase-client';
+import pkg from '@/package.json';
 import { noricaApi, type HealthReport, type OrgInfo } from '@/lib/norica-api';
 import { 
   User, Save, CheckCircle2, ArrowLeft, ShieldCheck, 
@@ -15,7 +16,7 @@ import { useRouter } from 'next/navigation';
 import AnimatedBackground from '@/components/AnimatedBackground';
 import { getAuthState, useAuth } from '@/lib/auth-store';
 import { cacheGet, cacheSet } from '@/lib/cache';
-import { RATES, getVoicePrefs, listPortugueseVoices, openVoiceInstall, setVoicePrefs, speak, stopSpeaking, type VoiceOption } from '@/lib/speech';
+import { RATES, getVoicePrefs, listPortugueseVoices, naturalVoices, openVoiceInstall, setVoicePrefs, speak, stopSpeaking, type NaturalVoice, type VoiceOption } from '@/lib/speech';
 import { DEFAULT_REMINDER, disableReminder, enableReminder, formatTime, getReminder, sendTestNotification, setNotificationPref, type ReminderSettings } from '@/lib/reminder';
 
 // Foto do Google em alta resolução. A URL padrão vem com 96px ("=s96-c"),
@@ -255,7 +256,17 @@ export default function PerfilPage() {
       return;
     }
     const [h, m] = reminderTime.split(':').map(Number);
-    const result = await enableReminder(h || 20, m || 0);
+    const STAGE_MSG: Record<string, string> = {
+      'esperando resposta': 'Toque em "Permitir" na janela do Android…',
+      canal: 'Preparando as notificações…',
+      agendar: 'Agendando seus lembretes…',
+    };
+    // Nunca deixa o botão girando para sempre: em 40s libera e explica.
+    const watchdog = new Promise<'error'>((res) => setTimeout(() => res('error'), 40_000));
+    const result = await Promise.race([
+      enableReminder(h || 20, m || 0, (st) => { if (STAGE_MSG[st]) setReminderMsg(STAGE_MSG[st]); }),
+      watchdog,
+    ]);
     setReminder({ ...getReminder() });
     setReminderBusy(false);
     if (result === 'ok') setReminderMsg(`Pronto! Todo dia às ${reminderTime} a Nórica te chama. 🌊`);
@@ -322,12 +333,19 @@ export default function PerfilPage() {
   const [voices, setVoices] = useState<VoiceOption[] | null>(null);
   const [voicePrefs, setVoicePrefsState] = useState(getVoicePrefs());
   const SAMPLE = 'Oi! Eu sou a Nórica. Estou aqui para te ouvir, sem pressa. Como está o seu mar hoje?';
+  const [natural, setNatural] = useState<NaturalVoice[] | null>(null);
   const openVoice = async () => {
     setIsVoiceOpen(true);
+    naturalVoices(true).then((r) => setNatural(r.available ? r.voices : [])).catch(() => setNatural([]));
     setVoices(await listPortugueseVoices());
   };
+  const chooseNatural = (v: NaturalVoice) => {
+    setVoicePrefs({ engine: 'natural', natural: v.id });
+    setVoicePrefsState(getVoicePrefs());
+    speak('amostra', SAMPLE, { engine: 'natural', natural: v.id });
+  };
   const chooseVoice = (v: VoiceOption) => {
-    setVoicePrefs({ id: v.id });
+    setVoicePrefs({ id: v.id, engine: 'device' });
     setVoicePrefsState(getVoicePrefs());
     speak('amostra', SAMPLE, { voiceId: v.id });
   };
@@ -339,8 +357,11 @@ export default function PerfilPage() {
 
   // Instituição parceira (B2B)
   const [isOrgOpen, setIsOrgOpen] = useState(false);
-  const [org, setOrg] = useState<OrgInfo>(null);
-  const [orgLoaded, setOrgLoaded] = useState(false);
+  // Mostra na hora a última informação salva no aparelho e atualiza quando o servidor responder.
+  const cachedOrg = cacheGet<{ org: OrgInfo }>(getAuthState().user?.id, 'org');
+  const [org, setOrgState] = useState<OrgInfo>(cachedOrg?.org ?? null);
+  const [orgLoaded, setOrgLoaded] = useState(!!cachedOrg);
+  const setOrg = (o: OrgInfo) => { setOrgState(o); cacheSet(getAuthState().user?.id, 'org', { org: o }); };
   const [orgCode, setOrgCode] = useState('');
   const [orgBusy, setOrgBusy] = useState(false);
   const [orgError, setOrgError] = useState<string | null>(null);
@@ -807,6 +828,7 @@ export default function PerfilPage() {
         <p className="text-center text-[10px] font-black text-white/20 uppercase tracking-[0.5em] italic pt-10">
           Nórica • Foco e Produtividade
         </p>
+        <p className="text-center text-[10px] font-bold text-white/25 tracking-widest" data-testid="versao">Versão {pkg.version} ({pkg.versionCode})</p>
         <button
           onClick={runHealth}
           className="block mx-auto text-[9px] font-black text-white/20 hover:text-emerald-400 uppercase tracking-[0.3em] transition-colors"
@@ -830,19 +852,37 @@ export default function PerfilPage() {
                   <p className="text-[9px] font-black text-teal-300 uppercase tracking-widest mt-1">Toque para ouvir e escolher</p>
                 </div>
               </div>
+              {natural && natural.length > 0 && (
+                <div className="space-y-2 mb-5" data-testid="vozes-naturais">
+                  <p className="text-[10px] font-black text-white/40 uppercase tracking-widest">Vozes naturais · mais humanas</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {natural.map((v) => {
+                      const active = voicePrefs.engine === 'natural' && voicePrefs.natural === v.id;
+                      return (
+                        <button key={v.id} onClick={() => chooseNatural(v)} className={`p-3 rounded-2xl border text-left ${active ? 'bg-teal-500/15 border-teal-400/40' : 'bg-white/5 border-white/10'}`}>
+                          <span className="block text-[12px] font-black text-white">{v.label}</span>
+                          <span className={`block text-[9px] font-black uppercase tracking-widest mt-1 ${active ? 'text-teal-300' : 'text-white/30'}`}>{active ? 'Escolhida' : 'Ouvir'}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[10px] text-white/40 font-semibold">Usa internet. Sem conexão, a Nórica lê com a voz do celular.</p>
+                  <p className="text-[10px] font-black text-white/40 uppercase tracking-widest pt-3">Vozes do celular</p>
+                </div>
+              )}
               {!voices ? (
                 <div className="flex items-center gap-3 text-white/60 text-sm font-bold py-6 justify-center">
                   <Loader2 size={18} className="animate-spin" /> Procurando vozes...
                 </div>
               ) : voices.length === 0 ? (
-                <div className="space-y-3">
+                <div className="space-y-3 mb-5">
                   <p className="text-sm text-white/60 font-semibold leading-relaxed">Seu celular não tem voz em português instalada.</p>
                   <button onClick={openVoiceInstall} className="w-full py-4 rounded-2xl bg-teal-500 text-slate-950 font-black uppercase tracking-widest text-[10px]">Instalar vozes</button>
                 </div>
               ) : (
                 <div className="space-y-2 mb-5">
                   {voices.map((v) => {
-                    const active = voicePrefs.id ? voicePrefs.id === v.id : v === voices[0];
+                    const active = (voicePrefs.engine === 'device' || !natural?.length) && (voicePrefs.id ? voicePrefs.id === v.id : v === voices[0]);
                     return (
                       <button
                         key={v.id}

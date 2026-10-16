@@ -50,16 +50,16 @@ const useSnakeStep = () => useSyncExternalStore(snakeClock.subscribe, snakeClock
 
 const SnakeBorder = ({ index, color }: { index: number; color: string }) => {
   const step = useSnakeStep();
-  if (step !== index * 2) return null;
-  // Um feixe de luz (gradiente cônico) gira atrás de uma "máscara" da cor do card,
-  // e só a borda de 2px aparece. Gira por transform: roda na placa de vídeo, sem travar.
+  const on = step === index * 2;
+  // Fica sempre montada (montar/desmontar a cada 3s criava e destruía camadas na placa de vídeo,
+  // o que fazia os cards piscarem). Só a classe "is-on" liga a volta da luz.
+  // A borda é recortada por máscara CSS: nada cobre o conteúdo do card.
   return (
-    <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none z-0" aria-hidden="true">
+    <div className={`snake-ring ${on ? 'is-on' : ''}`} aria-hidden="true">
       <div
         className="snake-spin"
         style={{ background: `conic-gradient(from 0deg, transparent 0deg, transparent 250deg, ${color} 320deg, #ffffff 340deg, transparent 352deg)` }}
       />
-      <div className="absolute inset-[2px] rounded-[22px] bg-[#131b2c]" />
     </div>
   );
 };
@@ -67,10 +67,10 @@ const SnakeBorder = ({ index, color }: { index: number; color: string }) => {
 // Fio de luz que desce de um card para o próximo.
 const SnakeGap = ({ index }: { index: number }) => {
   const step = useSnakeStep();
-  if (step !== index * 2 + 1) return null;
+  const on = step === index * 2 + 1;
   return (
-    <div className="absolute -bottom-6 left-6 w-[2px] h-6 z-20 overflow-hidden pointer-events-none">
-      <div className="w-full h-full bg-white snake-gap" />
+    <div className="absolute -bottom-6 left-6 w-[2px] h-6 z-20 overflow-hidden pointer-events-none" aria-hidden="true">
+      <div className={`w-full h-full bg-white snake-gap ${on ? 'is-on' : ''}`} />
     </div>
   );
 };

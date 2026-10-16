@@ -7,7 +7,7 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Building2, Loader2, ShieldCheck, Users, TrendingUp, TrendingDown, Minus, Lock, AlertTriangle, Lightbulb, Plus, X, Download, Layers } from 'lucide-react';
+import { ArrowLeft, Building2, Loader2, ShieldCheck, Users, TrendingUp, TrendingDown, Minus, Lock, AlertTriangle, Lightbulb, Plus, X, Download, Layers, Sparkles } from 'lucide-react';
 import { noricaApi, type OrgDashboard, type OrgSector } from '@/lib/norica-api';
 import { MOOD_COLOR } from '@/lib/farol';
 
@@ -55,14 +55,24 @@ export default function PainelPage() {
         </div>
 
         {!data && !error && (
-          <div className="flex items-center justify-center gap-3 text-white/50 text-sm font-bold py-10">
-            <Loader2 size={18} className="animate-spin" /> Carregando…
+          <div className="space-y-3" aria-label="Carregando painel">
+            <div className="grid grid-cols-2 gap-3"><div className="skeleton h-32 rounded-[2rem]" /><div className="skeleton h-32 rounded-[2rem]" /></div>
+            <div className="skeleton h-48 rounded-[2.5rem]" />
+            <div className="skeleton h-64 rounded-[2.5rem]" />
           </div>
         )}
         {error && <p className="text-sm font-bold text-rose-300">{error}</p>}
 
         {data && (
           <>
+            {data.demo && (
+              <div className="flex items-start gap-3 p-4 rounded-2xl bg-sky-500/10 border border-sky-400/25" data-testid="demo">
+                <Sparkles size={16} className="text-sky-300 shrink-0 mt-0.5" />
+                <p className="text-xs text-white/75 font-semibold leading-relaxed">
+                  <b className="text-sky-200">Demonstração:</b> os números abaixo são fictícios, para mostrar como o painel funciona. Com uma instituição real, aparecem só dados somados e anônimos do grupo.
+                </p>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <Tile label="Participantes" value={String(data.members)} hint="com o código da instituição" icon={Users} />
               <Tile label="Ativos na semana" value={cur ? String(cur.active) : '—'} hint={prev ? `semana anterior: ${prev.active}` : 'últimos 7 dias'} icon={TrendingUp} />

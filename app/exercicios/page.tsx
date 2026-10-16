@@ -7,7 +7,7 @@ import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import {
-  ArrowLeft, Eye, Hand, Ear, Flower2, Coffee, Sparkles, MessagesSquare, Loader2, CheckCircle2, Sword, Heart, LifeBuoy, ChevronRight,
+  ArrowLeft, Eye, Hand, Ear, Flower2, Coffee, Sparkles, MessagesSquare, Loader2, CheckCircle2, Sword, Heart, LifeBuoy, ChevronRight, Moon, Waves,
 } from 'lucide-react';
 import { noricaApi, type JournalEntry } from '@/lib/norica-api';
 import { HelpSheet } from '@/components/AjudaAgora';
@@ -69,6 +69,27 @@ export default function ExerciciosPage() {
                   key={c.id}
                   whileTap={{ scale: 0.97 }}
                   onClick={() => setActive(c.id)}
+                  className="w-full text-left p-6 bg-white/5 border border-white/10 rounded-[2.5rem] flex items-center gap-4"
+                >
+                  <div className={`w-14 h-14 rounded-2xl border flex items-center justify-center shrink-0 ${c.color}`}>
+                    <c.icon size={24} />
+                  </div>
+                  <div className="flex-1">
+                    <h2 className="text-sm font-black text-white uppercase tracking-tighter">{c.title}</h2>
+                    <p className="text-[12px] text-white/55 font-semibold leading-relaxed mt-1">{c.desc}</p>
+                    <p className="text-[9px] font-black text-emerald-400 uppercase tracking-widest mt-2">{c.time}</p>
+                  </div>
+                  <ChevronRight size={18} className="text-white/30" />
+                </motion.button>
+              ))}
+              {[
+                { href: '/noite/', title: 'Modo noite', desc: 'Para quando o sono não vem: respiração lenta, esvaziar a mente e sons com timer.', time: '5–30 min', icon: Moon, color: 'text-indigo-300 bg-indigo-500/10 border-indigo-500/20' },
+                { href: '/respiracao/', title: 'Respiração 4-7-8 com sons', desc: 'Ondas do mar, chuva ou ruído branco enquanto você respira.', time: '3 min', icon: Waves, color: 'text-teal-300 bg-teal-500/10 border-teal-500/20' },
+              ].map((c) => (
+                <motion.button
+                  key={c.href}
+                  whileTap={{ scale: 0.97 }}
+                  onClick={() => router.push(c.href)}
                   className="w-full text-left p-6 bg-white/5 border border-white/10 rounded-[2.5rem] flex items-center gap-4"
                 >
                   <div className={`w-14 h-14 rounded-2xl border flex items-center justify-center shrink-0 ${c.color}`}>

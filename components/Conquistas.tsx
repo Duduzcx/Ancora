@@ -77,15 +77,21 @@ export default function Conquistas() {
         )}
       </AnimatePresence>
 
+      {!stats ? (
+        <div className="grid grid-cols-3 gap-3" aria-label="Carregando conquistas">
+          {Array.from({ length: 6 }, (_, i) => <div key={i} className="skeleton h-[104px] rounded-2xl" />)}
+        </div>
+      ) : (
       <div className="grid grid-cols-3 gap-3">
-        {BADGES.map((b) => {
+        {BADGES.map((b, i) => {
           const v = stats ? b.value(stats) : 0;
           const done = v >= b.goal;
           return (
             <button
               key={b.id}
               onClick={() => setSelected(selected?.id === b.id ? null : b)}
-              className={`relative flex flex-col items-center gap-2 p-3 rounded-2xl border text-center transition-colors ${done ? 'bg-amber-400/10 border-amber-300/30' : 'bg-black/20 border-white/5'}`}
+              className={`relative flex flex-col items-center gap-2 p-3 rounded-2xl border text-center transition-colors ${done ? 'bg-amber-400/10 border-amber-300/30 badge-glow' : 'bg-black/20 border-white/5'}`}
+              style={done ? ({ '--glow-delay': `${(i % 5) * 0.9}s` } as React.CSSProperties) : undefined}
             >
               <div className={`w-11 h-11 rounded-2xl flex items-center justify-center ${done ? 'bg-amber-400/20 text-amber-200' : 'bg-white/5 text-white/25'}`}>
                 {done ? <b.icon size={20} /> : <Lock size={16} />}
@@ -100,6 +106,7 @@ export default function Conquistas() {
           );
         })}
       </div>
+      )}
 
       {selected && stats && (
         <p className="text-xs text-white/70 font-semibold leading-relaxed">

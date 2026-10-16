@@ -12,6 +12,13 @@ import { noricaApi } from '@/lib/norica-api';
 import { HelpSheet } from '@/components/AjudaAgora';
 import SonsAmbiente from '@/components/SonsAmbiente';
 
+// Estrelas fixas (posição %, tamanho px, duração e atraso do brilho): leve, só opacidade.
+const STARS: [number, number, number, number, number][] = [
+  [8, 6, 2, 3.2, 0], [22, 14, 1.5, 4.1, 1.2], [37, 4, 2, 2.8, 0.6], [55, 11, 1.5, 3.6, 2], [71, 5, 2.5, 4.4, 0.3],
+  [86, 13, 1.5, 3.1, 1.7], [93, 3, 2, 2.6, 0.9], [14, 22, 1.5, 3.9, 2.4], [63, 20, 1.5, 3.3, 1.1], [44, 26, 1, 4.6, 0.2],
+  [79, 27, 2, 3.7, 2.8], [5, 33, 1, 2.9, 1.5],
+];
+
 const TIPS = [
   'Tudo bem não dormir agora. Descansar de olhos fechados também recupera.',
   'Se passar de 20 minutos acordado(a), levante, fique no escuro e volte quando o sono chegar.',
@@ -92,6 +99,11 @@ export default function NoitePage() {
     <main className="min-h-[100dvh] bg-[#03030a] text-white relative overflow-x-hidden px-6 pt-[calc(env(safe-area-inset-top)+1.5rem)] pb-36 font-sans" data-testid="noite">
       {/* Céu noturno discreto (só opacidade/transform, leve) */}
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(ellipse_at_top,rgba(67,56,202,0.18)_0%,transparent_60%)]" />
+      <div className="pointer-events-none fixed inset-0" aria-hidden="true">
+        {STARS.map((st, i) => (
+          <span key={i} className="twinkle absolute rounded-full bg-white" style={{ left: `${st[0]}%`, top: `${st[1]}%`, width: st[2], height: st[2], ['--d' as any]: `${st[3]}s`, ['--delay' as any]: `${st[4]}s` }} />
+        ))}
+      </div>
       <div className="relative z-10 max-w-md mx-auto space-y-6">
         <div className="flex items-center justify-between">
           <button onClick={() => router.back()} className="p-3 bg-white/5 border border-white/10 rounded-full text-indigo-200/80" aria-label="Voltar">

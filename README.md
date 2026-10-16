@@ -119,6 +119,9 @@ Rode antes e depois de mudar o prompt ou o modelo e compare as médias. O relat�
 - **Modo noite:** `/noite/` — tela bem escura, respiração 4-6, "esvaziar a mente" (diário do tipo `noite`) e sons com timer de 30 min. Card na Início das 21h às 5h.
 - **Relógio (Wear OS):** módulo opcional `android/wear` com Respiração 4-7-8 (vibra a cada fase) e S.O.S (188/192 + aterramento). Para gerar: `norica.wear=true` em `android/gradle.properties` e `gradlew :wear:bundleRelease`; envie no mesmo app do Play Console (faixa Wear OS). O app do celular não muda.
 
+- **Instituições de demonstração:** códigos `DEMOESCOLA` (turmas) e `DEMOEMPRESA` (setores). Quem entra vira equipe e vê o `/painel/` com números fictícios, marcado como "Demonstração" — para apresentar a escolas e empresas. Para sair: Perfil → Instituição Parceira → Sair. (Migration `20261016220000_norica_voz_demo.sql`.)
+- **Voz natural (opcional):** com `supabase secrets set GEMINI_API_KEY=...` (chave do Google AI Studio), "Ouvir" usa vozes de IA mais humanas (Perfil → Voz da Nórica). Sem a chave, sem internet ou depois do limite do dia (20 no Gratuito, 120 no Pro), a leitura continua com a voz do celular. Modelo em `GEMINI_TTS_MODEL` (padrão `gemini-3.8-flash-tts`).
+
 ## Logs e humor sem internet
 
 `lib/offline-sync.ts`: o que a pessoa marca vai primeiro para uma fila no aparelho e é enviado ao Supabase

@@ -155,29 +155,41 @@ async function scheduleDaily(ln: any, hour: number, minute: number) {
   await withTimeout(ln.schedule({ notifications }), NATIVE_TIMEOUT, 'agendar');
 }
 
+export type ReminderStage = 'permissão' | 'esperando resposta' | 'canal' | 'agendar' | 'pronto';
+
+/** Pede a permissão só quando o Android ainda pode mostrar a janela. Se já foi negada, não trava esperando. */
+async function ensurePermission(ln: any, onStage?: (s: ReminderStage) => void): Promise<boolean> {
+  const perm = await withTimeout(ln.checkPermissions(), NATIVE_TIMEOUT, 'checar permissão') as { display: string };
+  if (perm.display === 'granted') return true;
+  if (perm.display === 'denied') return false; // o Android não mostra a janela de novo: só pelas Configurações
+  onStage?.('esperando resposta');
+  const asked = await withTimeout(ln.requestPermissions(), 30_000, 'pedir permissão') as { display: string };
+  return asked.display === 'granted';
+}
+
 /** Liga (ou muda o horário do) lembrete. Pede a permissão de notificação se precisar. */
-export async function enableReminder(hour: number, minute: number): Promise<ReminderResult> {
-  const ln = await plugin().catch(() => null);
+export async function enableReminder(hour: number, minute: number, onStage?: (s: ReminderStage) => void): Promise<ReminderResult> {
+  const ln = await withTimeout(plugin(), NATIVE_TIMEOUT, 'carregar plugin').catch(() => null);
   if (!ln) {
     save({ ...getReminder(), enabled: false, hour, minute });
-    return 'unsupported';
+    return Capacitor.isNativePlatform() ? 'error' : 'unsupported';
   }
-  let stage = 'permissão';
+  let stage: ReminderStage = 'permissão';
   try {
-    let perm = await withTimeout(ln.checkPermissions(), NATIVE_TIMEOUT, 'checar permissão');
-    if (perm.display !== 'granted') {
-      // A pessoa precisa responder a janela do Android: espera até 1 minuto.
-      perm = await withTimeout(ln.requestPermissions(), 60_000, 'pedir permissão');
-    }
-    if (perm.display !== 'granted') {
+    onStage?.(stage);
+    if (!(await ensurePermission(ln, onStage))) {
       save({ ...getReminder(), enabled: false, hour, minute });
       return 'denied';
     }
     stage = 'canal';
+    onStage?.(stage);
     await ensureChannel(ln);
     stage = 'agendar';
-    await scheduleDaily(ln, hour, minute);
+    onStage?.(stage);
+    // Guarda a escolha antes de agendar: mesmo se o agendamento demorar, o app reagenda na próxima abertura.
     save({ ...getReminder(), enabled: true, hour, minute });
+    await scheduleDaily(ln, hour, minute);
+    onStage?.('pronto');
     refreshEngagementNotifications().catch(() => {}); // os outros avisos em segundo plano
     return 'ok';
   } catch (e) {
@@ -192,9 +204,7 @@ export async function sendTestNotification(): Promise<ReminderResult> {
   const ln = await plugin().catch(() => null);
   if (!ln) return 'unsupported';
   try {
-    let perm = await withTimeout(ln.checkPermissions(), NATIVE_TIMEOUT, 'checar permissão');
-    if (perm.display !== 'granted') perm = await withTimeout(ln.requestPermissions(), 60_000, 'pedir permissão');
-    if (perm.display !== 'granted') return 'denied';
+    if (!(await ensurePermission(ln))) return 'denied';
     await ensureChannel(ln);
     const ctx = personalContext();
     await withTimeout(ln.schedule({

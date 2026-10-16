@@ -11,11 +11,11 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { billingConfigured, checkSubscription } from "./google-play.ts";
 
 export type Plan = "free" | "pro";
-export type UsageKind = "porto_message" | "arena_feedback";
+export type UsageKind = "porto_message" | "arena_feedback" | "tts";
 
 export const PLAN_LIMITS: Record<Plan, Record<UsageKind, number>> = {
-  free: { porto_message: 30, arena_feedback: 2 }, // por dia
-  pro: { porto_message: 300, arena_feedback: 50 }, // uso justo
+  free: { porto_message: 30, arena_feedback: 2, tts: 20 }, // por dia
+  pro: { porto_message: 300, arena_feedback: 50, tts: 120 }, // uso justo
 };
 
 export function launchMode(): boolean {
@@ -84,6 +84,7 @@ export async function consume(admin: SupabaseClient, userId: string, kind: Usage
   const used = await usageToday(admin, userId, kind);
   if (used >= limit) {
     if (effective === "pro") return "Você usou bastante hoje. Que tal uma pausa e voltar amanhã? 🌊";
+    if (kind === "tts") return "A voz natural descansou por hoje. A leitura continua com a voz do celular.";
     return kind === "porto_message"
       ? `Você chegou ao limite de ${limit} mensagens de hoje no plano Gratuito. Amanhã o Porto abre de novo — ou conheça o Pro no seu Perfil. Se precisar de ajuda agora, toque em "Ajuda".`
       : `Você já viu ${limit} retornos da Arena hoje no plano Gratuito. Volte amanhã ou conheça o Pro no seu Perfil.`;

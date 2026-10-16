@@ -13,6 +13,7 @@ import { CHAT_MODEL, type ChatMessage, FAST_MODEL, groqChat, groqChatStream, par
 import { firstNameFrom } from "../_shared/names.ts";
 import { consume, getPlan, launchMode, PLAN_LIMITS, usageToday } from "../_shared/plans.ts";
 import { checkSubscription, PRO_PRODUCT_ID } from "../_shared/google-play.ts";
+import { synthesize, TTS_VOICES, ttsConfigured } from "../_shared/tts.ts";
 import {
   arenaFeedbackPrompt,
   arenaSystemPrompt,
@@ -1051,10 +1052,15 @@ async function orgStatus(ctx: Ctx) {
 async function orgJoin(ctx: Ctx, body: Record<string, unknown>) {
   const code = String(body.code ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
   if (code.length < 4) throw new HttpError(400, "Digite o código que a instituição passou para você");
-  const { data: org } = await ctx.admin.from("organizations").select("id, name").eq("code", code).maybeSingle();
+  const { data: org } = await ctx.admin.from("organizations").select("id, name, demo").eq("code", code).maybeSingle();
   if (!org) throw new HttpError(404, "Código não encontrado. Confira com a sua instituição.");
   await ctx.admin.from("org_members").delete().eq("user_id", ctx.userId).neq("org_id", org.id).eq("role", "member");
-  const { error } = await ctx.admin.from("org_members").upsert({ org_id: org.id, user_id: ctx.userId }, { onConflict: "org_id,user_id", ignoreDuplicates: true });
+  await leaveDemos(ctx, org.id as string);
+  // Demonstração: quem entra vê o painel como a equipe (com números fictícios).
+  const { error } = await ctx.admin.from("org_members").upsert(
+    { org_id: org.id, user_id: ctx.userId, ...(org.demo ? { role: "admin" } : {}) },
+    { onConflict: "org_id,user_id", ignoreDuplicates: !org.demo },
+  );
   if (error) throw new HttpError(500, "Não foi possível entrar agora");
   return orgOut(ctx, await myMembership(ctx));
 }
@@ -1071,8 +1077,15 @@ async function orgSetSector(ctx: Ctx, body: Record<string, unknown>) {
   return orgOut(ctx, await myMembership(ctx));
 }
 
+async function leaveDemos(ctx: Ctx, exceptOrgId?: string) {
+  const { data: demos } = await ctx.admin.from("organizations").select("id").eq("demo", true);
+  const ids = (demos ?? []).map((d) => d.id as string).filter((id) => id !== exceptOrgId);
+  if (ids.length) await ctx.admin.from("org_members").delete().eq("user_id", ctx.userId).in("org_id", ids);
+}
+
 async function orgLeave(ctx: Ctx) {
   await ctx.admin.from("org_members").delete().eq("user_id", ctx.userId).eq("role", "member");
+  await leaveDemos(ctx);
   return { ok: true };
 }
 
@@ -1091,6 +1104,27 @@ async function orgSectorDelete(ctx: Ctx, body: Record<string, unknown>) {
   await ctx.admin.from("org_members").update({ sector_id: null }).eq("org_id", me.orgId).eq("sector_id", String(body.id ?? ""));
   await ctx.admin.from("org_sectors").delete().eq("org_id", me.orgId).eq("id", String(body.id ?? ""));
   return { sectors: await sectorsOf(ctx, me.orgId) };
+}
+
+// ---------------------------------------------------------------------
+// Voz natural (leitura em voz alta das respostas)
+// ---------------------------------------------------------------------
+
+async function ttsInfo() {
+  return { available: ttsConfigured(), voices: Object.entries(TTS_VOICES).map(([id, v]) => ({ id, label: v.label })) };
+}
+
+async function tts(ctx: Ctx, body: Record<string, unknown>) {
+  if (!ttsConfigured()) throw new HttpError(503, "Voz natural indisponível");
+  const text = cleanText(body.text, 1800);
+  const limited = await consume(ctx.admin, ctx.userId, "tts");
+  if (limited) throw new HttpError(429, limited);
+  try {
+    return await synthesize(text, String(body.voice ?? "serena"));
+  } catch (e) {
+    console.error(e);
+    throw new HttpError(502, "A voz natural não respondeu agora");
+  }
 }
 
 const SECTOR_LABELS = ["Setor", "Turma", "Equipe", "Departamento", "Unidade"];
@@ -1136,9 +1170,99 @@ function subsetWeek(w: Week, people: Set<string>): Week {
   return out;
 }
 
+// ---------------------------------------------------------------------
+// Instituição de demonstração (para apresentar a escolas e empresas).
+// organizations.demo = true → quem entra com o código vira equipe e vê números fictícios.
+// ---------------------------------------------------------------------
+
+function seeded(seed: number) {
+  let x = seed % 2147483647 || 1;
+  return () => (x = (x * 48271) % 2147483647) / 2147483647;
+}
+
+function demoWeek(rnd: () => number, active: number, stress: number, topics: string[]): WeekOut {
+  const sos = Math.round(rnd() * 3 * stress);
+  const ansioso = Math.round(18 + 30 * stress + rnd() * 8);
+  const agitado = Math.round(8 + 14 * stress + rnd() * 6);
+  const calmo = Math.max(5, 100 - ansioso - agitado - sos);
+  return {
+    active,
+    moodPct: { calmo, ansioso, agitado, sos },
+    hardPeoplePct: Math.min(95, Math.round(25 + 55 * stress + rnd() * 6)),
+    logsPct: Math.round(35 + rnd() * 30),
+    topics: topics.slice(0, 3).map((topic, i) => ({ topic, pct: Math.round(45 - i * 12 + rnd() * 6) })),
+  };
+}
+
+function demoDashboard(me: Membership, sectorList: { id: string; name: string }[]) {
+  const week = Math.floor(Date.now() / (7 * 86400_000));
+  const rnd = seeded(week * 7919);
+  const school = me.sectorLabel === "Turma";
+  const topicsPool = school ? ["provas", "vestibular", "sono", "família", "amizades"] : ["metas", "prazos", "liderança", "sono", "família"];
+  const names = sectorList.length ? sectorList : (school ? ["1º ano", "2º ano", "3º ano", "Cursinho"] : ["Vendas", "RH", "Tecnologia", "Operações"]).map((name, i) => ({ id: `demo-${i}`, name }));
+  const sectors: SectorRowOut[] = names.map((sec, i) => {
+    const stress = i === 0 ? 0.75 : 0.25 + rnd() * 0.35; // o primeiro grupo aparece mais pressionado
+    const members = 18 + Math.round(rnd() * 25);
+    const active = Math.round(members * (0.6 + rnd() * 0.25));
+    const topics = [...topicsPool].sort(() => rnd() - 0.5);
+    return { id: sec.id, name: sec.name, members, current: demoWeek(rnd, active, stress, topics), previous: demoWeek(rnd, active - 2, Math.max(0.1, stress - (i === 0 ? 0.25 : 0.05)), topics) };
+  });
+  const members = sectors.reduce((a, r) => a + r.members, 0);
+  const active = sectors.reduce((a, r) => a + (r.current?.active ?? 0), 0);
+  const current = demoWeek(rnd, active, 0.45, topicsPool);
+  const previous = demoWeek(rnd, active - 6, 0.38, topicsPool);
+  const { alerts, actions } = groupInsights(current, previous, sectors);
+  return {
+    org: me.name,
+    sectorLabel: me.sectorLabel,
+    members,
+    minGroup: MIN_GROUP,
+    current,
+    previous,
+    sectors,
+    sectorList,
+    alerts,
+    actions,
+    demo: true,
+    weeks: [0.3, 0.36, 0.38, 0.45].map((st, i) => ({ label: i === 3 ? "Esta semana" : `${3 - i} sem. atrás`, active: active - (3 - i) * 4, hardPeoplePct: Math.round(25 + 55 * st) })),
+  };
+}
+
+type WeekOut = NonNullable<ReturnType<typeof describeWeek>>;
+type SectorRowOut = { id: string; name: string; members: number; current: WeekOut | null; previous: WeekOut | null };
+
+function groupInsights(current: WeekOut | null, previous: WeekOut | null, sectorRows: SectorRowOut[]) {
+  // Sinais de atenção e ações sugeridas (sempre sobre o grupo, nunca sobre pessoas).
+  const alerts: string[] = [];
+  for (const r of sectorRows) {
+    if (r.current && r.previous && r.current.hardPeoplePct - r.previous.hardPeoplePct >= 10) {
+      alerts.push(`${r.name}: dias difíceis subiram de ${r.previous.hardPeoplePct}% para ${r.current.hardPeoplePct}% das pessoas.`);
+    }
+    if (r.current && current && r.current.hardPeoplePct - current.hardPeoplePct >= 15) {
+      alerts.push(`${r.name} está ${r.current.hardPeoplePct - current.hardPeoplePct} pontos acima da média em dias difíceis.`);
+    }
+  }
+  if (current && previous && current.hardPeoplePct - previous.hardPeoplePct >= 10) {
+    alerts.unshift(`No geral, dias difíceis subiram de ${previous.hardPeoplePct}% para ${current.hardPeoplePct}% das pessoas.`);
+  }
+  const actions: string[] = [];
+  if (current) {
+    if (current.hardPeoplePct >= 50) actions.push("Abrir um momento de escuta (roda de conversa ou plantão) nesta semana.");
+    if ((current.moodPct.ansioso ?? 0) >= 35) actions.push("Rever prazos e entregas concentrados; ansiedade alta costuma acompanhar picos de demanda.");
+    if ((current.moodPct.sos ?? 0) > 0) actions.push("Divulgar de novo os canais de ajuda: CVV 188 (24h, gratuito) e o apoio psicológico da instituição.");
+    if (current.logsPct < 30) actions.push("Incentivar pausas curtas de autocuidado (água, alongamento, 5 minutos longe das telas).");
+    if (current.topics.some((t) => /prova|vestibular|enem|simulado/.test(t.topic))) actions.push("Semana de provas: reforçar técnicas de estudo e de respiração antes das avaliações.");
+    if (!actions.length) actions.push("O grupo está estável. Mantenha os canais de escuta abertos e celebre o cuidado coletivo.");
+  }
+
+  return { alerts, actions };
+}
+
 async function orgDashboard(ctx: Ctx) {
   const me = await myMembership(ctx, "admin");
   if (!me) throw new HttpError(403, "Painel disponível só para a equipe da instituição");
+  const { data: orgRow } = await ctx.admin.from("organizations").select("demo").eq("id", me.orgId).maybeSingle();
+  if (orgRow?.demo) return demoDashboard(me, await sectorsOf(ctx, me.orgId));
   const { data: members } = await ctx.admin.from("org_members").select("user_id, role, sector_id").eq("org_id", me.orgId);
   const people = (members ?? []).filter((m) => m.role === "member");
   const ids = people.map((m) => m.user_id as string);
@@ -1226,28 +1350,7 @@ async function orgDashboard(ctx: Ctx) {
   const current = describeWeek(weeks[0]);
   const previous = describeWeek(weeks[1]);
 
-  // Sinais de atenção e ações sugeridas (sempre sobre o grupo, nunca sobre pessoas).
-  const alerts: string[] = [];
-  for (const r of sectorRows) {
-    if (r.current && r.previous && r.current.hardPeoplePct - r.previous.hardPeoplePct >= 10) {
-      alerts.push(`${r.name}: dias difíceis subiram de ${r.previous.hardPeoplePct}% para ${r.current.hardPeoplePct}% das pessoas.`);
-    }
-    if (r.current && current && r.current.hardPeoplePct - current.hardPeoplePct >= 15) {
-      alerts.push(`${r.name} está ${r.current.hardPeoplePct - current.hardPeoplePct} pontos acima da média em dias difíceis.`);
-    }
-  }
-  if (current && previous && current.hardPeoplePct - previous.hardPeoplePct >= 10) {
-    alerts.unshift(`No geral, dias difíceis subiram de ${previous.hardPeoplePct}% para ${current.hardPeoplePct}% das pessoas.`);
-  }
-  const actions: string[] = [];
-  if (current) {
-    if (current.hardPeoplePct >= 50) actions.push("Abrir um momento de escuta (roda de conversa ou plantão) nesta semana.");
-    if ((current.moodPct.ansioso ?? 0) >= 35) actions.push("Rever prazos e entregas concentrados; ansiedade alta costuma acompanhar picos de demanda.");
-    if ((current.moodPct.sos ?? 0) > 0) actions.push("Divulgar de novo os canais de ajuda: CVV 188 (24h, gratuito) e o apoio psicológico da instituição.");
-    if (current.logsPct < 30) actions.push("Incentivar pausas curtas de autocuidado (água, alongamento, 5 minutos longe das telas).");
-    if (current.topics.some((t) => /prova|vestibular|enem|simulado/.test(t.topic))) actions.push("Semana de provas: reforçar técnicas de estudo e de respiração antes das avaliações.");
-    if (!actions.length) actions.push("O grupo está estável. Mantenha os canais de escuta abertos e celebre o cuidado coletivo.");
-  }
+  const { alerts, actions } = groupInsights(current, previous, sectorRows);
 
   return {
     org: me.name,
@@ -1501,6 +1604,8 @@ const actions: Record<string, (ctx: Ctx, body: Record<string, unknown>) => Promi
   org_sector_create: orgSectorCreate,
   org_sector_delete: orgSectorDelete,
   org_set_label: orgSetLabel,
+  tts_info: ttsInfo,
+  tts,
   achievements,
   monthly_report: monthlyReport,
   health,

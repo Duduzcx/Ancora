@@ -111,6 +111,7 @@ export type OrgDashboard = {
   alerts: string[];
   actions: string[];
   weeks: { label: string; active: number | null; hardPeoplePct: number | null }[];
+  demo?: boolean;
 };
 
 export const MOODS = ['calmo', 'ansioso', 'agitado', 'sos'] as const;
@@ -203,6 +204,8 @@ export const noricaApi = {
 
   achievements: () => call<{ stats: AchievementStats }>('achievements'),
   monthlyReport: (refresh = false) => call<MonthlyReport>('monthly_report', { refresh }),
+  ttsInfo: () => call<{ available: boolean; voices: { id: string; label: string }[] }>('tts_info'),
+  tts: (text: string, voice: string) => call<{ audio: string; mime: string }>('tts', { text, voice }),
 
   async transcribe(blob: Blob): Promise<string> {
     const supabase = createClient();
@@ -325,6 +328,11 @@ export function warmUpServer(userId: string) {
   if (Date.now() - lastWarmUp < 5 * 60_000) return;
   lastWarmUp = Date.now();
   refreshPlan(userId).catch(() => {});
+  // Deixa prontas no aparelho as informações que mais demoravam a aparecer (Farol e Perfil).
+  setTimeout(() => {
+    call<{ stats: AchievementStats }>('achievements').then((r) => cacheSet(userId, 'achievements', r.stats)).catch(() => {});
+    call<{ org: OrgInfo }>('org_status').then((r) => cacheSet(userId, 'org', r)).catch(() => {});
+  }, 2500);
 }
 
 // ---------------------------------------------------------------------

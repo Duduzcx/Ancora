@@ -283,7 +283,8 @@ html, body {
   from { transform: translateY(-100%); }
   to { transform: translateY(100%); }
 }
-.snake-gap { animation: snake-gap 0.3s linear forwards; opacity: 0.85; }
+.snake-gap { opacity: 0; transform: translateY(-100%); }
+.snake-gap.is-on { animation: snake-gap 0.3s linear forwards; opacity: 0.85; }
 
 /* Luz contínua na borda do card de login */
 @keyframes snake-loop {
@@ -317,6 +318,20 @@ html, body {
 .reveal.is-in { opacity: 1; translate: none; }
 
 /* ---------- Luz que gira na borda do card da vez (transform = GPU) ---------- */
+/* Anel sempre montado; a máscara deixa aparecer só a borda de 2px (o meio fica transparente). */
+.snake-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 1.5rem;
+  padding: 2px;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  transform: translateZ(0);
+}
 .snake-spin {
   position: absolute;
   left: 50%;
@@ -324,9 +339,10 @@ html, body {
   width: 160%;
   aspect-ratio: 1 / 1;
   translate: -50% -50%;
-  animation: snake-spin 3s cubic-bezier(0.45, 0, 0.55, 1) forwards;
+  opacity: 0;
   will-change: transform, opacity;
 }
+.snake-ring.is-on .snake-spin { animation: snake-spin 3s cubic-bezier(0.45, 0, 0.55, 1) forwards; }
 @keyframes snake-spin {
   0% { transform: rotate(-30deg); opacity: 0; }
   12% { opacity: 1; }
@@ -357,10 +373,44 @@ html, body {
 .press:active { scale: 0.97; }
 
 /* Quem pediu menos movimento no celular (Acessibilidade) não recebe animações contínuas. */
+/* ---------- Esqueleto de carregamento (no lugar de "Carregando…") ---------- */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 1rem;
+}
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.07), transparent);
+  transform: translateX(-100%);
+  animation: skeleton-wave 1.4s ease-in-out infinite;
+}
+@keyframes skeleton-wave { to { transform: translateX(100%); } }
+
+/* Conquista desbloqueada: brilho dourado que passa de vez em quando */
+.badge-glow { position: relative; overflow: hidden; }
+.badge-glow::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 35%, rgba(252, 211, 77, 0.22) 50%, transparent 65%);
+  transform: translateX(-120%);
+  animation: badge-glow 5s ease-in-out infinite;
+  animation-delay: var(--glow-delay, 0s);
+}
+@keyframes badge-glow { 0%, 60% { transform: translateX(-120%); } 100% { transform: translateX(120%); } }
+
+/* Estrelas do Modo noite */
+@keyframes twinkle { 0%, 100% { opacity: 0.15; } 50% { opacity: 0.8; } }
+.twinkle { animation: twinkle var(--d, 3s) ease-in-out infinite; animation-delay: var(--delay, 0s); }
+
 @media (prefers-reduced-motion: reduce) {
   .bg-drift, .anchor-float, .animate-bubble-rise, .sea-shadow, .shimmer-pass, .text-shine,
   .breath-pulse::after, .breath-pulse-rose::after, .breathe-scale, .spin-10s, .reveal,
-  .snake-border, .snake-gap, .snake-loop, .snake-spin, .page-enter, .stagger-in > *, .log-particle, .log-anchor, .log-sway, .log-bubble, .log-fish, .log-sparkle, .text-water, .ocean-bg {
+  .snake-border, .snake-gap.is-on, .snake-loop, .snake-ring.is-on .snake-spin, .page-enter, .stagger-in > *, .log-particle, .log-anchor, .log-sway, .log-bubble, .log-fish, .log-sparkle, .text-water, .ocean-bg, .skeleton::after, .badge-glow::after, .twinkle {
     animation: none !important;
   }
   .reveal { transition: none !important; }
