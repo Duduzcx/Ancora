@@ -14,7 +14,9 @@ import Link from 'next/link';
 import AnimatedBackground from '@/components/AnimatedBackground';
 import { createClient } from '@/lib/supabase-client';
 import { firstName } from '@/lib/user-name';
-import { noricaApi } from '@/lib/norica-api';
+import { cachedPlan, refreshPlan } from '@/lib/norica-api';
+import { getAuthState } from '@/lib/auth-store';
+import { cacheGet, cacheSet } from '@/lib/cache';
 import { loadFarolReading, EMPTY_FAROL, type FarolReading } from '@/lib/farol';
 
 export default function FarolPage() {
@@ -56,45 +58,66 @@ export default function FarolPage() {
     else if (hour < 18) setTimeState("Tarde");
     else setTimeState("Noite");
 
-    const getProfile = async () => {
-      // Tenta pegar da sessão atual imediatamente (mais rápido)
-      const { data: { session } } = await supabase.auth.getSession();
-      const user = session?.user;
-      
-      if (user) {
-        // Prioridade: Metadata da sessão (instantâneo) -> Banco de dados
-        setUserName(firstName(user));
-        const { data: profile } = await supabase.from('profiles').select('display_name').eq('id', user.id).maybeSingle();
-        if (profile?.display_name) setUserName(firstName(user, profile.display_name));
-      }
-    };
-    getProfile();
-
-    const fetchLogs = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user) return;
+    // Tudo em paralelo e com cache no aparelho: o Farol aparece na hora com a última
+    // leitura e atualiza quando o servidor responde (antes cada consulta esperava a anterior).
+    const load = async () => {
+      const user = getAuthState().user ?? (await supabase.auth.getSession()).data.session?.user;
+      if (!user) return;
+      const uid = user.id;
       const today = new Date().toLocaleDateString('en-CA');
-      
-      const { data: todayLog } = await supabase.from('daily_logs').select('*').eq('user_id', session.user.id).eq('date', today).maybeSingle();
-      if (todayLog) setDailyLog(todayLog);
-      
-      // Plano Pro vê as marés dos últimos 30 dias; o Gratuito, 7.
-      const plan = await noricaApi.plan().catch(() => null);
-      const pro = plan?.effective === 'pro';
+      const since = new Date();
+      since.setDate(since.getDate() - 30);
+      const sinceKey = since.toLocaleDateString('en-CA');
+      const cutoff = (pro: boolean) => {
+        const d = new Date();
+        d.setDate(d.getDate() - (pro ? 30 : 7));
+        return d.toLocaleDateString('en-CA');
+      };
+
+      // 1) Na hora: o que já estava salvo no aparelho.
+      setUserName(firstName(user, cacheGet<string>(uid, 'profileName')));
+      let pro = cachedPlan(uid)?.effective === 'pro';
       setIsPro(pro);
-      const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - (pro ? 30 : 7));
-      const { data: weekLogs } = await supabase.from('daily_logs')
-        .select('*')
-        .eq('user_id', session.user.id)
-        .gte('date', sevenDaysAgo.toLocaleDateString('en-CA'))
-        .order('date', { ascending: true });
-        
-      if (weekLogs) setWeeklyLogs(weekLogs);
+      const cachedMonth = cacheGet<any[]>(uid, 'farolMonth');
+      if (cachedMonth) setWeeklyLogs(cachedMonth.filter((l) => l.date >= cutoff(pro)));
+      const cachedToday = cacheGet<any>(uid, 'farolToday');
+      if (cachedToday?.date === today) setDailyLog(cachedToday);
+      const cachedReading = cacheGet<FarolReading>(uid, 'farolReading');
+      if (cachedReading) setReading(cachedReading);
+
+      // 2) Em paralelo: servidor.
+      let monthLogs: any[] = cachedMonth ?? [];
+      supabase.from('profiles').select('display_name').eq('id', uid).maybeSingle()
+        .then(({ data }) => {
+          if (data?.display_name) {
+            setUserName(firstName(user, data.display_name));
+            cacheSet(uid, 'profileName', data.display_name);
+          }
+        });
+      supabase.from('daily_logs').select('*').eq('user_id', uid).gte('date', sinceKey)
+        .order('date', { ascending: true })
+        .then(({ data }) => {
+          if (!data) return;
+          monthLogs = data;
+          cacheSet(uid, 'farolMonth', data);
+          setWeeklyLogs(data.filter((l: any) => l.date >= cutoff(pro)));
+          const t = data.find((l: any) => l.date === today) ?? null;
+          setDailyLog(t);
+          cacheSet(uid, 'farolToday', t);
+        });
+      // Plano Pro vê as marés dos últimos 30 dias; o Gratuito, 7.
+      refreshPlan(uid)
+        .then((plan) => {
+          pro = plan.effective === 'pro';
+          setIsPro(pro);
+          setWeeklyLogs(monthLogs.filter((l) => l.date >= cutoff(pro)));
+        })
+        .catch(() => {});
+      loadFarolReading()
+        .then((r) => { setReading(r); cacheSet(uid, 'farolReading', r); })
+        .catch(() => {});
     };
-    fetchLogs();
-    // Leituras reais para os cartões (humor marcado + Logs dos últimos dias).
-    loadFarolReading().then(setReading).catch(() => {});
+    load();
 
     // Listener para mudanças no localStorage caso o usuário complete algo em outra aba (raro mas bom ter)
     window.addEventListener('storage', loadProgress);

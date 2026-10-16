@@ -57,7 +57,7 @@ NEXT_PUBLIC_GOOGLE_CLIENT_ID=...   # login nativo com Google
    npm install
    npm run build:mobile
    ```
-   Depois gere o AAB assinado no Android Studio (versionCode 41) e envie para a Play Store.
+   Depois gere o AAB assinado no Android Studio (versionCode 42) e envie para a Play Store.
 6. **Play Console** — atualize a seção *Segurança dos dados*: dados de saúde/emocionais coletados, criptografados, com opção de exclusão no app; URL de exclusão: `https://SEU-SITE/excluir-conta/`.
 7. Troque `CONTACT_EMAIL` em `app/privacidade/page.tsx` pelo e-mail oficial.
 

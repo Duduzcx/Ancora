@@ -13,6 +13,22 @@ import {
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import AnimatedBackground from '@/components/AnimatedBackground';
+import { getAuthState, useAuth } from '@/lib/auth-store';
+import { cacheGet, cacheSet } from '@/lib/cache';
+
+// Foto do Google em alta resolução. A URL padrão vem com 96px ("=s96-c"),
+// que fica borrada no avatar grande em telas de celular.
+function hiResAvatar(url: string | null | undefined, size = 512): string | null {
+  if (!url) return null;
+  if (url.includes('googleusercontent.com')) {
+    if (/=s\d+(-c)?$/.test(url)) return url.replace(/=s\d+(-c)?$/, `=s${size}-c`);
+    if (/\/s\d+(-c)?\//.test(url)) return url.replace(/\/s\d+(-c)?\//, `/s${size}-c/`);
+    return `${url}=s${size}-c`;
+  }
+  return url;
+}
+
+type CachedProfile = { name: string; birth: string | null };
 
 // Componente para efeito de digitação lenta
 const TypingName = ({ text }: { text: string }) => {
@@ -25,7 +41,7 @@ const TypingName = ({ text }: { text: string }) => {
       setDisplayedText(text.slice(0, i + 1));
       i++;
       if (i >= text.length) clearInterval(interval);
-    }, 200); // Digitação bem lenta conforme pedido
+    }, 70); // digitação suave, sem fazer a pessoa esperar
     return () => clearInterval(interval);
   }, [text]);
 
@@ -57,6 +73,8 @@ export default function PerfilPage() {
   const [error, setError] = useState<string | null>(null);
   const [isDataLoaded, setIsDataLoaded] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [avatarFailed, setAvatarFailed] = useState(false);
+  const { user: authUser } = useAuth();
   
   const [isExiting, setIsExiting] = useState(false);
   
@@ -79,27 +97,34 @@ export default function PerfilPage() {
 
   useEffect(() => {
     setIsMounted(true);
+    const applyBirth = (iso: string) => {
+      const [y, m, d] = iso.split('-');
+      const formatted = `${d}/${m}/${y}`;
+      setBirthDate(formatted);
+      calculateAge(formatted);
+      setIsLocked(true);
+    };
+
     const loadProfile = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user) return;
-      
-      const sessionUser = session.user;
+      // Usa o login já carregado pelo app (instantâneo) em vez de esperar o getSession.
+      const sessionUser = getAuthState().user ?? (await supabase.auth.getSession()).data.session?.user;
+      if (!sessionUser) return;
       setUser(sessionUser);
-      
+
       // Conta Google não tem display_name: usa o nome da conta como ponto de partida.
       const metaName = sessionUser.user_metadata?.display_name || sessionUser.user_metadata?.full_name || sessionUser.user_metadata?.name;
       const metaBirth = sessionUser.user_metadata?.birth_date;
       const metaAvatar = sessionUser.user_metadata?.avatar_url || sessionUser.user_metadata?.picture;
-      
-      if (metaAvatar) setAvatarUrl(metaAvatar);
+
+      if (metaAvatar) setAvatarUrl(hiResAvatar(metaAvatar));
       if (metaName) setName(metaName);
-      if (metaBirth) {
-        const [y, m, d] = metaBirth.split('-');
-        const formatted = `${d}/${m}/${y}`;
-        setBirthDate(formatted);
-        calculateAge(formatted);
-        setIsLocked(true);
-      }
+      if (metaBirth) applyBirth(metaBirth);
+
+      // Último perfil salvo no aparelho: o nome aparece na hora.
+      const cached = cacheGet<CachedProfile>(sessionUser.id, 'profile');
+      if (cached?.name) setName(cached.name);
+      if (cached?.birth) applyBirth(cached.birth);
+      if (cached || metaName) setIsDataLoaded(true);
 
       const { data: profile } = await supabase.from('profiles')
         .select('display_name, birth_date')
@@ -108,18 +133,16 @@ export default function PerfilPage() {
 
       if (profile) {
         if (profile.display_name) setName(profile.display_name);
-        if (profile.birth_date) {
-          const [y, m, d] = profile.birth_date.split('-');
-          const formatted = `${d}/${m}/${y}`;
-          setBirthDate(formatted);
-          calculateAge(formatted);
-          setIsLocked(true);
-        }
+        if (profile.birth_date) applyBirth(profile.birth_date);
+        cacheSet(sessionUser.id, 'profile', {
+          name: profile.display_name || metaName || '',
+          birth: profile.birth_date || metaBirth || null,
+        } satisfies CachedProfile);
       }
       setIsDataLoaded(true);
     };
     loadProfile();
-  }, [supabase]);
+  }, [supabase, authUser?.id]);
 
   useEffect(() => {
     if (isExiting) {
@@ -171,6 +194,8 @@ export default function PerfilPage() {
         name_changed: true
       });
 
+      cacheSet(user.id, 'profile', { name: name.trim(), birth: isoDate } satisfies CachedProfile);
+      cacheSet(user.id, 'profileName', name.trim());
       setSaved(true);
       setIsLocked(true);
       await supabase.auth.refreshSession();
@@ -314,10 +339,22 @@ export default function PerfilPage() {
               transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
               className="w-32 h-32 bg-gradient-to-br from-emerald-500 via-teal-600 to-emerald-700 rounded-[3.2rem] flex items-center justify-center border-[6px] border-white/10 shadow-2xl relative z-10 overflow-hidden"
             >
-              {avatarUrl ? (
-                <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover pointer-events-none" />
+              {avatarUrl && !avatarFailed ? (
+                <img
+                  src={avatarUrl}
+                  alt="Avatar"
+                  referrerPolicy="no-referrer"
+                  decoding="async"
+                  onError={() => setAvatarFailed(true)}
+                  className="w-full h-full object-cover pointer-events-none"
+                />
               ) : (
-                <img src={`https://ui-avatars.com/api/?name=${encodeURIComponent(name || 'Marujo')}&background=064e3b&color=34d399&size=256`} alt="Avatar" className="w-full h-full object-cover pointer-events-none" />
+                // Iniciais desenhadas no próprio app: nítidas em qualquer tela e sem depender da internet.
+                <div className="w-full h-full bg-[#064e3b] flex items-center justify-center pointer-events-none">
+                  <span className="text-[#34d399] text-4xl font-black tracking-tight">
+                    {(name || 'Marujo').trim().split(/\s+/).slice(0, 2).map((p) => p[0]?.toUpperCase()).join('')}
+                  </span>
+                </div>
               )}
             </motion.div>
           </div>

@@ -46,3 +46,17 @@ export const createClient = (): SupabaseClient => {
 }
 
 export const supabase = createClient();
+
+// Lê a sessão salva no aparelho sem passar pela rede. Serve só para abrir o app
+// na hora (mostrar a Início e o nome); o Supabase confirma/renova o login logo depois.
+export async function peekStoredSession(): Promise<any | null> {
+  if (!isBrowser) return null;
+  try {
+    const raw = await capacitorStorage.getItem('norica-auth');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed?.user && parsed?.refresh_token ? parsed : null;
+  } catch (_e) {
+    return null;
+  }
+}

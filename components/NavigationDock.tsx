@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { usePathname, useRouter } from 'next/navigation';
 import { Anchor, LifeBuoy, Clock, User, Compass, Sword, Shield, CheckCircle } from 'lucide-react';
-import { createClient } from '@/lib/supabase-client';
+import { useAuth } from '@/lib/auth-store';
 
 const LighthouseIcon = (props: any) => (
   <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={props.strokeWidth || 2} strokeLinecap="round" strokeLinejoin="round" {...props}>
@@ -35,28 +35,13 @@ export default function NavigationDock() {
   const router = useRouter();
   const [isVisible, setIsVisible] = useState(true);
   const [isHubOpen, setIsHubOpen] = useState(false);
-  const [user, setUser] = useState<any>(null);
-  const supabase = createClient();
+  const { user } = useAuth();
 
   React.useEffect(() => {
     const handleToggle = (e: any) => setIsVisible(e.detail);
     window.addEventListener('toggleDock', handleToggle);
-
-    const checkUser = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      setUser(session?.user ?? null);
-    };
-    checkUser();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-    });
-
-    return () => {
-      window.removeEventListener('toggleDock', handleToggle);
-      subscription.unsubscribe();
-    };
-  }, [supabase]);
+    return () => window.removeEventListener('toggleDock', handleToggle);
+  }, []);
 
   const handleNavigate = (e: React.MouseEvent, href: string) => {
     e.preventDefault();
@@ -91,7 +76,7 @@ export default function NavigationDock() {
               initial={{ opacity: 0, y: 20, scale: 0.95 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 20, scale: 0.95 }}
-              className="fixed bottom-24 left-6 right-6 z-[999] bg-[#031c20]/80 backdrop-blur-3xl rounded-[2.5rem] p-6 shadow-[0_8px_32px_0_rgba(0,0,0,0.5)] border border-white/10 max-w-sm mx-auto"
+              className="fixed bottom-24 left-6 right-6 z-[999] bg-[#031c20]/90 backdrop-blur-xl rounded-[2.5rem] p-6 shadow-[0_8px_32px_0_rgba(0,0,0,0.5)] border border-white/10 max-w-sm mx-auto"
             >
               <div className="grid grid-cols-3 gap-4">
                 {hubItems.map((item) => (
@@ -112,7 +97,7 @@ export default function NavigationDock() {
         )}
       </AnimatePresence>
 
-      <nav className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-sm bg-[#021013]/60 backdrop-blur-3xl border border-white/10 rounded-full px-4 py-2 shadow-[0_10px_40px_rgba(0,0,0,0.37)] flex justify-between items-center z-[999]">
+      <nav className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-sm bg-[#021013]/80 backdrop-blur-xl border border-white/10 rounded-full px-4 py-2 shadow-[0_10px_40px_rgba(0,0,0,0.37)] flex justify-between items-center z-[999]">
         <div className="w-full flex items-center justify-around h-12">
           {navItems.map((item) => {
             const isActive = item.href === 'hub' ? isHubOpen : (pathname === item.href || (item.href !== '/' && pathname?.startsWith(item.href)));

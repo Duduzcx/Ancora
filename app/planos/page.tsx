@@ -9,7 +9,8 @@ import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Check, Sparkles, LifeBuoy, Loader2, Crown, Anchor, RefreshCcw, ExternalLink } from 'lucide-react';
-import { noricaApi, type PlanInfo } from '@/lib/norica-api';
+import { noricaApi, type PlanInfo, cachedPlan, refreshPlan } from '@/lib/norica-api';
+import { getAuthState } from '@/lib/auth-store';
 import {
   billingAvailable, initBilling, onBillingEvent, proPriceLabel, restorePro, subscribePro,
   MANAGE_SUBSCRIPTION_URL, PRO_PRICE_FALLBACK,
@@ -68,12 +69,20 @@ export default function PlanosPage() {
   const [joined, setJoined] = useState(false);
 
   const loadPlan = async () => {
+    // Mostra o último plano conhecido na hora e confere com o servidor.
+    const uid = getAuthState().user?.id;
+    const cached = cachedPlan(uid);
+    if (cached) {
+      setInfo(cached);
+      setJoined(cached.proInterest);
+      setLoading(false);
+    }
     try {
-      const data = await noricaApi.plan();
+      const data = await refreshPlan(uid);
       setInfo(data);
       setJoined(data.proInterest);
     } catch (_e) {
-      setMessage({ kind: 'error', text: 'Não foi possível carregar seu plano agora.' });
+      if (!cached) setMessage({ kind: 'error', text: 'Não foi possível carregar seu plano agora.' });
     } finally {
       setLoading(false);
     }

@@ -369,24 +369,20 @@ export default function LogPage() {
             
             {/* Partículas estáveis */}
             {particlePos.map((pos: any, i: number) => (
-              <motion.div
+              <div
                 key={i}
-                animate={{ y: [-5, 5, -5], opacity: [0.1, 0.4, 0.1] }}
-                transition={{ duration: 3 + (i % 5), repeat: Infinity }}
-                className="absolute w-1 h-1 bg-emerald-400 rounded-full blur-[1px]"
-                style={{ top: `${pos.top}%`, left: `${pos.left}%` }}
+                className="absolute w-1 h-1 bg-emerald-400 rounded-full log-particle"
+                style={{ top: `${pos.top}%`, left: `${pos.left}%`, ['--d' as any]: `${3 + (i % 5)}s` }}
               />
             ))}
 
             <div className="absolute bottom-0 inset-x-0 h-32 bg-white/5 backdrop-blur-sm" />
             
-            <motion.div 
-              animate={{ y: [0, -15, 0] }}
-              transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
-              className="absolute bottom-16 left-1/2 -translate-x-1/2 text-emerald-500/20"
-            >
-              <Anchor size={140} strokeWidth={1} className="opacity-40" />
-            </motion.div>
+            <div className="absolute bottom-16 left-1/2 -translate-x-1/2 text-emerald-500/20">
+              <div className="log-anchor">
+                <Anchor size={140} strokeWidth={1} className="opacity-40" />
+              </div>
+            </div>
 
             {/* Evolução Visual */}
             <AnimatePresence>
@@ -400,19 +396,16 @@ export default function LogPage() {
                       className="absolute bottom-20 text-emerald-400/60"
                       style={{ left: `${15 + i * 14}%` }}
                     >
-                      <motion.div animate={{ rotate: [-8, 8, -8] }} transition={{ duration: 4 + i, repeat: Infinity }}>
+                      <div className="log-sway" style={{ ['--d' as any]: `${4 + i}s` }}>
                         <Sprout size={30 + i * 8} />
-                      </motion.div>
+                      </div>
                     </motion.div>
                   ))}
                   {bubbleLefts.map((left: any, i: number) => (
-                    <motion.div
+                    <div
                       key={`b-${i}`}
-                      initial={{ y: 600, opacity: 0 }}
-                      animate={{ y: -100, opacity: [0, 0.5, 0] }}
-                      transition={{ duration: 4 + (i % 4), repeat: Infinity, delay: i * 0.5 }}
-                      className="absolute w-2 h-2 bg-white/30 rounded-full border border-white/20"
-                      style={{ left: `${left}%` }}
+                      className="absolute top-0 w-2 h-2 bg-white/30 rounded-full border border-white/20 log-bubble"
+                      style={{ left: `${left}%`, ['--d' as any]: `${4 + (i % 4)}s`, ['--delay' as any]: `${i * 0.5}s` }}
                     />
                   ))}
                 </>
@@ -420,16 +413,13 @@ export default function LogPage() {
               
               {progress >= 60 && (
                 [...Array(4)].map((_: any, i: number) => (
-                  <motion.div
+                  <div
                     key={`f-${i}`}
-                    initial={{ x: -100, opacity: 0 }}
-                    animate={{ x: 600, opacity: 1 }}
-                    transition={{ duration: 15 + i * 2, repeat: Infinity, ease: "linear", delay: i * 4 }}
-                    className="absolute text-blue-400/40"
-                    style={{ top: `${25 + i * 15}%` }}
+                    className="absolute left-0 text-blue-400/40 log-fish"
+                    style={{ top: `${25 + i * 15}%`, ['--d' as any]: `${15 + i * 2}s`, ['--delay' as any]: `${i * 4}s` }}
                   >
                     <Fish size={40} />
-                  </motion.div>
+                  </div>
                 ))
               )}
 
@@ -439,13 +429,9 @@ export default function LogPage() {
                   animate={{ opacity: 1 }}
                   className="absolute inset-0 bg-emerald-500/5 flex items-center justify-center"
                 >
-                  <motion.div 
-                    animate={{ scale: [1, 1.2, 1], rotate: 360 }}
-                    transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
-                    className="text-amber-400/10"
-                  >
+                  <div className="text-amber-400/10 log-sparkle">
                     <Sparkles size={300} />
-                  </motion.div>
+                  </div>
                 </motion.div>
               )}
             </AnimatePresence>

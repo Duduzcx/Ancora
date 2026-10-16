@@ -9,6 +9,8 @@ import { Capacitor } from '@capacitor/core';
 import { motion, AnimatePresence } from 'framer-motion';
 import NavigationDock from '@/components/NavigationDock';
 import ConsentGate from '@/components/ConsentGate';
+import { useAuth } from '@/lib/auth-store';
+import { warmUpServer } from '@/lib/norica-api';
 
 const publicPages = ['/auth', '/auth/signup', '/auth/forgot-password', '/privacidade', '/excluir-conta'];
 
@@ -23,8 +25,8 @@ const isChunkError = (err: any, msg = '') =>
 
 export default function LayoutWrapper({ children }: { children: React.ReactNode }) {
   const [isMounted, setIsMounted] = useState(false);
-  const [session, setSession] = useState<any>(null);
-  const [authReady, setAuthReady] = useState(false);
+  // Login compartilhado: abre na hora com a sessão salva no aparelho.
+  const { session, ready: authReady } = useAuth();
   const [loading, setLoading] = useState(true);
   const pathname = usePathname();
   const router = useRouter();
@@ -72,24 +74,6 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
       }));
     }
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, newSession) => {
-      log(`onAuthStateChange: event="${event}", session=${newSession ? 'YES' : 'NO'}`);
-      setSession(newSession);
-      if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN' || event === 'SIGNED_OUT') setAuthReady(true);
-    });
-
-    // Fallback para a tela não travar se o INITIAL_SESSION demorar.
-    const fallback = setTimeout(async () => {
-      try {
-        const { data: { session: current } } = await supabase.auth.getSession();
-        setSession(current);
-      } catch (e: any) {
-        log(`Erro no fallback getSession: ${e?.message || e}`);
-      } finally {
-        setAuthReady(true);
-      }
-    }, 1200);
-
     const handleGlobalError = (event: ErrorEvent) => {
       log(`GLOBAL ERROR: "${event.message || ''}"`);
       if (isChunkError(event.error, event.message || '')) window.location.reload();
@@ -102,8 +86,6 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
     window.addEventListener('unhandledrejection', handleUnhandledRejection);
 
     return () => {
-      subscription.unsubscribe();
-      clearTimeout(fallback);
       window.removeEventListener('error', handleGlobalError);
       window.removeEventListener('unhandledrejection', handleUnhandledRejection);
       listeners.forEach(p => p.then(l => l.remove()).catch(() => {}));
@@ -115,9 +97,22 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
     if (!authReady) return;
     const isPublic = publicPages.some(page => pathname?.startsWith(page));
     log(`checkRedirect: session=${session ? 'YES' : 'NO'}, path="${pathname}", isPublic=${isPublic}`);
-    if (!session && !isPublic && pathname !== '/') router.push('/');
+    if (!session && !isPublic && pathname !== '/') router.replace('/');
     setLoading(false);
   }, [authReady, session, pathname, router]);
+
+  // Logado: deixa as telas principais e o servidor da IA prontos em segundo plano,
+  // para a troca de página e a primeira resposta do Porto serem rápidas.
+  const userId = session?.user?.id;
+  useEffect(() => {
+    if (!userId) return;
+    const t = setTimeout(() => {
+      ['/porto/', '/farol/', '/perfil/', '/log/', '/arena/', '/cofre/', '/respiracao/', '/planos/']
+        .forEach((href) => { try { router.prefetch(href); } catch (_e) {} });
+      warmUpServer(userId);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [userId, router]);
 
   if (!isMounted) return null;
 
@@ -125,36 +120,38 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
 
   return (
     <div className="min-h-screen bg-transparent relative">
-      <AnimatePresence mode="wait">
-        {loading ? (
+      {!loading && (
+        <div className="min-h-[100dvh] w-full relative z-0 flex flex-col">
+          <motion.div
+            key={pathname}
+            initial={{ opacity: 0.6 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.12, ease: "easeOut" }}
+            className="flex-1 w-full"
+          >
+            {children}
+          </motion.div>
+          <NavigationDock />
+        </div>
+      )}
+      {/* Tela de abertura: some por cima do conteúdo já desenhado (antes a tela esperava a animação terminar). */}
+      <AnimatePresence>
+        {loading && (
           <motion.div
             key="loader"
             initial={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.8, ease: "easeInOut" }}
+            transition={{ duration: 0.25, ease: "easeOut" }}
             className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-[#021013]"
           >
             <div className="relative mb-8">
               <div className="w-24 h-24 bg-emerald-500/10 rounded-[2.5rem] flex items-center justify-center relative overflow-hidden border border-white/10">
-                <div className="absolute inset-0 bg-emerald-500 blur-3xl opacity-20 animate-pulse" />
+                <div className="absolute inset-0 bg-emerald-500/20 animate-pulse" />
                 <Anchor className="text-emerald-400 animate-bounce relative z-10" size={56} strokeWidth={2.5} />
               </div>
             </div>
             <p className="text-[10px] font-black text-emerald-400 uppercase tracking-[0.5em] animate-pulse">Ancorando...</p>
           </motion.div>
-        ) : (
-          <div className="min-h-[100dvh] w-full relative z-0 flex flex-col">
-              <motion.div
-                key={pathname}
-                initial={{ opacity: 0.3 }}
-                animate={{ opacity: 1 }}
-                transition={{ duration: 0.15, ease: "easeOut" }}
-                className="flex-1 w-full"
-              >
-                {children}
-              </motion.div>
-            <NavigationDock />
-          </div>
         )}
       </AnimatePresence>
       {/* Consentimento LGPD para dados emocionais (uma vez por conta) */}

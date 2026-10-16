@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useSyncExternalStore } from 'react';
 import { Anchor, Mail, Lock, ArrowRight, Loader2, User, Wind, Cloud, Zap, LifeBuoy, MessageCircle, Sword, Lightbulb, CheckCircle2, Shield, Eye, EyeOff, Compass } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { createClient } from '@/lib/supabase-client';
@@ -13,14 +13,64 @@ import { Capacitor } from '@capacitor/core';
 import { GoogleSignIn } from '@capawesome/capacitor-google-sign-in';
 import AnimatedBackground from '@/components/AnimatedBackground';
 import RevealOnScroll from '@/components/RevealOnScroll';
-import MovingGlow from '@/components/MovingGlow';
 import LoginBackground from '@/components/LoginBackground';
 import NeblinaSOS from '@/components/NeblinaSOS';
-import { gsap } from 'gsap';
-import { useGSAP } from '@gsap/react';
-import { ScrollTrigger } from 'gsap/ScrollTrigger';
+import { useAuth } from '@/lib/auth-store';
+import { cacheGet, cacheSet } from '@/lib/cache';
 
-gsap.registerPlugin(useGSAP, ScrollTrigger);
+// Luz que percorre a borda dos cards, um card de cada vez (Porto → Arena → Farol → Cofre → Logs).
+// Antes a página inteira era redesenhada a cada passo e a luz era animada por JavaScript, o que
+// travava. Agora um relógio leve só liga/desliga o card da vez; a luz em si é animação CSS.
+// Passos: 0,2,4,6,8 = borda do card (3s); 1,3,5,7 = fio de luz até o próximo card (0,3s).
+const snakeClock = (() => {
+  let step = 0;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const subs = new Set<() => void>();
+  const next = () => {
+    step = (step + 1) % 9;
+    subs.forEach((f) => f());
+    timer = setTimeout(next, step % 2 === 0 ? 3000 : 300);
+  };
+  return {
+    get: () => step,
+    subscribe(f: () => void) {
+      subs.add(f);
+      if (!timer) timer = setTimeout(next, 3000);
+      return () => {
+        subs.delete(f);
+        if (!subs.size && timer) { clearTimeout(timer); timer = null; step = 0; }
+      };
+    },
+  };
+})();
+const useSnakeStep = () => useSyncExternalStore(snakeClock.subscribe, snakeClock.get, () => 0);
+
+const SnakeBorder = ({ index, color }: { index: number; color: string }) => {
+  const step = useSnakeStep();
+  if (step !== index * 2) return null;
+  return (
+    <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none z-20 flex">
+      <svg className="absolute inset-0 w-full h-full block overflow-visible" xmlns="http://www.w3.org/2000/svg">
+        <rect
+          x="0" y="0" width="100%" height="100%" rx="24" fill="none" stroke={color} strokeWidth="4"
+          pathLength={100}
+          className="snake-border"
+        />
+      </svg>
+    </div>
+  );
+};
+
+// Fio de luz que desce de um card para o próximo.
+const SnakeGap = ({ index }: { index: number }) => {
+  const step = useSnakeStep();
+  if (step !== index * 2 + 1) return null;
+  return (
+    <div className="absolute -bottom-6 left-6 w-[2px] h-6 z-20 overflow-hidden pointer-events-none">
+      <div className="w-full h-full bg-white snake-gap" />
+    </div>
+  );
+};
 
 const LighthouseIcon = (props: any) => (
   <svg xmlns="http://www.w3.org/2000/svg" width={props.size || 24} height={props.size || 24} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={props.strokeWidth || 2} strokeLinecap="round" strokeLinejoin="round" {...props}>
@@ -77,8 +127,9 @@ const moduleCardVariants = {
 
 export default function Home() {
   const [mostrarNeblina, setMostrarNeblina] = useState(false);
-  const [user, setUser] = useState<any>(null);
-  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  // Login compartilhado pelo app inteiro: a Início aparece na hora, sem um segundo "carregando".
+  const { user: authUser, ready } = useAuth();
+  const isCheckingAuth = !ready;
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -87,46 +138,22 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
   const supabase = createClient();
+  const user = authUser;
   const [profileName, setProfileName] = useState<string | null>(null);
 
   // Nome escolhido no Perfil (vale mais que o nome da conta Google).
+  // Mostra o último nome salvo no aparelho na hora e confere com o servidor em segundo plano.
   useEffect(() => {
     if (!user?.id) return;
+    const cached = cacheGet<string>(user.id, 'profileName');
+    if (cached) setProfileName(cached);
     supabase.from('profiles').select('display_name').eq('id', user.id).maybeSingle()
-      .then(({ data }) => setProfileName(data?.display_name ?? null));
+      .then(({ data }) => {
+        const n = data?.display_name ?? null;
+        setProfileName(n);
+        cacheSet(user.id, 'profileName', n);
+      });
   }, [user?.id]);
-  const gsapContainerRef = useRef<HTMLDivElement>(null);
-  
-  const [snakeStep, setSnakeStep] = useState(0);
-
-  const handleSnakeComplete = () => {
-    setSnakeStep(prev => (prev + 1) % 9);
-  };
-
-  useEffect(() => {
-    const handleSession = (session: any) => {
-      if (session?.user) {
-        setUser({
-          ...session.user,
-          display_name: firstName(session.user)
-        });
-      } else {
-        setUser(null);
-      }
-    };
-
-    const checkSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      handleSession(session);
-      setIsCheckingAuth(false);
-    };
-    checkSession();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      handleSession(session);
-    });
-    return () => subscription.unsubscribe();
-  }, [supabase]);
 
   useEffect(() => {
     // Esconde o menu global quando a neblina está ativa
@@ -194,7 +221,6 @@ export default function Home() {
         password: password.trim() 
       });
       if (signInError) throw signInError;
-      if (data?.session) handleSession(data.session);
     } catch (err: any) {
       setError("E-mail ou senha incorretos.");
     } finally {
@@ -202,20 +228,6 @@ export default function Home() {
     }
   };
 
-  const handleSession = (session: any) => {
-    if (session?.user) {
-      setUser({
-        ...session.user,
-        display_name: firstName(session.user)
-      });
-    } else {
-      setUser(null);
-    }
-  };
-
-  useGSAP(() => {
-    // ScrollTrigger desativado temporariamente conforme solicitado
-  }, { dependencies: [user], revertOnUpdate: true });
 
   if (isCheckingAuth) {
     return (
@@ -234,17 +246,8 @@ export default function Home() {
         <AnimatedBackground subtle />
         
         {/* Sombra Se Movendo Lentamente - Efeito Fundo do Mar */}
-        <motion.div 
-          className="fixed inset-0 pointer-events-none z-[-5] opacity-60 mix-blend-multiply"
-          style={{
-            backgroundImage: `radial-gradient(ellipse at 50% 50%, transparent 0%, rgba(2,10,16,0.6) 100%)`,
-            backgroundSize: '200% 200%'
-          }}
-          animate={{
-            backgroundPosition: ['0% 50%', '50% 0%', '100% 50%', '50% 100%', '0% 50%'],
-            scale: [1, 1.1, 1]
-          }}
-          transition={{ duration: 20, ease: "easeInOut", repeat: Infinity }}
+        <div className="fixed inset-[-15%] pointer-events-none z-[-5] opacity-60 sea-shadow"
+          style={{ backgroundImage: `radial-gradient(ellipse at 50% 50%, transparent 0%, rgba(2,10,16,0.6) 100%)` }}
         />
         
         <motion.div
@@ -274,16 +277,8 @@ export default function Home() {
           >
             <span className="text-[34px] md:text-[42px] block leading-none mb-3">
               Sua
-              <motion.span
-                animate={{ 
-                  backgroundPosition: ['0% center', '-200% center'],
-                }}
-                transition={{ 
-                  duration: 2.5, 
-                  repeat: Infinity, 
-                  ease: "linear"
-                }}
-                className="font-brain text-6xl md:text-7xl normal-case px-1 ml-1 mr-2 inline-block bg-[linear-gradient(110deg,#DB2777,46%,#fff,54%,#DB2777)] bg-[length:200%_auto]"
+              <span
+                className="font-brain text-6xl md:text-7xl normal-case px-1 ml-1 mr-2 inline-block bg-[linear-gradient(110deg,#DB2777,46%,#fff,54%,#DB2777)] bg-[length:200%_auto] text-shine"
                 style={{
                   WebkitBackgroundClip: 'text',
                   WebkitTextFillColor: 'transparent',
@@ -291,7 +286,7 @@ export default function Home() {
                 }}
               >
                 mente
-              </motion.span>
+              </span>
               em
             </span>
             <span className="text-emerald-400 italic block text-[52px] md:text-[64px] tracking-[-0.05em]">Solo firme.</span>
@@ -323,11 +318,7 @@ export default function Home() {
         >
           <div className="bg-slate-900/60 border border-white/10 rounded-[3rem] p-6 shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] overflow-hidden relative group">
             {/* Shimmer Effect */}
-            <motion.div 
-              animate={{ x: ['-100%', '200%'] }}
-              transition={{ duration: 4, repeat: Infinity, ease: "linear", repeatDelay: 2 }}
-              className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -skew-x-12 pointer-events-none"
-            />
+            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent pointer-events-none shimmer-pass" />
             
             {/* Background decoration */}
             <div className="absolute top-0 right-0 w-48 h-48 bg-emerald-500/10 rounded-full -mr-24 -mt-24 blur-3xl transition-transform group-hover:scale-110 duration-700" />
@@ -415,7 +406,7 @@ export default function Home() {
         </motion.div>
 
         {/* Modules Section */}
-        <div ref={gsapContainerRef} className="cards-grid px-6 mt-4 space-y-6 max-w-md mx-auto perspective-[1200px] relative">
+        <div className="cards-grid px-6 mt-4 space-y-6 max-w-md mx-auto perspective-[1200px] relative">
           
 
           {/* O Porto */}
@@ -426,35 +417,11 @@ export default function Home() {
             transition={{ duration: 0.8, delay: 0.15 }}
             style={{ '--card-index': 0 } as React.CSSProperties}
             onClick={(e) => handleNavigate(e, '/porto/')}
-            className="group p-6 rounded-3xl bg-[#131b2c] hover:bg-[#1a2333] border border-white/5 active:scale-[0.98] transition-all relative cursor-pointer shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] text-center overflow-hidden"
+            className="group p-6 rounded-3xl bg-[#131b2c] hover:bg-[#1a2333] border border-white/5 active:scale-[0.98] transition-all relative cursor-pointer shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] text-center"
           >            {/* SVG Snake Border */}
-            {snakeStep === 0 && (
-              <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none z-20 flex">
-                <svg className="absolute inset-0 w-full h-full block overflow-visible" xmlns="http://www.w3.org/2000/svg">
-                  <motion.rect
-                    x="0" y="0" width="100%" height="100%" rx="24" fill="none" stroke="#60A5FA" strokeWidth="4"
-                    initial={{ pathLength: 0, pathOffset: 0 }}
-                    animate={{ pathLength: [0, 0.4, 0], pathOffset: [0, 1.6, 1.6] }}
-                    transition={{ duration: 3, ease: "linear" }}
-                    style={{ opacity: 0.85 }}
-                    onAnimationComplete={handleSnakeComplete}
-                  />
-                </svg>
-              </div>
-            )}
+            <SnakeBorder index={0} color="#60A5FA" />
             {/* Gap Line to next card */}
-            {snakeStep === 1 && (
-              <div className="absolute -bottom-6 left-6 w-[2px] h-6 z-20 overflow-hidden">
-                <motion.div
-                  className="w-full bg-white"
-                  initial={{ height: "0%", y: "0%" }}
-                  animate={{ height: ["0%", "100%", "0%"], y: ["0%", "0%", "24px"] }}
-                  transition={{ duration: 0.3, ease: "linear" }}
-                  style={{ opacity: 0.85 }}
-                  onAnimationComplete={handleSnakeComplete}
-                />
-              </div>
-            )}
+            <SnakeGap index={0} />
             <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none z-0"><div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 rounded-bl-full -mr-10 -mt-10 transition-transform group-hover:scale-110" /></div>
             <div className="relative z-10 flex flex-col items-center space-y-4">
               <div className="w-16 h-16 bg-gradient-to-br from-blue-600 to-blue-400 rounded-[2rem] flex items-center justify-center mx-auto shadow-lg shadow-blue-500/20 group-hover:rotate-6 transition-transform relative z-10">
@@ -478,35 +445,11 @@ export default function Home() {
             transition={{ duration: 0.8, delay: 0.3 }}
             style={{ '--card-index': 1 } as React.CSSProperties}
             onClick={(e) => handleNavigate(e, '/arena/')}
-            className="group p-6 rounded-3xl bg-[#131b2c] hover:bg-[#1a2333] border border-white/5 active:scale-[0.98] transition-all relative cursor-pointer shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] text-center overflow-hidden"
+            className="group p-6 rounded-3xl bg-[#131b2c] hover:bg-[#1a2333] border border-white/5 active:scale-[0.98] transition-all relative cursor-pointer shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] text-center"
           >            {/* SVG Snake Border */}
-            {snakeStep === 2 && (
-              <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none z-20 flex">
-                <svg className="absolute inset-0 w-full h-full block overflow-visible" xmlns="http://www.w3.org/2000/svg">
-                  <motion.rect
-                    x="0" y="0" width="100%" height="100%" rx="24" fill="none" stroke="#FB7185" strokeWidth="4"
-                    initial={{ pathLength: 0, pathOffset: 0 }}
-                    animate={{ pathLength: [0, 0.4, 0], pathOffset: [0, 1.6, 1.6] }}
-                    transition={{ duration: 3, ease: "linear" }}
-                    style={{ opacity: 0.85 }}
-                    onAnimationComplete={handleSnakeComplete}
-                  />
-                </svg>
-              </div>
-            )}
+            <SnakeBorder index={1} color="#FB7185" />
             {/* Gap Line to next card */}
-            {snakeStep === 3 && (
-              <div className="absolute -bottom-6 left-6 w-[2px] h-6 z-20 overflow-hidden">
-                <motion.div
-                  className="w-full bg-white"
-                  initial={{ height: "0%", y: "0%" }}
-                  animate={{ height: ["0%", "100%", "0%"], y: ["0%", "0%", "24px"] }}
-                  transition={{ duration: 0.3, ease: "linear" }}
-                  style={{ opacity: 0.85 }}
-                  onAnimationComplete={handleSnakeComplete}
-                />
-              </div>
-            )}
+            <SnakeGap index={1} />
             <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none z-0">
               <div className="absolute top-0 right-0 w-32 h-32 bg-rose-500/10 rounded-bl-full -mr-10 -mt-10 transition-transform group-hover:scale-110" />
             </div>
@@ -532,36 +475,12 @@ export default function Home() {
             transition={{ duration: 0.8, delay: 0.45 }}
             style={{ '--card-index': 2 } as React.CSSProperties}
             onClick={(e) => handleNavigate(e, '/farol/')}
-            className="group p-6 rounded-3xl bg-[#131b2c] hover:bg-[#1a2333] border border-white/5 active:scale-[0.98] transition-all relative cursor-pointer shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] text-center overflow-hidden"
+            className="group p-6 rounded-3xl bg-[#131b2c] hover:bg-[#1a2333] border border-white/5 active:scale-[0.98] transition-all relative cursor-pointer shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] text-center"
           >
             {/* SVG Snake Border */}
-            {snakeStep === 4 && (
-              <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none z-20 flex">
-                <svg className="absolute inset-0 w-full h-full block overflow-visible" xmlns="http://www.w3.org/2000/svg">
-                  <motion.rect
-                    x="0" y="0" width="100%" height="100%" rx="24" fill="none" stroke="#34D399" strokeWidth="4"
-                    initial={{ pathLength: 0, pathOffset: 0 }}
-                    animate={{ pathLength: [0, 0.4, 0], pathOffset: [0, 1.6, 1.6] }}
-                    transition={{ duration: 3, ease: "linear" }}
-                    style={{ opacity: 0.85 }}
-                    onAnimationComplete={handleSnakeComplete}
-                  />
-                </svg>
-              </div>
-            )}
+            <SnakeBorder index={2} color="#34D399" />
             {/* Gap Line to next card */}
-            {snakeStep === 5 && (
-              <div className="absolute -bottom-6 left-6 w-[2px] h-6 z-20 overflow-hidden">
-                <motion.div
-                  className="w-full bg-white"
-                  initial={{ height: "0%", y: "0%" }}
-                  animate={{ height: ["0%", "100%", "0%"], y: ["0%", "0%", "24px"] }}
-                  transition={{ duration: 0.3, ease: "linear" }}
-                  style={{ opacity: 0.85 }}
-                  onAnimationComplete={handleSnakeComplete}
-                />
-              </div>
-            )}
+            <SnakeGap index={2} />
             <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none z-0">
               <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-bl-full -mr-10 -mt-10 transition-transform group-hover:scale-110" />
             </div>
@@ -590,33 +509,9 @@ export default function Home() {
             className="group p-6 rounded-3xl bg-[#131b2c] hover:bg-[#1a2333] border border-white/5 active:scale-[0.98] transition-all relative cursor-pointer shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] text-center"
           >
             {/* SVG Snake Border */}
-            {snakeStep === 6 && (
-              <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none z-20 flex">
-                <svg className="absolute inset-0 w-full h-full block overflow-visible" xmlns="http://www.w3.org/2000/svg">
-                  <motion.rect
-                    x="0" y="0" width="100%" height="100%" rx="24" fill="none" stroke="#2DD4BF" strokeWidth="4"
-                    initial={{ pathLength: 0, pathOffset: 0 }}
-                    animate={{ pathLength: [0, 0.4, 0], pathOffset: [0, 1.6, 1.6] }}
-                    transition={{ duration: 3, ease: "linear" }}
-                    style={{ opacity: 0.85 }}
-                    onAnimationComplete={handleSnakeComplete}
-                  />
-                </svg>
-              </div>
-            )}
+            <SnakeBorder index={3} color="#2DD4BF" />
             {/* Gap Line to next card */}
-            {snakeStep === 7 && (
-              <div className="absolute -bottom-6 left-6 w-[2px] h-6 z-20 overflow-hidden">
-                <motion.div
-                  className="w-full bg-white"
-                  initial={{ height: "0%", y: "0%" }}
-                  animate={{ height: ["0%", "100%", "0%"], y: ["0%", "0%", "24px"] }}
-                  transition={{ duration: 0.3, ease: "linear" }}
-                  style={{ opacity: 0.85 }}
-                  onAnimationComplete={handleSnakeComplete}
-                />
-              </div>
-            )}
+            <SnakeGap index={3} />
             <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none z-0">
               <div className="absolute top-0 right-0 w-32 h-32 bg-teal-500/10 rounded-bl-full -mr-10 -mt-10 transition-transform group-hover:scale-110" />
             </div>
@@ -645,33 +540,9 @@ export default function Home() {
             className="group p-6 rounded-3xl bg-[#131b2c] hover:bg-[#1a2333] border border-white/5 active:scale-[0.98] transition-all relative cursor-pointer shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] text-center"
           >
             {/* SVG Snake Border */}
-            {snakeStep === 8 && (
-              <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none z-20 flex">
-                <svg className="absolute inset-0 w-full h-full block overflow-visible" xmlns="http://www.w3.org/2000/svg">
-                  <motion.rect
-                    x="0" y="0" width="100%" height="100%" rx="24" fill="none" stroke="#38BDF8" strokeWidth="4"
-                    initial={{ pathLength: 0, pathOffset: 0 }}
-                    animate={{ pathLength: [0, 0.4, 0], pathOffset: [0, 1.6, 1.6] }}
-                    transition={{ duration: 3, ease: "linear" }}
-                    style={{ opacity: 0.85 }}
-                    onAnimationComplete={handleSnakeComplete}
-                  />
-                </svg>
-              </div>
-            )}
+            <SnakeBorder index={4} color="#38BDF8" />
             {/* Gap Line to next card */}
-            {false && (
-              <div className="absolute -bottom-6 left-6 w-[2px] h-6 z-20 overflow-hidden">
-                <motion.div
-                  className="w-full bg-white"
-                  initial={{ height: "0%", y: "0%" }}
-                  animate={{ height: ["0%", "100%", "0%"], y: ["0%", "0%", "24px"] }}
-                  transition={{ duration: 0.3, ease: "linear" }}
-                  style={{ opacity: 0.85 }}
-                  onAnimationComplete={handleSnakeComplete}
-                />
-              </div>
-            )}
+            
             <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none z-0">
               <div className="absolute top-0 right-0 w-32 h-32 bg-sky-500/10 rounded-bl-full -mr-10 -mt-10 transition-transform group-hover:scale-110" />
             </div>
@@ -703,29 +574,20 @@ export default function Home() {
             </div>
             
             <div className="flex flex-col items-center pt-4 relative z-10">
-              <motion.div
-                animate={{ 
-                  scale: [1, 1.3, 1],
-                }}
-                transition={{ duration: 4.5, repeat: Infinity, ease: "easeInOut" }}
-                className="w-52 h-52 rounded-full bg-white/5 border border-white/15 flex items-center justify-center relative overflow-hidden shadow-2xl mx-auto transform-gpu"
-                style={{ willChange: 'transform' }}
+              <div
+                className="w-52 h-52 rounded-full bg-white/5 border border-white/15 flex items-center justify-center relative overflow-hidden shadow-2xl mx-auto breathe-scale"
               >
                 <div className="absolute inset-0 bg-gradient-to-tr from-sky-500/10 to-transparent opacity-40" />
                 
                 {/* Compass Icon with rotating needle effect */}
                 <div className="relative z-10 w-24 h-24 flex items-center justify-center">
                   <Compass className="text-sky-400 opacity-55 absolute" size={80} strokeWidth={1} />
-                  <motion.div
-                    animate={{ rotate: [0, 360] }}
-                    transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
-                    className="relative"
-                  >
+                  <div className="relative spin-10s">
                     <div className="w-1 h-12 bg-gradient-to-t from-sky-400 to-transparent rounded-full" />
-                  </motion.div>
+                  </div>
                   <div className="absolute w-2 h-2 bg-sky-400 rounded-full shadow-[0_0_10px_rgba(56,189,248,0.5)]" />
                 </div>
-              </motion.div>
+              </div>
               <p className="text-[11px] font-bold text-white/60 uppercase tracking-widest mt-10 opacity-80 italic">Sincronize sua respiração e ritmo vital</p>
             </div>
           </motion.div>
@@ -739,30 +601,6 @@ export default function Home() {
           }} 
         />
       )}
-      <style dangerouslySetInnerHTML={{ __html: `
-        @keyframes breath {
-          0%, 100% {
-            box-shadow: 0 0 15px rgba(16, 185, 129, 0.4), 0 0 0 0px rgba(16, 185, 129, 0.2);
-          }
-          50% {
-            box-shadow: 0 0 25px rgba(16, 185, 129, 0.7), 0 0 0 10px rgba(16, 185, 129, 0);
-          }
-        }
-        @keyframes breath-rose {
-          0%, 100% {
-            box-shadow: 0 0 15px rgba(244, 63, 94, 0.4), 0 0 0 0px rgba(244, 63, 94, 0.2);
-          }
-          50% {
-            box-shadow: 0 0 25px rgba(244, 63, 94, 0.7), 0 0 0 10px rgba(244, 63, 94, 0);
-          }
-        }
-        .breath-pulse {
-          animation: breath 3s infinite ease-in-out !important;
-        }
-        .breath-pulse-rose {
-          animation: breath-rose 3s infinite ease-in-out !important;
-        }
-      ` }} />
     </main>
   );
 }
@@ -786,12 +624,10 @@ export default function Home() {
         <div className="w-full bg-[#0d1424]/80 backdrop-blur-md rounded-3xl p-8 shadow-[0_20px_40px_rgba(0,0,0,0.4)] relative overflow-hidden">
           <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none z-20 flex">
             <svg className="absolute inset-0 w-full h-full block overflow-visible" xmlns="http://www.w3.org/2000/svg">
-              <motion.rect
+              <rect
                 x="0" y="0" width="100%" height="100%" rx="24" fill="none" stroke="#00D88B" strokeWidth="4"
-                initial={{ pathLength: 0, pathOffset: 0 }}
-                animate={{ pathLength: [0, 0.5, 0], pathOffset: [0, 2, 2] }}
-                transition={{ duration: 6, repeat: Infinity, ease: "linear" }}
-                style={{ opacity: 0.85 }}
+                pathLength={100}
+                className="snake-loop"
               />
             </svg>
           </div>

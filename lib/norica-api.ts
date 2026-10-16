@@ -2,6 +2,7 @@
 // O app não carrega mais nenhuma chave de IA: tudo passa pelo servidor, com login.
 
 import { createClient } from '@/lib/supabase-client';
+import { cacheGet, cacheSet } from '@/lib/cache';
 
 export type ChatResult = {
   chatId: string;
@@ -109,6 +110,29 @@ export const noricaApi = {
     return data?.text ?? '';
   },
 };
+
+// ---------------------------------------------------------------------
+// Plano com cache: as telas usam o último plano conhecido na hora
+// ---------------------------------------------------------------------
+
+export function cachedPlan(userId: string | null | undefined): PlanInfo | null {
+  return cacheGet<PlanInfo>(userId, 'plan');
+}
+
+export async function refreshPlan(userId: string | null | undefined): Promise<PlanInfo> {
+  const plan = await noricaApi.plan();
+  cacheSet(userId, 'plan', plan);
+  return plan;
+}
+
+// Acorda a função da IA ao abrir o app (a primeira chamada depois de um tempo parada
+// é mais lenta) e já atualiza o plano em cache. Roda no máximo uma vez a cada 5 minutos.
+let lastWarmUp = 0;
+export function warmUpServer(userId: string) {
+  if (Date.now() - lastWarmUp < 5 * 60_000) return;
+  lastWarmUp = Date.now();
+  refreshPlan(userId).catch(() => {});
+}
 
 // ---------------------------------------------------------------------
 // Humor (mapa emocional)
