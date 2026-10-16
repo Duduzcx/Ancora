@@ -426,6 +426,7 @@ export default function PerfilPage() {
     setIsExiting(true);
     // Aguarda animação de "afundar" antes de deslogar
     setTimeout(async () => {
+      await import('@/lib/push').then((m) => m.stopPush()).catch(() => {});
       await supabase.auth.signOut();
       router.replace('/');
     }, 1500);

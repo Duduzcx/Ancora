@@ -57,6 +57,7 @@ export default function NavigationDock() {
   const isExcluded = 
     !user || 
     pathname?.startsWith('/porto') || 
+    pathname?.startsWith('/amigos/chat') ||
     pathname?.startsWith('/arena') || 
     pathname?.startsWith('/cofre') ||
     !isVisible;

@@ -86,8 +86,17 @@ export type Patterns =
       heavyWeekday: { day: string; pct: number } | null; hardTopics: string[];
       feelingsHard: string[]; feelingsCalm: string[]; recovery: number | null;
     };
-export type Friend = { pairId: string; name: string; since: string; streak: number; restUsed: boolean; bothToday: boolean; meToday: boolean; friendToday: boolean };
-export type FriendNudge = { id: string; kind: 'apoio' | 'pensei' | 'parabens'; from: string; created_at: string };
+export type ChallengeKind = 'agua' | 'caminhar' | 'respirar' | 'telas' | 'gratidao' | 'alongar';
+export type PairChallenge = { id: string; kind: ChallengeKind; title: string; emoji: string; days: number; start: string; me: number; friend: number; ended: boolean };
+export type Friend = {
+  pairId: string; name: string; since: string; streak: number; restUsed: boolean; bothToday: boolean; meToday: boolean; friendToday: boolean;
+  unread?: number; daysAway?: number | null; iShare?: boolean;
+  friendWins?: { careDaysMonth: number; longestRun: number } | null;
+  challenges?: PairChallenge[];
+};
+export type FriendNudge = { id: string; kind: 'apoio' | 'pensei' | 'parabens' | 'sumido'; from: string; created_at: string };
+export type ChatMessage = { id: string; mine: boolean; kind: 'texto' | 'audio'; text: string | null; audioUrl: string | null; risk: boolean; created_at: string };
+export type CareGroup = { id: string; name: string; code: string; need: number; streak: number; restUsed: boolean; litToday: boolean; members: { name: string; me: boolean; today: boolean }[] };
 export type FriendsState = { friends: Friend[]; nudges: FriendNudge[]; max: number };
 export type FutureLetter = { id: string; created_at: string; deliver_at: string; opened: boolean; delivered: boolean; content: string | null };
 export type OrgWeek = {
@@ -234,6 +243,20 @@ export const noricaApi = {
   friendsNudge: (pairId: string, kind: FriendNudge['kind']) => call<{ ok: boolean }>('friends_nudge', { pairId, kind }),
   friendsSeen: () => call<{ ok: boolean }>('friends_seen'),
   friendsRemove: (pairId: string) => call<FriendsState>('friends_remove', { pairId }),
+  friendsBlock: (pairId: string, reason?: string) => call<FriendsState>('friends_block', { pairId, reason }),
+  friendsShare: (pairId: string, share: boolean) => call<FriendsState>('friends_share', { pairId, share }),
+  chatList: (pairId: string, before?: string) => call<{ messages: ChatMessage[] }>('chat_list', { pairId, before }),
+  chatSend: (pairId: string, text: string) => call<{ message: ChatMessage; crisis: boolean }>('chat_send', { pairId, text }),
+  chatAudio: (pairId: string, audio: string, mime: string) => call<{ message: ChatMessage }>('chat_audio', { pairId, audio, mime }),
+  chatClear: (pairId: string) => call<{ ok: boolean }>('chat_clear', { pairId }),
+  challengeCreate: (pairId: string, kind: ChallengeKind, days: number) => call<FriendsState>('challenge_create', { pairId, kind, days }),
+  challengeEnd: (id: string) => call<FriendsState>('challenge_end', { id }),
+  groupsList: () => call<{ groups: CareGroup[] }>('groups_list'),
+  groupsCreate: (name: string) => call<{ groups: CareGroup[] }>('groups_create', { name }),
+  groupsJoin: (code: string) => call<{ groups: CareGroup[] }>('groups_join', { code }),
+  groupsLeave: (groupId: string) => call<{ groups: CareGroup[] }>('groups_leave', { groupId }),
+  pushRegister: (token: string) => call<{ ok: boolean; server: boolean }>('push_register', { token }),
+  pushUnregister: (token: string) => call<{ ok: boolean }>('push_unregister', { token }),
   ttsInfo: () => call<{ available: boolean; voices: { id: string; label: string }[] }>('tts_info'),
   tts: (text: string, voice: string) => call<{ audio: string; mime: string }>('tts', { text, voice }),
 

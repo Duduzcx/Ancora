@@ -6,15 +6,24 @@
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import confetti from 'canvas-confetti';
-import { ArrowLeft, Flame, UserPlus, Loader2, Heart, Sparkles, Check, X, ShieldCheck } from 'lucide-react';
-import { noricaApi, type Friend, type FriendsState } from '@/lib/norica-api';
+import { ArrowLeft, Flame, UserPlus, Loader2, Heart, Sparkles, Check, X, ShieldCheck, MessageCircle, Trophy, Plus } from 'lucide-react';
+import { noricaApi, type ChallengeKind, type Friend, type FriendsState } from '@/lib/norica-api';
 import { getAuthState, useAuth } from '@/lib/auth-store';
 import { cacheGet, cacheSet } from '@/lib/cache';
 import { firstName } from '@/lib/user-name';
 import { shareText, STORE_URL } from '@/lib/share-text';
 import PenseiEmVoce from '@/components/PenseiEmVoce';
+import GruposFoguinho from '@/components/GruposFoguinho';
 
-const NUDGE_TEXT = { apoio: 'te mandou apoio 💛', pensei: 'pensou em você 🌊', parabens: 'comemorou com você 🎉' } as const;
+const NUDGE_TEXT = { apoio: 'te mandou apoio 💛', pensei: 'pensou em você 🌊', parabens: 'comemorou com você 🎉', sumido: 'perguntou se está tudo bem com você 💙' } as const;
+const CHALLENGE_OPTIONS: { kind: ChallengeKind; label: string }[] = [
+  { kind: 'agua', label: '💧 Beber água' },
+  { kind: 'caminhar', label: '🚶 Sair de casa' },
+  { kind: 'respirar', label: '🌬️ Respirar fundo' },
+  { kind: 'telas', label: '📵 Longe das telas' },
+  { kind: 'gratidao', label: '✍️ Uma reflexão' },
+  { kind: 'alongar', label: '🧘 Alongar' },
+];
 
 function FlameBadge({ n, lit }: { n: number; lit: boolean }) {
   return (
@@ -35,6 +44,7 @@ export default function AmigosPage() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [sent, setSent] = useState<string | null>(null);
+  const [picking, setPicking] = useState<string | null>(null);
 
   const apply = (s: FriendsState) => { if (!Array.isArray(s?.friends)) return; setState(s); cacheSet(uid, 'friends', s); };
   useEffect(() => {
@@ -42,6 +52,10 @@ export default function AmigosPage() {
       apply(s);
       if (s?.nudges?.length) noricaApi.friendsSeen().catch(() => {});
     }).catch(() => setState((p) => p ?? { friends: [], nudges: [], max: 5 }));
+    // Chegou um aviso com o app aberto (mensagem, carinho): atualiza na hora.
+    const onPush = () => { noricaApi.friendsList().then(apply).catch(() => {}); };
+    window.addEventListener('norica-push', onPush);
+    return () => window.removeEventListener('norica-push', onPush);
   }, []);
 
   const invite = async () => {
@@ -61,9 +75,23 @@ export default function AmigosPage() {
       setMsg('Foguinho aceso! 🔥 Marquem o dia para a chama crescer.');
     } catch (e: any) { setMsg(e?.message || 'Código não encontrado.'); } finally { setBusy(false); }
   };
-  const nudge = async (f: Friend, kind: 'apoio' | 'pensei' | 'parabens') => {
+  const nudge = async (f: Friend, kind: 'apoio' | 'pensei' | 'parabens' | 'sumido') => {
     try { await noricaApi.friendsNudge(f.pairId, kind); setSent(`${f.pairId}:${kind}`); setTimeout(() => setSent(null), 2500); }
     catch (e: any) { setMsg(e?.message || 'Não foi possível enviar agora.'); }
+  };
+  const startChallenge = async (f: Friend, kind: ChallengeKind) => {
+    setPicking(null);
+    try {
+      apply(await noricaApi.challengeCreate(f.pairId, kind, 7));
+      setMsg(`Desafio começou! Marque o hábito nos Logs todo dia — vale para ${f.name} também.`);
+    } catch (e: any) { setMsg(e?.message || 'Não foi possível começar agora.'); }
+  };
+  const endChallenge = async (id: string) => {
+    if (!window.confirm('Encerrar este desafio?')) return;
+    try { apply(await noricaApi.challengeEnd(id)); } catch (_e) {}
+  };
+  const toggleShare = async (f: Friend) => {
+    try { apply(await noricaApi.friendsShare(f.pairId, !f.iShare)); } catch (e: any) { setMsg(e?.message || 'Não foi possível agora.'); }
   };
   const remove = async (f: Friend) => {
     if (!window.confirm(`Apagar o foguinho com ${f.name}?`)) return;
@@ -116,6 +144,57 @@ export default function AmigosPage() {
                 </button>
               ))}
             </div>
+            <button onClick={() => router.push(`/amigos/chat/?pair=${f.pairId}`)} className="w-full py-3 rounded-2xl bg-white/10 border border-white/15 text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2" data-testid="abrir-chat">
+              <MessageCircle size={14} /> Conversar com {f.name}
+              {!!f.unread && <span className="min-w-5 h-5 px-1.5 rounded-full bg-orange-400 text-slate-950 text-[10px] flex items-center justify-center" data-testid="nao-lidas">{f.unread}</span>}
+            </button>
+
+            {f.daysAway != null && f.daysAway >= 3 && (
+              <div className="p-3 rounded-2xl bg-sky-400/10 border border-sky-300/20 flex items-center gap-3" data-testid="amigo-sumido">
+                <p className="flex-1 text-[12px] font-bold text-sky-100/90 leading-snug">Faz {f.daysAway} dias que {f.name} não aparece por aqui.</p>
+                <button onClick={() => nudge(f, 'sumido')} className="shrink-0 px-3 py-2 rounded-xl bg-sky-300 text-slate-950 text-[10px] font-black uppercase tracking-widest">
+                  {sent === `${f.pairId}:sumido` ? 'Enviado ✓' : 'Tá tudo bem?'}
+                </button>
+              </div>
+            )}
+
+            {(f.challenges ?? []).map((c) => (
+              <div key={c.id} className="p-3 rounded-2xl bg-black/20 border border-white/5 space-y-2" data-testid="desafio">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[12px] font-black">{c.emoji} {c.title} · {c.days} dias</p>
+                  {c.ended ? <span className="text-[10px] font-black text-amber-200 flex items-center gap-1"><Trophy size={11} /> Terminou</span>
+                    : <button onClick={() => endChallenge(c.id)} className="text-[9px] font-black uppercase tracking-widest text-white/30">Encerrar</button>}
+                </div>
+                {([['Você', c.me], [f.name, c.friend]] as const).map(([who, n]) => (
+                  <div key={who} className="flex items-center gap-2">
+                    <span className="w-16 truncate text-[10px] font-bold text-white/50">{who}</span>
+                    <div className="flex-1 h-2 rounded-full bg-white/5 overflow-hidden"><div className="h-full rounded-full bg-orange-400" style={{ width: `${Math.min(100, (n / c.days) * 100)}%` }} /></div>
+                    <span className="text-[10px] font-black tabular-nums text-white/60">{n}/{c.days}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+            {picking === f.pairId ? (
+              <div className="grid grid-cols-2 gap-2" data-testid="escolher-desafio">
+                {CHALLENGE_OPTIONS.map((o) => (
+                  <button key={o.kind} onClick={() => startChallenge(f, o.kind)} className="py-2.5 rounded-xl bg-white/5 border border-white/10 text-[11px] font-bold">{o.label}</button>
+                ))}
+                <p className="col-span-2 text-[10px] text-white/40 font-semibold text-center">7 dias juntos. Conta quando vocês marcam o hábito nos Logs.</p>
+              </div>
+            ) : (f.challenges ?? []).filter((c) => !c.ended).length < 3 && (
+              <button onClick={() => setPicking(f.pairId)} className="w-full py-2.5 rounded-xl border border-dashed border-white/15 text-[10px] font-black uppercase tracking-widest text-white/50 flex items-center justify-center gap-1.5" data-testid="novo-desafio"><Plus size={12} /> Desafio leve de 7 dias</button>
+            )}
+
+            {f.friendWins && (
+              <p className="text-[11px] text-amber-100/80 font-semibold" data-testid="conquistas-amigo">🏆 {f.name} se cuidou {f.friendWins.careDaysMonth} {f.friendWins.careDaysMonth === 1 ? 'dia' : 'dias'} este mês · maior sequência: {f.friendWins.longestRun}</p>
+            )}
+            <label className="flex items-center justify-between gap-3 text-[11px] text-white/50 font-semibold">
+              <span>Mostrar minhas conquistas do mês para {f.name} <span className="text-white/30">(nunca o humor)</span></span>
+              <button role="switch" aria-checked={!!f.iShare} onClick={() => toggleShare(f)} className={`w-10 h-6 rounded-full shrink-0 relative transition-colors ${f.iShare ? 'bg-orange-400' : 'bg-white/10'}`} data-testid="compartilhar-conquistas">
+                <span className={`absolute left-0 top-1 w-4 h-4 rounded-full bg-white transition-transform ${f.iShare ? 'translate-x-5' : 'translate-x-1'}`} />
+              </button>
+            </label>
+
             {!f.meToday && (
               <button onClick={() => router.push('/')} className="w-full py-3 rounded-2xl bg-orange-400 text-slate-950 text-[10px] font-black uppercase tracking-widest">Marcar meu dia</button>
             )}
@@ -130,12 +209,14 @@ export default function AmigosPage() {
             </button>
             {myCode && <p className="text-xs text-white/60 font-semibold text-center">Seu código: <b className="text-orange-200 tracking-[0.3em] text-base" data-testid="meu-codigo">{myCode}</b> · vale 7 dias</p>}
             <div className="flex gap-2">
-              <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} maxLength={6} placeholder="Tenho um código" className="flex-1 bg-black/30 border border-white/10 rounded-2xl px-4 py-3 text-sm tracking-[0.2em] uppercase outline-none focus:border-orange-300/40 placeholder:text-white/25 placeholder:tracking-normal placeholder:normal-case" />
+              <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} maxLength={6} placeholder="Tenho um código" className="flex-1 min-w-0 bg-black/30 border border-white/10 rounded-2xl px-4 py-3 text-sm tracking-[0.2em] uppercase outline-none focus:border-orange-300/40 placeholder:text-white/25 placeholder:tracking-normal placeholder:normal-case" />
               <button onClick={join} disabled={busy || code.trim().length !== 6} className="px-4 rounded-2xl bg-white/10 border border-white/15 disabled:opacity-40 text-[10px] font-black uppercase tracking-widest">Entrar</button>
             </div>
           </section>
         )}
         {msg && <p className="text-xs font-bold text-orange-100/80">{msg}</p>}
+
+        <GruposFoguinho />
 
         <PenseiEmVoce from={user ? firstName(user, null, '') : ''} />
 

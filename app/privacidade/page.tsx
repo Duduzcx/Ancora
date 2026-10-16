@@ -40,6 +40,10 @@ const SECTIONS: Section[] = [
           <li><strong>Memória da Nórica:</strong> um resumo curto das conversas (pessoas importantes, temas e o que costuma ajudar). Você vê, desliga e apaga em <strong>Perfil → Memória da Nórica</strong>.</li>
           <li><strong>Diário, exercícios e Modo noite:</strong> o que você grava ou escreve, o resumo semanal e o relatório mensal que a IA escreve para você.</li>
           <li><strong>Cartas para o futuro:</strong> o texto fica criptografado e só é liberado na data que você escolher. A agenda da terapia, a lista do que levar para a sessão e o progresso das trilhas ficam apenas no seu celular.</li>
+          <li><strong>Foguinho com amigos e grupos:</strong> o nome que aparece para seus amigos e se você marcou o dia (nunca o que você escreveu ou sentiu). As conquistas do mês só aparecem para um amigo se você ligar essa opção — e nunca o seu humor.</li>
+          <li><strong>Chat entre amigos:</strong> as mensagens de texto ficam criptografadas e os áudios de apoio (até 30 segundos) ficam numa área privada, acessada só por links temporários. Qualquer um dos dois pode apagar a conversa inteira. Se uma mensagem indicar risco, quem escreveu vê na hora o contato do CVV (188).</li>
+          <li><strong>Bloqueios e denúncias:</strong> ao denunciar alguém, a pessoa é bloqueada e guardamos o motivo e as últimas mensagens da conversa (criptografadas) só para nossa equipe analisar.</li>
+          <li><strong>Notificações em tempo real:</strong> um código do seu aparelho (token do Firebase) para avisar de mensagens e carinhos dos amigos. O aviso na tela de bloqueio diz só quem mandou, nunca o conteúdo.</li>
           <li><strong>Plano de segurança:</strong> o que você escrever, incluindo nomes e telefones das suas pessoas de confiança. Só são usados quando você mesmo(a) toca para avisá-las.</li>
           <li><strong>Avaliações e registros técnicos:</strong> nota e motivo quando você toca em 👍/👎 (não o texto da conversa), além de erros e lentidão (tela, versão do app e modelo do celular).</li>
         </ul>
@@ -67,7 +71,7 @@ const SECTIONS: Section[] = [
         <ul>
           <li><strong>Supabase</strong> — banco de dados, login e servidor do app.</li>
           <li><strong>Groq</strong> — inteligência artificial (respostas do Porto e da Arena, títulos, resumos e transcrição de voz).</li>
-          <li><strong>Google</strong> — login com conta Google, pagamento do Pro pela Google Play (não recebemos dados do seu cartão) e, quando você escolhe uma <strong>voz natural</strong>, o texto da resposta é enviado para virar áudio (o áudio não é guardado).</li>
+          <li><strong>Google</strong> — login com conta Google, pagamento do Pro pela Google Play (não recebemos dados do seu cartão) e, quando você escolhe uma <strong>voz natural</strong>, o texto da resposta é enviado para virar áudio (o áudio não é guardado). O <strong>Firebase Cloud Messaging</strong> (Google) entrega as notificações dos amigos — recebe só o título do aviso, sem o conteúdo das mensagens.</li>
           <li><strong>Instituição parceira</strong> (escola, cursinho ou empresa) — só se você digitar o código dela. Ela vê apenas números somados e anônimos de grupos com pelo menos 5 pessoas ativas, inclusive por setor ou turma, e pode publicar campanhas que aparecem na sua Início. Nunca recebe suas conversas, Cofre, diário, plano de segurança ou o seu humor individual. Você pode sair quando quiser em Perfil → Instituição Parceira.</li>
         </ul>
         <p>Esses fornecedores podem processar dados fora do Brasil (inclusive nos Estados Unidos), apenas para prestar o serviço e com garantias compatíveis com a LGPD.</p>
@@ -80,7 +84,7 @@ const SECTIONS: Section[] = [
     body: (
       <ul>
         <li>Todo o tráfego é criptografado (HTTPS).</li>
-        <li>Mensagens do Porto, títulos, Cofre, diário, cartas, memória, plano de segurança, resumos e relatórios são <strong>criptografados no servidor com AES-256</strong> antes de ir para o banco.</li>
+        <li>Mensagens do Porto e do chat entre amigos, títulos, Cofre, diário, cartas, memória, plano de segurança, resumos e relatórios são <strong>criptografados no servidor com AES-256</strong> antes de ir para o banco.</li>
         <li>Cada conta só acessa os próprios dados (regras de acesso no banco) e a IA só atende usuários autenticados.</li>
       </ul>
     ),

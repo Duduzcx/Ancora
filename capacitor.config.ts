@@ -16,6 +16,10 @@ const config: CapacitorConfig = {
       smallIcon: 'ic_stat_norica',
       iconColor: '#34d399'
     },
+    PushNotifications: {
+      // Com o app aberto, os avisos dos amigos também aparecem.
+      presentationOptions: ['badge', 'sound', 'alert']
+    },
     SplashScreen: {
       launchShowDuration: 1000,
       launchAutoHide: true,

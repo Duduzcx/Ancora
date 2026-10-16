@@ -16,6 +16,8 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 /**
  * Atalhos de notificação da Nórica:
  * - status(): se as notificações do app estão ligadas no Android.
+ * - firebase(): se o app foi montado com o google-services.json (push do Firebase).
+ *   Sem ele, pedir o token do Firebase fecharia o app; então o JS só registra quando isto der true.
  * - openSettings(): abre direto a tela "Notificações" do app nas Configurações,
  *   para a pessoa ligar com um toque quando o Android não mostra mais a janela de permissão.
  */
@@ -27,6 +29,14 @@ public class NoricaNotify extends Plugin {
         JSObject ret = new JSObject();
         ret.put("enabled", NotificationManagerCompat.from(getContext()).areNotificationsEnabled());
         ret.put("sdk", Build.VERSION.SDK_INT);
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void firebase(PluginCall call) {
+        JSObject ret = new JSObject();
+        int id = getContext().getResources().getIdentifier("google_app_id", "string", getContext().getPackageName());
+        ret.put("ready", id != 0);
         call.resolve(ret);
     }
 

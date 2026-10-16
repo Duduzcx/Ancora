@@ -56,8 +56,13 @@ export default function HojeCards() {
 
   const tpl = campaign ? CAMPAIGN_TEMPLATES[campaign.kind] : null;
   // Foguinho: um card só — um carinho recebido, ou um amigo que já marcou e espera você.
-  const nudge = (Array.isArray(friends?.nudges) && friends!.nudges[0]) || null;
-  const waiting = !nudge && Array.isArray(friends?.friends) ? friends!.friends.find((x) => x.friendToday && !x.meToday) ?? null : null;
+  // Prioridade: mensagem nova > carinho recebido > amigo sumido > amigo esperando você marcar.
+  const list = Array.isArray(friends?.friends) ? friends!.friends : [];
+  const unread = list.find((x) => (x.unread ?? 0) > 0) ?? null;
+  const nudge = (!unread && Array.isArray(friends?.nudges) && friends!.nudges[0]) || null;
+  const away = !unread && !nudge ? list.find((x) => x.daysAway != null && x.daysAway >= 3 && x.daysAway <= 14) ?? null : null;
+  const waiting = !unread && !nudge && !away ? list.find((x) => x.friendToday && !x.meToday) ?? null : null;
+  const NUDGE_LINE = { apoio: 'te mandou apoio 💛', pensei: 'pensou em você 🌊', parabens: 'comemorou com você 🎉', sumido: 'perguntou se está tudo bem com você 💙' } as const;
 
   return (
     <>
@@ -90,13 +95,16 @@ export default function HojeCards() {
         </div>
       )}
 
-      {(nudge || waiting) && (
-        <button onClick={() => router.push('/amigos/')} className={`${card} bg-gradient-to-br from-orange-950/60 to-[#0b0f19] border-orange-300/20`} data-testid="foguinho-card">
+      {(unread || nudge || away || waiting) && (
+        <button onClick={() => router.push(unread ? `/amigos/chat/?pair=${unread.pairId}` : '/amigos/')} className={`${card} bg-gradient-to-br from-orange-950/60 to-[#0b0f19] border-orange-300/20`} data-testid="foguinho-card">
           <div className="w-14 h-14 rounded-2xl bg-orange-500/15 text-orange-300 flex items-center justify-center shrink-0"><Flame size={26} fill="currentColor" className="flame-flicker" /></div>
           <div className="flex-1">
             <p className="text-[9px] font-black text-orange-300/80 uppercase tracking-[0.3em]">Foguinho</p>
             <p className="text-base font-black text-white tracking-tight leading-snug">
-              {nudge ? `${nudge.from} ${nudge.kind === 'apoio' ? 'te mandou apoio 💛' : nudge.kind === 'pensei' ? 'pensou em você 🌊' : 'comemorou com você 🎉'}` : `🔥 ${waiting!.streak} com ${waiting!.name}. ${waiting!.name} já marcou o dia — e você?`}
+              {unread ? `${unread.name} te mandou ${unread.unread === 1 ? 'uma mensagem' : `${unread.unread} mensagens`} 💬`
+                : nudge ? `${nudge.from} ${NUDGE_LINE[nudge.kind] ?? NUDGE_LINE.apoio}`
+                : away ? `Faz ${away.daysAway} dias que ${away.name} não aparece. Que tal mandar um "tá tudo bem?" 💙`
+                : `🔥 ${waiting!.streak} com ${waiting!.name}. ${waiting!.name} já marcou o dia — e você?`}
             </p>
           </div>
           <ChevronRight size={18} className="text-orange-200/50" />

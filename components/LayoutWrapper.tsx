@@ -152,6 +152,14 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
     setLoading(false);
   }, [authReady, session, pathname, router]);
 
+  // Push (Firebase): liga sozinho quando a pessoa está logada e já permitiu notificações.
+  const uidForPush = session?.user?.id;
+  useEffect(() => {
+    if (!uidForPush) return;
+    const t = setTimeout(() => { import('@/lib/push').then((m) => m.initPush((route) => router.push(route))).catch(() => {}); }, 2500);
+    return () => clearTimeout(t);
+  }, [uidForPush, router]);
+
   // Mede a fluidez de cada tela no celular de verdade (registra só quando trava).
   useEffect(() => {
     if (session?.user?.id && pathname) sampleFps(pathname);

@@ -14,6 +14,7 @@ import { firstNameFrom } from "../_shared/names.ts";
 import { consume, getPlan, launchMode, PLAN_LIMITS, usageToday } from "../_shared/plans.ts";
 import { checkSubscription, PRO_PRODUCT_ID } from "../_shared/google-play.ts";
 import { synthesize, TTS_VOICES, ttsConfigured } from "../_shared/tts.ts";
+import { pushConfigured, pushSoon } from "../_shared/push.ts";
 import {
   arenaFeedbackPrompt,
   arenaSystemPrompt,
@@ -948,7 +949,7 @@ async function achievements(ctx: Ctx) {
 // ---------------------------------------------------------------------
 
 const MAX_PAIRS = 5;
-const NUDGE_KINDS = ["apoio", "pensei", "parabens"];
+const NUDGE_KINDS = ["apoio", "pensei", "parabens", "sumido"];
 const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 async function activeDays(ctx: Ctx, userIds: string[], since: string): Promise<Map<string, Set<string>>> {
@@ -967,19 +968,29 @@ async function activeDays(ctx: Ctx, userIds: string[], since: string): Promise<M
 }
 
 /** Chama da dupla: dias seguidos em que os dois marcaram. Hoje ainda pode acontecer. */
-function pairFlame(a: Set<string>, b: Set<string>, today: string) {
-  const both = (d: string) => a.has(d) && b.has(d);
+/** Dias seguidos em que "ok(dia)" é verdade, perdoando 1 dia por semana (dia de descanso). Hoje ainda pode acontecer. */
+function streakOf(ok: (d: string) => boolean, today: string) {
   let streak = 0;
   let restUsedAt: string | null = null;
-  let day = both(today) ? today : addDays(today, -1);
+  let day = ok(today) ? today : addDays(today, -1);
   for (let i = 0; i < 400; i++) {
-    if (both(day)) { streak++; day = addDays(day, -1); continue; }
-    // Dia de descanso: perdoa um dia por semana (se o dia antes dele também foi dos dois)
+    if (ok(day)) { streak++; day = addDays(day, -1); continue; }
     const restOk = !restUsedAt || (new Date(`${restUsedAt}T12:00:00Z`).getTime() - new Date(`${day}T12:00:00Z`).getTime()) >= 7 * 86400_000;
-    if (streak > 0 && restOk && both(addDays(day, -1))) { restUsedAt = day; day = addDays(day, -1); continue; }
+    if (streak > 0 && restOk && ok(addDays(day, -1))) { restUsedAt = day; day = addDays(day, -1); continue; }
     break;
   }
-  return { streak, restUsed: restUsedAt !== null, bothToday: both(today), meToday: a.has(today), friendToday: b.has(today) };
+  return { streak, restUsed: restUsedAt !== null };
+}
+
+/** Chama da dupla: dias seguidos em que os dois marcaram. */
+function pairFlame(a: Set<string>, b: Set<string>, today: string) {
+  const both = (d: string) => a.has(d) && b.has(d);
+  return { ...streakOf(both, today), bothToday: both(today), meToday: a.has(today), friendToday: b.has(today) };
+}
+
+function daysSince(days: Set<string>, today: string): number | null {
+  for (let i = 0; i <= 30; i++) if (days.has(addDays(today, -i))) return i;
+  return null;
 }
 
 async function friendsInvite(ctx: Ctx) {
@@ -993,7 +1004,7 @@ async function friendsInvite(ctx: Ctx) {
 }
 
 async function myPairs(ctx: Ctx) {
-  const { data } = await ctx.admin.from("care_pairs").select("id, user_a, user_b, name_a, name_b, created_at")
+  const { data } = await ctx.admin.from("care_pairs").select("id, user_a, user_b, name_a, name_b, created_at, read_a, read_b, share_a, share_b")
     .or(`user_a.eq.${ctx.userId},user_b.eq.${ctx.userId}`).limit(MAX_PAIRS + 1);
   return data ?? [];
 }
@@ -1004,6 +1015,7 @@ async function friendsJoin(ctx: Ctx, body: Record<string, unknown>) {
   const { data: inv } = await ctx.admin.from("care_invites").select("code, user_id, name, expires_at").eq("code", code).maybeSingle();
   if (!inv || new Date(inv.expires_at).getTime() < Date.now()) throw new HttpError(404, "Convite não encontrado ou vencido. Peça um código novo.");
   if (inv.user_id === ctx.userId) throw new HttpError(400, "Esse é o seu próprio código. Mande para um amigo 💛");
+  if (await isBlocked(ctx, inv.user_id)) throw new HttpError(404, "Convite não encontrado ou vencido. Peça um código novo.");
   const pairs = await myPairs(ctx);
   if (pairs.some((p) => p.user_a === inv.user_id || p.user_b === inv.user_id)) throw new HttpError(409, "Vocês já estão juntos no foguinho 🔥");
   if (pairs.length >= MAX_PAIRS) throw new HttpError(409, `Você já tem ${MAX_PAIRS} amigos no foguinho.`);
@@ -1011,8 +1023,18 @@ async function friendsJoin(ctx: Ctx, body: Record<string, unknown>) {
   const { error } = await ctx.admin.from("care_pairs").insert({ user_a: inv.user_id, user_b: ctx.userId, name_a: inv.name, name_b: myName });
   if (error) throw new HttpError(409, "Não foi possível juntar vocês agora");
   await ctx.admin.from("care_invites").delete().eq("code", code);
+  await pushSoon(ctx.admin, [inv.user_id], { title: "Foguinho aceso! 🔥", body: `${myName} aceitou seu convite. Marquem o dia para a chama crescer.`, route: "/amigos/" });
   return friendsList(ctx);
 }
+
+const CHALLENGES: Record<string, { habit: number; title: string; emoji: string }> = {
+  agua: { habit: 1, title: "Beber água", emoji: "💧" },
+  caminhar: { habit: 19, title: "Sair de casa um pouco", emoji: "🚶" },
+  respirar: { habit: 7, title: "Respirar fundo", emoji: "🌬️" },
+  telas: { habit: 8, title: "Um tempo longe das telas", emoji: "📵" },
+  gratidao: { habit: 9, title: "Anotar minhas reflexões", emoji: "✍️" },
+  alongar: { habit: 6, title: "Alongar o corpo", emoji: "🧘" },
+};
 
 async function friendsList(ctx: Ctx) {
   const pairs = await myPairs(ctx);
@@ -1020,16 +1042,55 @@ async function friendsList(ctx: Ctx) {
   const friendIds = pairs.map((p) => (p.user_a === ctx.userId ? p.user_b : p.user_a));
   const days = await activeDays(ctx, [ctx.userId, ...friendIds], addDays(today, -120));
   const mine = days.get(ctx.userId) ?? new Set<string>();
-  const { data: unseen } = await ctx.admin.from("care_nudges").select("id, pair_id, kind, created_at").eq("to_user", ctx.userId).is("seen_at", null).order("created_at", { ascending: false }).limit(20);
+  const pairIds = pairs.map((p) => p.id);
+  const [{ data: unseen }, { data: msgs }, { data: challenges }] = await Promise.all([
+    ctx.admin.from("care_nudges").select("id, pair_id, kind, created_at").eq("to_user", ctx.userId).is("seen_at", null).order("created_at", { ascending: false }).limit(20),
+    pairIds.length ? ctx.admin.from("care_messages").select("pair_id, from_user, created_at").in("pair_id", pairIds).gte("created_at", new Date(Date.now() - 30 * 86400_000).toISOString()) : Promise.resolve({ data: [] as any[] }),
+    pairIds.length ? ctx.admin.from("care_challenges").select("id, pair_id, kind, days, start_day").in("pair_id", pairIds).gte("start_day", addDays(today, -40)) : Promise.resolve({ data: [] as any[] }),
+  ]);
+  // Hábitos de cada um nos dias dos desafios
+  const habitDays = new Map<string, Map<string, number[]>>();
+  if ((challenges ?? []).length) {
+    const minStart = (challenges ?? []).reduce((m: string, c: any) => (c.start_day < m ? c.start_day : m), today);
+    const { data: hl } = await ctx.admin.from("habit_logs").select("user_id, day, completed").in("user_id", [ctx.userId, ...friendIds]).gte("day", minStart);
+    for (const h of hl ?? []) {
+      if (!habitDays.has(h.user_id)) habitDays.set(h.user_id, new Map());
+      habitDays.get(h.user_id)!.set(h.day, (h.completed ?? []) as number[]);
+    }
+  }
+  const progress = (userId: string, c: any) => {
+    const def = CHALLENGES[c.kind];
+    let n = 0;
+    for (let i = 0; i < c.days; i++) {
+      const d = addDays(c.start_day, i);
+      if (d > today) break;
+      if (habitDays.get(userId)?.get(d)?.includes(def.habit)) n++;
+    }
+    return n;
+  };
   return {
     friends: pairs.map((p) => {
-      const friendId = p.user_a === ctx.userId ? p.user_b : p.user_a;
-      const flame = pairFlame(mine, days.get(friendId) ?? new Set(), today);
+      const iAmA = p.user_a === ctx.userId;
+      const friendId = iAmA ? p.user_b : p.user_a;
+      const friendDays = days.get(friendId) ?? new Set<string>();
+      const flame = pairFlame(mine, friendDays, today);
+      const myRead = (iAmA ? p.read_a : p.read_b) ?? "1970-01-01";
+      const unread = (msgs ?? []).filter((m: any) => m.pair_id === p.id && m.from_user === friendId && m.created_at > myRead).length;
+      const friendShares = iAmA ? p.share_b : p.share_a;
+      const monthStart = `${today.slice(0, 7)}-01`;
+      const pairChallenges = (challenges ?? []).filter((c: any) => c.pair_id === p.id)
+        .map((c: any) => ({ id: c.id, kind: c.kind, title: CHALLENGES[c.kind]?.title ?? c.kind, emoji: CHALLENGES[c.kind]?.emoji ?? "⭐", days: c.days, start: c.start_day, me: progress(ctx.userId, c), friend: progress(friendId, c), ended: addDays(c.start_day, c.days - 1) < today }))
+        .filter((c: any) => !c.ended || addDays(c.start, c.days + 6) >= today);
       return {
         pairId: p.id,
-        name: (p.user_a === ctx.userId ? p.name_b : p.name_a) || "Amigo",
+        name: (iAmA ? p.name_b : p.name_a) || "Amigo",
         since: p.created_at,
         ...flame,
+        unread,
+        daysAway: daysSince(friendDays, today),
+        iShare: !!(iAmA ? p.share_a : p.share_b),
+        friendWins: friendShares ? { careDaysMonth: [...friendDays].filter((d) => d >= monthStart).length, longestRun: longestRun([...friendDays]).best } : null,
+        challenges: pairChallenges,
       };
     }),
     nudges: (unseen ?? []).map((n) => {
@@ -1050,6 +1111,9 @@ async function friendsNudge(ctx: Ctx, body: Record<string, unknown>) {
     .eq("pair_id", pair.id).eq("from_user", ctx.userId).gte("created_at", dayStartIso(brtDay()));
   if ((count ?? 0) >= 3) throw new HttpError(429, "Você já mandou carinho 3 vezes hoje para essa pessoa 💛");
   await ctx.admin.from("care_nudges").insert({ pair_id: pair.id, from_user: ctx.userId, to_user: to, kind });
+  const me = (pair.user_a === ctx.userId ? pair.name_a : pair.name_b) || "Um amigo";
+  const text: Record<string, string> = { apoio: "te mandou apoio 💛", pensei: "pensou em você 🌊", parabens: "comemorou com você 🎉", sumido: "perguntou se está tudo bem com você 💙" };
+  await pushSoon(ctx.admin, [to], { title: `${me} ${text[kind]}`, body: "Abra a Nórica para ver.", route: "/amigos/" });
   return { ok: true };
 }
 
@@ -1062,6 +1126,201 @@ async function friendsRemove(ctx: Ctx, body: Record<string, unknown>) {
   const pair = (await myPairs(ctx)).find((p) => p.id === body.pairId);
   if (pair) await ctx.admin.from("care_pairs").delete().eq("id", pair.id);
   return friendsList(ctx);
+}
+
+async function isBlocked(ctx: Ctx, other: string) {
+  const { data } = await ctx.admin.from("care_blocks").select("blocker").or(`and(blocker.eq.${ctx.userId},blocked.eq.${other}),and(blocker.eq.${other},blocked.eq.${ctx.userId})`).limit(1);
+  return !!data?.length;
+}
+
+async function pairOf(ctx: Ctx, pairId: unknown) {
+  const pair = (await myPairs(ctx)).find((p) => p.id === pairId);
+  if (!pair) throw new HttpError(404, "Amigo não encontrado");
+  const iAmA = pair.user_a === ctx.userId;
+  return { pair, iAmA, friendId: iAmA ? pair.user_b : pair.user_a, myName: (iAmA ? pair.name_a : pair.name_b) || "Um amigo" };
+}
+
+// ---------- Chat entre amigos ----------
+
+async function messageOut(ctx: Ctx, m: Record<string, any>) {
+  let audioUrl: string | null = null;
+  if (m.kind === "audio" && m.audio_path) {
+    const { data } = await ctx.admin.storage.from("care-audio").createSignedUrl(m.audio_path, 3600);
+    audioUrl = data?.signedUrl ?? null;
+  }
+  return { id: m.id, mine: m.from_user === ctx.userId, kind: m.kind, text: m.content ? await decrypt(m.content) : null, audioUrl, risk: !!m.risk, created_at: m.created_at };
+}
+
+async function chatList(ctx: Ctx, body: Record<string, unknown>) {
+  const { pair, iAmA } = await pairOf(ctx, body.pairId);
+  let q = ctx.admin.from("care_messages").select("id, from_user, kind, content, audio_path, risk, created_at").eq("pair_id", pair.id).order("created_at", { ascending: false }).limit(60);
+  if (typeof body.before === "string") q = q.lt("created_at", body.before);
+  const { data } = await q;
+  await ctx.admin.from("care_pairs").update(iAmA ? { read_a: new Date().toISOString() } : { read_b: new Date().toISOString() }).eq("id", pair.id);
+  return { messages: await Promise.all((data ?? []).reverse().map((m) => messageOut(ctx, m))) };
+}
+
+async function chatSend(ctx: Ctx, body: Record<string, unknown>) {
+  const { pair, friendId, myName } = await pairOf(ctx, body.pairId);
+  const text = cleanText(body.text, 1000);
+  const { count } = await ctx.admin.from("care_messages").select("id", { count: "exact", head: true })
+    .eq("from_user", ctx.userId).gte("created_at", new Date(Date.now() - 60_000).toISOString());
+  if ((count ?? 0) >= 20) throw new HttpError(429, "Calma 🙂 Muitas mensagens em um minuto.");
+  const risk = detectRisk(text);
+  const { data, error } = await ctx.admin.from("care_messages")
+    .insert({ pair_id: pair.id, from_user: ctx.userId, kind: "texto", content: await encrypt(text), risk })
+    .select("id, from_user, kind, content, audio_path, risk, created_at").single();
+  if (error || !data) throw new HttpError(500, "Não foi possível enviar agora");
+  await pushSoon(ctx.admin, [friendId], { title: `${myName} te mandou uma mensagem 💬`, body: "Toque para ler na Nórica.", route: `/amigos/chat/?pair=${pair.id}` });
+  return { message: await messageOut(ctx, data), crisis: risk };
+}
+
+async function chatAudio(ctx: Ctx, body: Record<string, unknown>) {
+  const { pair, friendId, myName } = await pairOf(ctx, body.pairId);
+  const b64 = typeof body.audio === "string" ? body.audio : "";
+  if (!b64 || b64.length > 1_200_000) throw new HttpError(413, "Áudio muito longo (até 30 segundos)");
+  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  const mime = typeof body.mime === "string" && /^audio\/[a-z0-9.+-]+/i.test(body.mime) ? body.mime.split(";")[0] : "audio/webm";
+  const path = `${pair.id}/${crypto.randomUUID()}.${mime.includes("mp4") ? "m4a" : mime.includes("ogg") ? "ogg" : "webm"}`;
+  const { error: upErr } = await ctx.admin.storage.from("care-audio").upload(path, bytes, { contentType: mime });
+  if (upErr) throw new HttpError(500, "Não foi possível enviar o áudio");
+  const { data, error } = await ctx.admin.from("care_messages")
+    .insert({ pair_id: pair.id, from_user: ctx.userId, kind: "audio", audio_path: path })
+    .select("id, from_user, kind, content, audio_path, risk, created_at").single();
+  if (error || !data) throw new HttpError(500, "Não foi possível enviar o áudio");
+  await pushSoon(ctx.admin, [friendId], { title: `${myName} te mandou um áudio 🎧`, body: "Toque para ouvir na Nórica.", route: `/amigos/chat/?pair=${pair.id}` });
+  return { message: await messageOut(ctx, data) };
+}
+
+async function chatClear(ctx: Ctx, body: Record<string, unknown>) {
+  const { pair } = await pairOf(ctx, body.pairId);
+  const { data: audios } = await ctx.admin.from("care_messages").select("audio_path").eq("pair_id", pair.id).not("audio_path", "is", null);
+  const paths = (audios ?? []).map((a) => a.audio_path).filter(Boolean);
+  if (paths.length) await ctx.admin.storage.from("care-audio").remove(paths);
+  await ctx.admin.from("care_messages").delete().eq("pair_id", pair.id);
+  return { ok: true };
+}
+
+async function friendsBlock(ctx: Ctx, body: Record<string, unknown>) {
+  const { pair, friendId } = await pairOf(ctx, body.pairId);
+  await ctx.admin.from("care_blocks").upsert({ blocker: ctx.userId, blocked: friendId }, { onConflict: "blocker,blocked", ignoreDuplicates: true });
+  if (typeof body.reason === "string" && body.reason.trim()) {
+    const { data: last } = await ctx.admin.from("care_messages").select("from_user, content, created_at").eq("pair_id", pair.id).order("created_at", { ascending: false }).limit(15);
+    const lines: string[] = [];
+    for (const m of (last ?? []).reverse()) if (m.content) lines.push(`${m.from_user === ctx.userId ? "denunciante" : "denunciado"} ${m.created_at}: ${await decrypt(m.content)}`);
+    await ctx.admin.from("care_reports").insert({ reporter: ctx.userId, reported: friendId, reason: body.reason.trim().slice(0, 300), excerpt: lines.length ? await encrypt(lines.join("\n")) : null });
+  }
+  await ctx.admin.from("care_pairs").delete().eq("id", pair.id);
+  return friendsList(ctx);
+}
+
+async function friendsShare(ctx: Ctx, body: Record<string, unknown>) {
+  const { pair, iAmA } = await pairOf(ctx, body.pairId);
+  await ctx.admin.from("care_pairs").update(iAmA ? { share_a: body.share === true } : { share_b: body.share === true }).eq("id", pair.id);
+  return friendsList(ctx);
+}
+
+async function challengeCreate(ctx: Ctx, body: Record<string, unknown>) {
+  const { pair, friendId, myName } = await pairOf(ctx, body.pairId);
+  const kind = String(body.kind ?? "");
+  if (!CHALLENGES[kind]) throw new HttpError(400, "Desafio inválido");
+  const days = [3, 7, 14, 21, 30].includes(Number(body.days)) ? Number(body.days) : 7;
+  const today = brtDay();
+  const { data: active } = await ctx.admin.from("care_challenges").select("id, start_day, days").eq("pair_id", pair.id);
+  if ((active ?? []).filter((c) => addDays(c.start_day, c.days - 1) >= today).length >= 3) throw new HttpError(409, "Vocês já têm 3 desafios ao mesmo tempo. Terminem um primeiro 🙂");
+  await ctx.admin.from("care_challenges").insert({ pair_id: pair.id, kind, days, start_day: today, created_by: ctx.userId });
+  await pushSoon(ctx.admin, [friendId], { title: `${myName} começou um desafio com você ${CHALLENGES[kind].emoji}`, body: `${CHALLENGES[kind].title} por ${days} dias. Bora?`, route: "/amigos/" });
+  return friendsList(ctx);
+}
+
+async function challengeEnd(ctx: Ctx, body: Record<string, unknown>) {
+  const pairs = await myPairs(ctx);
+  const { data: c } = await ctx.admin.from("care_challenges").select("id, pair_id").eq("id", String(body.id ?? "")).maybeSingle();
+  if (!c || !pairs.some((p) => p.id === c.pair_id)) throw new HttpError(404, "Desafio não encontrado");
+  await ctx.admin.from("care_challenges").delete().eq("id", c.id);
+  return friendsList(ctx);
+}
+
+// ---------- Foguinho de grupo (3 a 6 pessoas) ----------
+
+const GROUP_MAX = 6;
+const MAX_GROUPS = 3;
+
+async function groupsList(ctx: Ctx) {
+  const { data: mine } = await ctx.admin.from("care_group_members").select("group_id").eq("user_id", ctx.userId);
+  const ids = (mine ?? []).map((m) => m.group_id);
+  if (!ids.length) return { groups: [] };
+  const [{ data: groups }, { data: members }] = await Promise.all([
+    ctx.admin.from("care_groups").select("id, name, code, created_by").in("id", ids),
+    ctx.admin.from("care_group_members").select("group_id, user_id, name").in("group_id", ids),
+  ]);
+  const today = brtDay();
+  const userIds = [...new Set((members ?? []).map((m) => m.user_id))];
+  const days = await activeDays(ctx, userIds, addDays(today, -120));
+  return {
+    groups: (groups ?? []).map((g) => {
+      const ms = (members ?? []).filter((m) => m.group_id === g.id);
+      const need = Math.max(2, Math.ceil(ms.length * 0.6));
+      const ok = (d: string) => ms.filter((m) => days.get(m.user_id)?.has(d)).length >= need;
+      return {
+        id: g.id,
+        name: g.name,
+        code: g.code,
+        need,
+        ...streakOf(ok, today),
+        litToday: ok(today),
+        members: ms.map((m) => ({ name: m.user_id === ctx.userId ? "Você" : m.name || "Amigo", me: m.user_id === ctx.userId, today: !!days.get(m.user_id)?.has(today) })),
+      };
+    }),
+  };
+}
+
+async function groupsCreate(ctx: Ctx, body: Record<string, unknown>) {
+  const name = cleanText(body.name, 40);
+  const { count } = await ctx.admin.from("care_group_members").select("group_id", { count: "exact", head: true }).eq("user_id", ctx.userId);
+  if ((count ?? 0) >= MAX_GROUPS) throw new HttpError(409, `Você já está em ${MAX_GROUPS} grupos.`);
+  let code = "";
+  for (let i = 0; i < 6; i++) code += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
+  const { data: g, error } = await ctx.admin.from("care_groups").insert({ name, code, created_by: ctx.userId }).select("id").single();
+  if (error || !g) throw new HttpError(500, "Não foi possível criar o grupo");
+  await ctx.admin.from("care_group_members").insert({ group_id: g.id, user_id: ctx.userId, name: (await personName(ctx)) ?? "Alguém" });
+  return groupsList(ctx);
+}
+
+async function groupsJoin(ctx: Ctx, body: Record<string, unknown>) {
+  const code = String(body.code ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const { data: g } = await ctx.admin.from("care_groups").select("id, name, created_by").eq("code", code).maybeSingle();
+  if (!g) throw new HttpError(404, "Grupo não encontrado. Confira o código.");
+  const { data: ms } = await ctx.admin.from("care_group_members").select("user_id").eq("group_id", g.id);
+  if ((ms ?? []).some((m) => m.user_id === ctx.userId)) throw new HttpError(409, "Você já está nesse grupo 🔥");
+  if ((ms ?? []).length >= GROUP_MAX) throw new HttpError(409, `Esse grupo já tem ${GROUP_MAX} pessoas.`);
+  const { count } = await ctx.admin.from("care_group_members").select("group_id", { count: "exact", head: true }).eq("user_id", ctx.userId);
+  if ((count ?? 0) >= MAX_GROUPS) throw new HttpError(409, `Você já está em ${MAX_GROUPS} grupos.`);
+  const myName = (await personName(ctx)) ?? "Alguém";
+  await ctx.admin.from("care_group_members").insert({ group_id: g.id, user_id: ctx.userId, name: myName });
+  await pushSoon(ctx.admin, (ms ?? []).map((m) => m.user_id), { title: `${myName} entrou no ${g.name} 🔥`, body: "O foguinho do grupo ficou maior.", route: "/amigos/" });
+  return groupsList(ctx);
+}
+
+async function groupsLeave(ctx: Ctx, body: Record<string, unknown>) {
+  await ctx.admin.from("care_group_members").delete().eq("group_id", String(body.groupId ?? "")).eq("user_id", ctx.userId);
+  const { count } = await ctx.admin.from("care_group_members").select("user_id", { count: "exact", head: true }).eq("group_id", String(body.groupId ?? ""));
+  if (!count) await ctx.admin.from("care_groups").delete().eq("id", String(body.groupId ?? ""));
+  return groupsList(ctx);
+}
+
+// ---------- Push (Firebase) ----------
+
+async function pushRegister(ctx: Ctx, body: Record<string, unknown>) {
+  const token = typeof body.token === "string" ? body.token.trim() : "";
+  if (token.length < 20 || token.length > 4096) throw new HttpError(400, "Token inválido");
+  await ctx.admin.from("push_tokens").upsert({ token, user_id: ctx.userId, platform: "android", updated_at: new Date().toISOString() }, { onConflict: "token" });
+  return { ok: true, server: pushConfigured() };
+}
+
+async function pushUnregister(ctx: Ctx, body: Record<string, unknown>) {
+  if (typeof body.token === "string") await ctx.admin.from("push_tokens").delete().eq("token", body.token).eq("user_id", ctx.userId);
+  return { ok: true };
 }
 
 // ---------------------------------------------------------------------
@@ -1777,6 +2036,10 @@ async function deleteAccount(ctx: Ctx) {
     await admin.from(table).delete().eq("user_id", uid);
   }
   await admin.from("care_nudges").delete().or(`from_user.eq.${uid},to_user.eq.${uid}`);
+  await admin.from("care_messages").delete().eq("from_user", uid);
+  await admin.from("care_blocks").delete().or(`blocker.eq.${uid},blocked.eq.${uid}`);
+  await admin.from("care_group_members").delete().eq("user_id", uid);
+  await admin.from("push_tokens").delete().eq("user_id", uid);
   await admin.from("care_pairs").delete().or(`user_a.eq.${uid},user_b.eq.${uid}`);
   await admin.from("profiles").delete().eq("id", uid);
   const { error } = await admin.auth.admin.deleteUser(uid);
@@ -1857,7 +2120,7 @@ async function health(ctx: Ctx) {
     checks.criptografia = { ok: false, detail: String((e as Error).message) };
   }
 
-  for (const table of ["chats", "messages", "mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "user_plans", "usage_events", "app_errors", "user_memory", "safety_plans", "message_feedback", "weekly_summaries", "journal_entries", "organizations", "org_members", "org_sectors", "monthly_reports", "future_letters", "org_campaigns", "care_pairs", "care_invites", "care_nudges"]) {
+  for (const table of ["chats", "messages", "mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "user_plans", "usage_events", "app_errors", "user_memory", "safety_plans", "message_feedback", "weekly_summaries", "journal_entries", "organizations", "org_members", "org_sectors", "monthly_reports", "future_letters", "org_campaigns", "care_pairs", "care_invites", "care_nudges", "care_messages", "care_groups", "care_group_members", "care_challenges", "push_tokens"]) {
     const { error } = await ctx.admin.from(table).select("*", { count: "exact", head: true });
     checks[`tabela_${table}`] = error ? { ok: false, detail: error.message } : { ok: true };
   }
@@ -1931,6 +2194,20 @@ const actions: Record<string, (ctx: Ctx, body: Record<string, unknown>) => Promi
   friends_nudge: friendsNudge,
   friends_seen: friendsSeen,
   friends_remove: friendsRemove,
+  friends_block: friendsBlock,
+  friends_share: friendsShare,
+  chat_list: chatList,
+  chat_send: chatSend,
+  chat_audio: chatAudio,
+  chat_clear: chatClear,
+  challenge_create: challengeCreate,
+  challenge_end: challengeEnd,
+  groups_list: groupsList,
+  groups_create: groupsCreate,
+  groups_join: groupsJoin,
+  groups_leave: groupsLeave,
+  push_register: pushRegister,
+  push_unregister: pushUnregister,
   tts_info: ttsInfo,
   tts,
   achievements,

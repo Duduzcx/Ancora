@@ -467,12 +467,19 @@ export async function notificationStatus(): Promise<'granted' | 'denied' | 'prom
 // Permitir notificações direto no app
 // ---------------------------------------------------------------------
 
-type NoricaNotifyPlugin = { status(): Promise<{ enabled: boolean; sdk: number }>; openSettings(): Promise<void> };
+type NoricaNotifyPlugin = { status(): Promise<{ enabled: boolean; sdk: number }>; openSettings(): Promise<void>; firebase?(): Promise<{ ready: boolean }> };
 let nativeNotify: NoricaNotifyPlugin | null = null;
 function notifyPlugin(): NoricaNotifyPlugin | null {
   if (!Capacitor.isNativePlatform() || !Capacitor.isPluginAvailable('NoricaNotify')) return null;
   if (!nativeNotify) nativeNotify = registerPlugin<NoricaNotifyPlugin>('NoricaNotify');
   return nativeNotify;
+}
+
+/** true quando o app foi montado com o Firebase (google-services.json). Sem ele, o push fica desligado. */
+export async function firebaseReady(): Promise<boolean> {
+  const p = notifyPlugin();
+  if (!p?.firebase) return false;
+  try { return !!(await withTimeout(p.firebase(), NATIVE_TIMEOUT, 'firebase')).ready; } catch (_e) { return false; }
 }
 
 /** Abre a tela de notificações da Nórica nas Configurações do Android. */
