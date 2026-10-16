@@ -7,8 +7,11 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Building2, Loader2, ShieldCheck, Users, TrendingUp, TrendingDown, Minus, Lock, AlertTriangle, Lightbulb, Plus, X, Download, Layers, Sparkles } from 'lucide-react';
-import { noricaApi, type OrgDashboard, type OrgSector } from '@/lib/norica-api';
+import { ArrowLeft, Building2, Loader2, ShieldCheck, Users, TrendingUp, TrendingDown, Minus, Lock, AlertTriangle, Lightbulb, Plus, X, Download, Layers, Sparkles, Megaphone, FileText } from 'lucide-react';
+import { noricaApi, type CampaignKind, type OrgCampaign, type OrgDashboard, type OrgSector } from '@/lib/norica-api';
+import { CAMPAIGN_TEMPLATES } from '@/lib/campanhas';
+import { buildOrgReportPdf } from '@/lib/relatorio-instituicao';
+import { shareFile } from '@/lib/share-file';
 import { MOOD_COLOR } from '@/lib/farol';
 
 const MOODS: { key: string; label: string }[] = [
@@ -157,6 +160,12 @@ export default function PainelPage() {
             )}
 
             <Setores data={data} onChanged={load} />
+
+            <Campanhas data={data} />
+
+            <button onClick={() => buildOrgReportPdf(data).then((b) => shareFile(b, `norica-instituicao-${new Date().toLocaleDateString('en-CA')}.pdf`, 'Relatório da instituição')).catch(() => {})} className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl bg-white/5 border border-white/10 text-[11px] font-black uppercase tracking-widest text-white/80" data-testid="pdf-instituicao">
+              <FileText size={16} className="text-emerald-300" /> Relatório da instituição (PDF)
+            </button>
 
             <Card title="Últimas 4 semanas" subtitle="Pessoas ativas e quantas tiveram algum dia difícil">
               <div className="space-y-3">
@@ -375,5 +384,100 @@ function Mini({ v, l, sub, tone }: { v: string; l: string; sub?: string; tone?: 
       <p className="text-[9px] font-black text-white/45 uppercase tracking-widest mt-1">{l}</p>
       {sub && <p className="text-[9px] font-bold text-white/40 mt-0.5">{sub}</p>}
     </div>
+  );
+}
+
+const plusDays = (n: number) => { const d = new Date(); d.setDate(d.getDate() + n); return d.toLocaleDateString('en-CA'); };
+const br = (iso: string) => iso.split('-').reverse().join('/');
+
+function Campanhas({ data }: { data: OrgDashboard }) {
+  const [list, setList] = useState<OrgCampaign[]>(data.campaigns ?? []);
+  const [open, setOpen] = useState(false);
+  const [kind, setKind] = useState<CampaignKind>('provas');
+  const [title, setTitle] = useState(CAMPAIGN_TEMPLATES.provas.title);
+  const [message, setMessage] = useState(CAMPAIGN_TEMPLATES.provas.message);
+  const [start, setStart] = useState(plusDays(0));
+  const [end, setEnd] = useState(plusDays(6));
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => { setList(data.campaigns ?? []); }, [data]);
+
+  const pick = (k: CampaignKind) => {
+    setKind(k);
+    const t = CAMPAIGN_TEMPLATES[k];
+    setTitle(t.title);
+    setMessage(t.message);
+    if (k === 'setembro') {
+      // Setembro inteiro (deste ano, ou do próximo se setembro já passou).
+      const now = new Date();
+      const y = now.getMonth() > 8 ? now.getFullYear() + 1 : now.getFullYear();
+      setStart(`${y}-09-01`); setEnd(`${y}-09-30`);
+    } else {
+      setStart(plusDays(0)); setEnd(plusDays(6));
+    }
+  };
+  const create = async () => {
+    setBusy(true); setErr(null);
+    try {
+      const r = await noricaApi.orgCampaignCreate({ kind, title: title.trim(), message: message.trim(), startsOn: start, endsOn: end });
+      setList(r.campaigns); setOpen(false);
+    } catch (e: any) { setErr(e?.message || 'Não foi possível criar.'); } finally { setBusy(false); }
+  };
+  const remove = async (id: string) => {
+    try { setList((await noricaApi.orgCampaignDelete(id)).campaigns); } catch (_e) {}
+  };
+  const today = plusDays(0);
+
+  return (
+    <section className="bg-white/5 border border-white/10 rounded-[2.5rem] p-6 space-y-4" data-testid="campanhas">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="flex items-center gap-2 text-sm font-black text-white uppercase tracking-tighter"><Megaphone size={16} className="text-amber-300" /> Campanhas</h2>
+          <p className="text-[11px] text-white/45 font-semibold mt-1">Uma mensagem com ação aparece na Início de todos do grupo durante o período.</p>
+        </div>
+        {!open && <button onClick={() => setOpen(true)} className="shrink-0 flex items-center gap-1 px-3 py-2 rounded-xl bg-amber-400 text-slate-950 text-[10px] font-black uppercase tracking-widest"><Plus size={12} /> Nova</button>}
+      </div>
+
+      {open && (
+        <div className="space-y-3 p-4 rounded-2xl bg-black/25 border border-white/5">
+          <div className="flex flex-wrap gap-2">
+            {(Object.keys(CAMPAIGN_TEMPLATES) as CampaignKind[]).map((k) => (
+              <button key={k} onClick={() => pick(k)} className={`px-3 py-1.5 rounded-full text-[11px] font-black border ${kind === k ? 'bg-amber-400/20 border-amber-300/40 text-amber-100' : 'border-white/10 text-white/50'}`}>{CAMPAIGN_TEMPLATES[k].emoji} {CAMPAIGN_TEMPLATES[k].label}</button>
+            ))}
+          </div>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={60} placeholder="Título" className="w-full bg-black/30 border border-white/10 rounded-2xl px-4 py-3 text-sm text-white outline-none focus:border-amber-300/50 placeholder:text-white/25" />
+          <textarea value={message} onChange={(e) => setMessage(e.target.value)} maxLength={280} rows={3} placeholder="Mensagem para o grupo" className="w-full bg-black/30 border border-white/10 rounded-2xl px-4 py-3 text-sm text-white outline-none focus:border-amber-300/50 placeholder:text-white/25 resize-none" />
+          <div className="grid grid-cols-2 gap-2">
+            <label className="text-[10px] font-black text-white/40 uppercase tracking-widest space-y-1">De<input type="date" value={start} onChange={(e) => setStart(e.target.value)} className="w-full bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-xs text-white [color-scheme:dark]" /></label>
+            <label className="text-[10px] font-black text-white/40 uppercase tracking-widest space-y-1">Até<input type="date" value={end} onChange={(e) => setEnd(e.target.value)} className="w-full bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-xs text-white [color-scheme:dark]" /></label>
+          </div>
+          {err && <p className="text-xs font-bold text-rose-300">{err}</p>}
+          <div className="flex gap-2">
+            <button onClick={create} disabled={busy || !title.trim() || !message.trim()} className="flex-1 py-3 rounded-2xl bg-amber-400 text-slate-950 text-[10px] font-black uppercase tracking-widest disabled:opacity-40 flex items-center justify-center gap-2">{busy && <Loader2 size={14} className="animate-spin" />} Publicar campanha</button>
+            <button onClick={() => setOpen(false)} className="px-4 rounded-2xl border border-white/10 text-white/50 text-[10px] font-black uppercase">Cancelar</button>
+          </div>
+        </div>
+      )}
+
+      {list.length === 0 ? (
+        !open && <p className="text-sm text-white/45 font-semibold">Nenhuma campanha. Experimente "Semana de provas" ou "Setembro Amarelo".</p>
+      ) : (
+        <ul className="space-y-2">
+          {list.map((c) => {
+            const live = c.starts_on <= today && c.ends_on >= today;
+            return (
+              <li key={c.id} className="flex items-center gap-3 p-3 rounded-2xl bg-black/25 border border-white/5">
+                <span className="text-xl">{CAMPAIGN_TEMPLATES[c.kind]?.emoji ?? '📣'}</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-black text-white truncate">{c.title}</p>
+                  <p className="text-[10px] font-bold text-white/40">{br(c.starts_on)} a {br(c.ends_on)} · <span className={live ? 'text-emerald-300' : 'text-white/40'}>{live ? 'no ar' : c.starts_on > today ? 'agendada' : 'encerrada'}</span></p>
+                </div>
+                <button onClick={() => remove(c.id)} aria-label={`Remover ${c.title}`} className="p-1 text-white/30"><X size={14} /></button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
   );
 }

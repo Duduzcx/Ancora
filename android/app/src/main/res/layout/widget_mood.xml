@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Widget "Como está o seu mar?" — 4 humores, um toque para registrar. -->
+<!-- Widget "Como está o seu mar?" — 4 humores e 3 pérolas dos Logs, um toque para registrar. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -55,5 +55,41 @@
             android:background="@drawable/widget_btn_sos"
             android:text="@string/widget_sos"
             android:textColor="#FF93C5FD" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="38dp"
+        android:layout_marginTop="6dp"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/widget_agua"
+            style="@style/NoricaWidgetButton"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/widget_btn_habit"
+            android:maxLines="1"
+            android:text="@string/widget_agua"
+            android:textColor="#FFBAE6FD"
+            android:textSize="11sp" />
+
+        <TextView
+            android:id="@+id/widget_respirei"
+            style="@style/NoricaWidgetButton"
+            android:layout_marginEnd="6dp"
+            android:background="@drawable/widget_btn_habit"
+            android:maxLines="1"
+            android:text="@string/widget_respirei"
+            android:textColor="#FFBAE6FD"
+            android:textSize="11sp" />
+
+        <TextView
+            android:id="@+id/widget_sai"
+            style="@style/NoricaWidgetButton"
+            android:background="@drawable/widget_btn_habit"
+            android:maxLines="1"
+            android:text="@string/widget_sai"
+            android:textColor="#FFBAE6FD"
+            android:textSize="11sp" />
     </LinearLayout>
 </LinearLayout>

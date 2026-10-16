@@ -122,6 +122,16 @@ Rode antes e depois de mudar o prompt ou o modelo e compare as médias. O relat�
 - **Instituições de demonstração:** códigos `DEMOESCOLA` (turmas) e `DEMOEMPRESA` (setores). Quem entra vira equipe e vê o `/painel/` com números fictícios, marcado como "Demonstração" — para apresentar a escolas e empresas. Para sair: Perfil → Instituição Parceira → Sair. (Migration `20261016220000_norica_voz_demo.sql`.)
 - **Voz natural (opcional):** com `supabase secrets set GEMINI_API_KEY=...` (chave do Google AI Studio), "Ouvir" usa vozes de IA mais humanas (Perfil → Voz da Nórica). Sem a chave, sem internet ou depois do limite do dia (20 no Gratuito, 120 no Pro), a leitura continua com a voz do celular. Modelo em `GEMINI_TTS_MODEL` (padrão `gemini-3.8-flash-tts`).
 
+## Ferramentas (1.4.0)
+
+- **Widget com pérolas:** além dos 4 humores, "Bebi água", "Respirei" e "Saí de casa" marcam o hábito do dia (`com.zcx.norica://habito/<id>`).
+- **Trilhas de 7 dias:** `/trilhas/` — Ansiedade antes da prova, Dormir melhor e Gentileza consigo. Um passo por dia, aviso às 19h, progresso no aparelho (`lib/trilhas.ts`). Card "Trilha de hoje" na Início.
+- **Cartas para o futuro:** `/cartas/` — 1 semana a 1 ano. Tabela `future_letters` (criptografada); o servidor só libera o texto na data. Aviso local quando chega e card na Início.
+- **Agenda da terapia:** `/terapia/` — próxima consulta (única, semanal ou quinzenal), avisos na véspera e 2h antes, "o que quero levar" com sugestões do diário e "depois da sessão" (diário tipo `terapia`). Fica no aparelho.
+- **Campanhas B2B:** no `/painel/`, a equipe publica Setembro Amarelo, Semana de provas, Pausa ativa, Semana do sono ou mensagem livre, com período. Aparece na Início dos participantes (tabela `org_campaigns`).
+- **Relatório da instituição em PDF:** botão no `/painel/` com visão geral, evolução de 4 semanas, setores/turmas, alertas, ações e campanhas.
+- Migration: `20261017090000_norica_cartas_campanhas.sql`.
+
 ## Logs e humor sem internet
 
 `lib/offline-sync.ts`: o que a pessoa marca vai primeiro para uma fila no aparelho e é enviado ao Supabase

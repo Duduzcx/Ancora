@@ -28,7 +28,7 @@ const hubItems = [
   { icon: Sword, label: 'Arena', href: '/arena/', desc: 'Praticar' },
   { icon: Shield, label: 'O Cofre', href: '/cofre/', desc: 'Segurança' },
   { icon: CheckCircle, label: 'Logs', href: '/log/', desc: 'Histórico' },
-  { icon: Leaf, label: 'Exercícios', href: '/exercicios/', desc: 'Guiados' },
+  { icon: Leaf, label: 'Exercícios', href: '/exercicios/', desc: 'Trilhas e mais' },
 ];
 
 export default function NavigationDock() {

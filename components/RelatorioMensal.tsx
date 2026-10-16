@@ -7,7 +7,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { FileText, Loader2, Lock, Download } from 'lucide-react';
-import { Capacitor } from '@capacitor/core';
+import { shareFile } from '@/lib/share-file';
 import { noricaApi, type MonthlyReport } from '@/lib/norica-api';
 import { MOOD_LABEL, MOOD_COLOR, TASK_LABELS } from '@/lib/farol';
 import { reportError } from '@/lib/error-report';
@@ -119,29 +119,6 @@ export async function buildReportPdf(r: MonthlyReport): Promise<Blob> {
   return doc.output('blob');
 }
 
-async function deliver(blob: Blob, fileName: string) {
-  if (Capacitor.isNativePlatform()) {
-    const [{ Filesystem, Directory }, { Share }] = await Promise.all([import('@capacitor/filesystem'), import('@capacitor/share')]);
-    const data = await new Promise<string>((res, rej) => {
-      const fr = new FileReader();
-      fr.onload = () => res(String(fr.result).split(',')[1]);
-      fr.onerror = () => rej(fr.error);
-      fr.readAsDataURL(blob);
-    });
-    const saved = await Filesystem.writeFile({ path: fileName, data, directory: Directory.Cache });
-    await Share.share({ title: 'Relatório do meu mar', text: 'Meu relatório mensal da Nórica', url: saved.uri, dialogTitle: 'Enviar relatório' });
-    return;
-  }
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 5000);
-}
-
 export default function RelatorioMensal() {
   const [busy, setBusy] = useState(false);
   const [locked, setLocked] = useState(false);
@@ -153,7 +130,7 @@ export default function RelatorioMensal() {
     try {
       const r = await noricaApi.monthlyReport();
       const blob = await buildReportPdf(r);
-      await deliver(blob, `norica-relatorio-${r.end}.pdf`);
+      await shareFile(blob, `norica-relatorio-${r.end}.pdf`, 'Relatório do meu mar');
       setMsg('Relatório pronto. 💚');
     } catch (err: any) {
       const m = String(err?.message || '');

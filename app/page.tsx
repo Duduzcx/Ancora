@@ -4,7 +4,8 @@ import React, { useState, useEffect, useSyncExternalStore } from 'react';
 import { Anchor, Mail, Lock, ArrowRight, Loader2, User, Wind, Cloud, Zap, LifeBuoy, MessageCircle, Sword, Lightbulb, CheckCircle2, Shield, Eye, EyeOff, Compass } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { createClient } from '@/lib/supabase-client';
-import { logMood, toMood } from '@/lib/norica-api';
+import { logMood, markHabitToday, toMood } from '@/lib/norica-api';
+import { TASK_LABELS } from '@/lib/farol';
 import { firstName } from '@/lib/user-name';
 import { useRouter } from 'next/navigation';
 import { Browser } from '@capacitor/browser';
@@ -13,6 +14,7 @@ import { Capacitor } from '@capacitor/core';
 import { GoogleSignIn } from '@capawesome/capacitor-google-sign-in';
 import AnimatedBackground from '@/components/AnimatedBackground';
 import NoiteCard from '@/components/NoiteCard';
+import HojeCards from '@/components/HojeCards';
 import RevealOnScroll from '@/components/RevealOnScroll';
 import LoginBackground from '@/components/LoginBackground';
 import NeblinaSOS from '@/components/NeblinaSOS';
@@ -168,6 +170,7 @@ export default function Home() {
   // Convite para o lembrete diário (uma vez, a partir da 2ª visita) e registro vindo do widget.
   const [showInvite, setShowInvite] = useState(false);
   const [inviteMsg, setInviteMsg] = useState<string | null>(null);
+  const [habitToast, setHabitToast] = useState<{ label: string; fresh: boolean } | null>(null);
   const [widgetToast, setWidgetToast] = useState<string | null>(null);
   useEffect(() => {
     if (!user?.id) return;
@@ -184,12 +187,28 @@ export default function Home() {
       setWidgetToast(mood);
       setTimeout(() => setWidgetToast(null), 8000);
     };
-    const param = new URLSearchParams(window.location.search).get('widget');
+    // Pérola marcada pelo widget (Bebi água, Respirei, Saí de casa)
+    let lastHabit = { id: '', at: 0 };
+    const fromHabit = async (id: string | null) => {
+      if (!id || (lastHabit.id === id && Date.now() - lastHabit.at < 3000)) return;
+      lastHabit = { id, at: Date.now() };
+      const n = Number(id);
+      if (!TASK_LABELS[n]) return;
+      const fresh = await markHabitToday(n).catch(() => false);
+      setHabitToast({ label: TASK_LABELS[n], fresh });
+      setTimeout(() => setHabitToast(null), 6000);
+    };
+    const qs = new URLSearchParams(window.location.search);
+    const param = qs.get('widget');
+    const habitParam = qs.get('habito');
     const cleanUrl = () => { try { window.history.replaceState(window.history.state, '', '/'); } catch (_e) {} };
     if (param) { fromWidget(param); cleanUrl(); }
+    if (habitParam) { fromHabit(habitParam); cleanUrl(); }
     const onWidget = (e: any) => { fromWidget(e.detail); setTimeout(cleanUrl, 300); };
+    const onHabit = (e: any) => { fromHabit(e.detail); setTimeout(cleanUrl, 300); };
     window.addEventListener('norica-widget', onWidget);
-    return () => window.removeEventListener('norica-widget', onWidget);
+    window.addEventListener('norica-widget-habit', onHabit);
+    return () => { window.removeEventListener('norica-widget', onWidget); window.removeEventListener('norica-widget-habit', onHabit); };
   }, [user?.id]);
 
   const acceptInvite = async () => {
@@ -468,6 +487,8 @@ export default function Home() {
         <div className="cards-grid px-6 mt-4 space-y-6 max-w-md mx-auto relative">
           
 
+          <HojeCards />
+
           {/* O Porto */}
           <RevealOnScroll
             style={{ '--card-index': 0 } as React.CSSProperties}
@@ -630,6 +651,21 @@ export default function Home() {
           </RevealOnScroll>
         </div>
       </motion.div>
+      {/* Confirmação da pérola marcada pelo widget */}
+      <AnimatePresence>
+        {habitToast && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}
+            data-testid="habit-toast"
+            className="fixed top-[calc(env(safe-area-inset-top)+1rem)] inset-x-4 z-[200] max-w-md mx-auto bg-[#0b0f19]/95 border border-sky-400/30 rounded-[2rem] p-5 shadow-2xl"
+          >
+            <p className="text-sm font-black text-white">
+              {habitToast.fresh ? <>Pérola do dia: <span className="text-sky-300">{habitToast.label}</span> ✓</> : <>&quot;{habitToast.label}&quot; já estava marcado hoje 💙</>}
+            </p>
+            <button onClick={() => { setHabitToast(null); router.push('/log/'); }} className="mt-3 text-[10px] font-black text-sky-300 uppercase tracking-widest underline underline-offset-4">Ver meus Logs</button>
+          </motion.div>
+        )}
+      </AnimatePresence>
       {/* Confirmação do humor marcado pelo widget */}
       <AnimatePresence>
         {widgetToast && (

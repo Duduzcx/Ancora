@@ -764,7 +764,7 @@ async function weeklySummary(ctx: Ctx, body: Record<string, unknown>) {
 // Diário (voz, gratidão, preparação de conversa, aterramento)
 // ---------------------------------------------------------------------
 
-const JOURNAL_KINDS = ["voz", "gratidao", "conversa", "aterramento", "noite"];
+const JOURNAL_KINDS = ["voz", "gratidao", "conversa", "aterramento", "noite", "terapia"];
 
 async function journalEntryOut(row: { id: string; kind: string; content: string; summary: string | null; mood: string | null; created_at: string }) {
   const summary = row.summary ? await decrypt(row.summary) : "";
@@ -1042,7 +1042,104 @@ async function sectorsOf(ctx: Ctx, orgId: string) {
 
 async function orgOut(ctx: Ctx, m: Membership | null) {
   if (!m) return { org: null };
-  return { org: { name: m.name, role: m.role, sectorId: m.sectorId, sectorLabel: m.sectorLabel, sectors: await sectorsOf(ctx, m.orgId) } };
+  const [sectors, campaigns] = await Promise.all([sectorsOf(ctx, m.orgId), activeCampaigns(ctx, m.orgId)]);
+  return { org: { name: m.name, role: m.role, sectorId: m.sectorId, sectorLabel: m.sectorLabel, sectors, campaigns } };
+}
+
+// ---------------------------------------------------------------------
+// Campanhas da instituição (aparecem na Início de quem faz parte dela)
+// ---------------------------------------------------------------------
+
+const CAMPAIGN_KINDS = ["setembro", "provas", "pausa", "sono", "livre"];
+
+async function activeCampaigns(ctx: Ctx, orgId: string) {
+  const today = brtDay();
+  const { data } = await ctx.admin.from("org_campaigns").select("id, kind, title, message, starts_on, ends_on")
+    .eq("org_id", orgId).lte("starts_on", today).gte("ends_on", today).order("starts_on", { ascending: false }).limit(3);
+  return data ?? [];
+}
+
+async function campaignsOf(ctx: Ctx, orgId: string) {
+  const { data } = await ctx.admin.from("org_campaigns").select("id, kind, title, message, starts_on, ends_on")
+    .eq("org_id", orgId).gte("ends_on", addDays(brtDay(), -30)).order("starts_on", { ascending: false }).limit(20);
+  return data ?? [];
+}
+
+async function orgCampaignCreate(ctx: Ctx, body: Record<string, unknown>) {
+  const me = await myMembership(ctx, "admin");
+  if (!me) throw new HttpError(403, "Só a equipe da instituição pode criar campanhas");
+  const kind = String(body.kind ?? "livre");
+  if (!CAMPAIGN_KINDS.includes(kind)) throw new HttpError(400, "Tipo de campanha inválido");
+  const title = cleanText(body.title, 60);
+  const message = cleanText(body.message, 280);
+  const isDay = (v: unknown) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
+  const starts = isDay(body.startsOn) ? String(body.startsOn) : brtDay();
+  const ends = isDay(body.endsOn) ? String(body.endsOn) : addDays(starts, 6);
+  if (ends < starts) throw new HttpError(400, "A data final precisa ser depois da inicial");
+  if (ends > addDays(starts, 60)) throw new HttpError(400, "Campanhas duram no máximo 60 dias");
+  const { error } = await ctx.admin.from("org_campaigns").insert({ org_id: me.orgId, kind, title, message, starts_on: starts, ends_on: ends });
+  if (error) throw new HttpError(500, "Não foi possível criar a campanha");
+  return { campaigns: await campaignsOf(ctx, me.orgId) };
+}
+
+async function orgCampaignDelete(ctx: Ctx, body: Record<string, unknown>) {
+  const me = await myMembership(ctx, "admin");
+  if (!me) throw new HttpError(403, "Só a equipe da instituição pode remover campanhas");
+  await ctx.admin.from("org_campaigns").delete().eq("org_id", me.orgId).eq("id", String(body.id ?? ""));
+  return { campaigns: await campaignsOf(ctx, me.orgId) };
+}
+
+// ---------------------------------------------------------------------
+// Cartas para o futuro: escrita hoje, só pode ser lida na data escolhida
+// ---------------------------------------------------------------------
+
+const LETTER_DAYS = [7, 30, 90, 180, 365];
+
+async function letterOut(row: Record<string, unknown>) {
+  const delivered = new Date(String(row.deliver_at)).getTime() <= Date.now();
+  return {
+    id: row.id,
+    created_at: row.created_at,
+    deliver_at: row.deliver_at,
+    opened: !!row.opened_at,
+    delivered,
+    content: delivered ? await decrypt(String(row.content)) : null,
+  };
+}
+
+async function letterSave(ctx: Ctx, body: Record<string, unknown>) {
+  const content = cleanText(body.content, 4000);
+  const days = Number(body.days);
+  if (!LETTER_DAYS.includes(days)) throw new HttpError(400, "Escolha quando a carta chega");
+  const { count } = await ctx.admin.from("future_letters").select("id", { count: "exact", head: true }).eq("user_id", ctx.userId).is("opened_at", null);
+  if ((count ?? 0) >= 20) throw new HttpError(429, "Você já tem 20 cartas esperando. Leia algumas antes de escrever mais.");
+  const deliver = new Date(Date.now() + days * 86400_000);
+  deliver.setUTCHours(13, 0, 0, 0); // 10h em Brasília
+  const { data, error } = await ctx.admin.from("future_letters")
+    .insert({ user_id: ctx.userId, content: await encrypt(content), deliver_at: deliver.toISOString() })
+    .select("id, content, deliver_at, opened_at, created_at").single();
+  if (error || !data) throw new HttpError(500, "Não foi possível guardar a carta");
+  return { letter: await letterOut(data), crisis: detectRisk(content) };
+}
+
+async function letterList(ctx: Ctx) {
+  const { data } = await ctx.admin.from("future_letters").select("id, content, deliver_at, opened_at, created_at")
+    .eq("user_id", ctx.userId).order("deliver_at", { ascending: true }).limit(50);
+  return { letters: await Promise.all((data ?? []).map(letterOut)) };
+}
+
+async function letterOpen(ctx: Ctx, body: Record<string, unknown>) {
+  const { data } = await ctx.admin.from("future_letters").select("id, content, deliver_at, opened_at, created_at")
+    .eq("user_id", ctx.userId).eq("id", String(body.id ?? "")).maybeSingle();
+  if (!data) throw new HttpError(404, "Carta não encontrada");
+  if (new Date(data.deliver_at).getTime() > Date.now()) throw new HttpError(403, "Essa carta ainda está a caminho");
+  if (!data.opened_at) await ctx.admin.from("future_letters").update({ opened_at: new Date().toISOString() }).eq("id", data.id).eq("user_id", ctx.userId);
+  return { letter: await letterOut({ ...data, opened_at: data.opened_at ?? new Date().toISOString() }) };
+}
+
+async function letterDelete(ctx: Ctx, body: Record<string, unknown>) {
+  await ctx.admin.from("future_letters").delete().eq("user_id", ctx.userId).eq("id", String(body.id ?? ""));
+  return { ok: true };
 }
 
 async function orgStatus(ctx: Ctx) {
@@ -1262,7 +1359,7 @@ async function orgDashboard(ctx: Ctx) {
   const me = await myMembership(ctx, "admin");
   if (!me) throw new HttpError(403, "Painel disponível só para a equipe da instituição");
   const { data: orgRow } = await ctx.admin.from("organizations").select("demo").eq("id", me.orgId).maybeSingle();
-  if (orgRow?.demo) return demoDashboard(me, await sectorsOf(ctx, me.orgId));
+  if (orgRow?.demo) return { ...demoDashboard(me, await sectorsOf(ctx, me.orgId)), campaigns: await campaignsOf(ctx, me.orgId) };
   const { data: members } = await ctx.admin.from("org_members").select("user_id, role, sector_id").eq("org_id", me.orgId);
   const people = (members ?? []).filter((m) => m.role === "member");
   const ids = people.map((m) => m.user_id as string);
@@ -1354,6 +1451,7 @@ async function orgDashboard(ctx: Ctx) {
 
   return {
     org: me.name,
+    campaigns: await campaignsOf(ctx, me.orgId),
     sectorLabel: me.sectorLabel,
     members: ids.length,
     minGroup: MIN_GROUP,
@@ -1461,7 +1559,7 @@ async function deleteAccount(ctx: Ctx) {
   const chatIds = (chats ?? []).map((c) => c.id);
   if (chatIds.length) await admin.from("messages").delete().in("chat_id", chatIds);
   await admin.from("chats").delete().eq("user_id", uid);
-  for (const table of ["mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "usage_events", "user_plans", "user_memory", "safety_plans", "message_feedback", "app_errors", "weekly_summaries", "journal_entries", "org_members", "monthly_reports"]) {
+  for (const table of ["mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "usage_events", "user_plans", "user_memory", "safety_plans", "message_feedback", "app_errors", "weekly_summaries", "journal_entries", "org_members", "monthly_reports", "future_letters"]) {
     await admin.from(table).delete().eq("user_id", uid);
   }
   await admin.from("profiles").delete().eq("id", uid);
@@ -1543,7 +1641,7 @@ async function health(ctx: Ctx) {
     checks.criptografia = { ok: false, detail: String((e as Error).message) };
   }
 
-  for (const table of ["chats", "messages", "mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "user_plans", "usage_events", "app_errors", "user_memory", "safety_plans", "message_feedback", "weekly_summaries", "journal_entries", "organizations", "org_members", "org_sectors", "monthly_reports"]) {
+  for (const table of ["chats", "messages", "mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "user_plans", "usage_events", "app_errors", "user_memory", "safety_plans", "message_feedback", "weekly_summaries", "journal_entries", "organizations", "org_members", "org_sectors", "monthly_reports", "future_letters", "org_campaigns"]) {
     const { error } = await ctx.admin.from(table).select("*", { count: "exact", head: true });
     checks[`tabela_${table}`] = error ? { ok: false, detail: error.message } : { ok: true };
   }
@@ -1604,6 +1702,12 @@ const actions: Record<string, (ctx: Ctx, body: Record<string, unknown>) => Promi
   org_sector_create: orgSectorCreate,
   org_sector_delete: orgSectorDelete,
   org_set_label: orgSetLabel,
+  org_campaign_create: orgCampaignCreate,
+  org_campaign_delete: orgCampaignDelete,
+  letter_save: letterSave,
+  letter_list: letterList,
+  letter_open: letterOpen,
+  letter_delete: letterDelete,
   tts_info: ttsInfo,
   tts,
   achievements,

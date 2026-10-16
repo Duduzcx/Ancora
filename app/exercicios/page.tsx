@@ -7,7 +7,7 @@ import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import {
-  ArrowLeft, Eye, Hand, Ear, Flower2, Coffee, Sparkles, MessagesSquare, Loader2, CheckCircle2, Sword, Heart, LifeBuoy, ChevronRight, Moon, Waves,
+  ArrowLeft, Eye, Hand, Ear, Flower2, Coffee, Sparkles, MessagesSquare, Loader2, CheckCircle2, Sword, Heart, LifeBuoy, ChevronRight, Moon, Waves, Route, Mail, CalendarClock,
 } from 'lucide-react';
 import { noricaApi, type JournalEntry } from '@/lib/norica-api';
 import { HelpSheet } from '@/components/AjudaAgora';
@@ -60,7 +60,7 @@ export default function ExerciciosPage() {
             <motion.div key="lista" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-6">
               <div className="space-y-3">
                 <h1 className="text-4xl font-black text-white tracking-tighter leading-none">
-                  Exercícios <span className="text-emerald-400 italic">guiados.</span>
+                  Exercícios <span className="text-emerald-400 italic">e ferramentas.</span>
                 </h1>
                 <p className="text-white/55 font-bold text-sm leading-relaxed">Pequenas práticas para os momentos em que você precisa de um caminho.</p>
               </div>
@@ -83,6 +83,9 @@ export default function ExerciciosPage() {
                 </motion.button>
               ))}
               {[
+                { href: '/trilhas/', title: 'Trilhas de 7 dias', desc: 'Ansiedade antes da prova, dormir melhor ou gentileza consigo: um passo curto por dia.', time: '7 dias', icon: Route, color: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/20' },
+                { href: '/cartas/', title: 'Carta para o futuro', desc: 'Escreva hoje para ler daqui a 1 semana, 1 mês ou 1 ano.', time: '5 min', icon: Mail, color: 'text-rose-300 bg-rose-500/10 border-rose-500/20' },
+                { href: '/terapia/', title: 'Agenda da terapia', desc: 'Lembrete da consulta e a lista do que você quer levar para a sessão.', time: '2 min', icon: CalendarClock, color: 'text-sky-300 bg-sky-500/10 border-sky-500/20' },
                 { href: '/noite/', title: 'Modo noite', desc: 'Para quando o sono não vem: respiração lenta, esvaziar a mente e sons com timer.', time: '5–30 min', icon: Moon, color: 'text-indigo-300 bg-indigo-500/10 border-indigo-500/20' },
                 { href: '/respiracao/', title: 'Respiração 4-7-8 com sons', desc: 'Ondas do mar, chuva ou ruído branco enquanto você respira.', time: '3 min', icon: Waves, color: 'text-teal-300 bg-teal-500/10 border-teal-500/20' },
               ].map((c) => (

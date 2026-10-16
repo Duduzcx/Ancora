@@ -5,10 +5,13 @@
     <string name="package_name">com.zcx.ancora</string>
     <string name="custom_url_scheme">com.zcx.norica</string>
     <string name="widget_label">Como está o seu mar?</string>
-    <string name="widget_description">Registre seu humor com um toque, sem abrir o app.</string>
+    <string name="widget_description">Registre seu humor e pequenas vitórias do dia com um toque.</string>
     <string name="widget_question">Como está o seu mar? 🌊</string>
     <string name="widget_calmo">🍃\nCalmo</string>
     <string name="widget_ansioso">🌫️\nAnsioso</string>
     <string name="widget_agitado">⚡\nAgitado</string>
     <string name="widget_sos">🆘\nS.O.S</string>
+    <string name="widget_agua">💧 Bebi água</string>
+    <string name="widget_respirei">🌬️ Respirei</string>
+    <string name="widget_sai">🚶 Saí de casa</string>
 </resources>

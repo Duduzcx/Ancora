@@ -24,6 +24,10 @@ public class MoodWidget extends AppWidgetProvider {
             views.setOnClickPendingIntent(R.id.widget_ansioso, link(context, "com.zcx.norica://humor/ansioso", 12));
             views.setOnClickPendingIntent(R.id.widget_agitado, link(context, "com.zcx.norica://humor/agitado", 13));
             views.setOnClickPendingIntent(R.id.widget_sos, link(context, "com.zcx.norica://humor/sos", 14));
+            // Pérolas rápidas dos Logs (ids da aba Logs: 1 água, 7 respirei, 19 saí de casa)
+            views.setOnClickPendingIntent(R.id.widget_agua, link(context, "com.zcx.norica://habito/1", 21));
+            views.setOnClickPendingIntent(R.id.widget_respirei, link(context, "com.zcx.norica://habito/7", 22));
+            views.setOnClickPendingIntent(R.id.widget_sai, link(context, "com.zcx.norica://habito/19", 23));
             manager.updateAppWidget(appWidgetId, views);
         }
     }

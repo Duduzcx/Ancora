@@ -36,6 +36,7 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:scheme="com.zcx.norica" android:host="humor" />
+                <data android:scheme="com.zcx.norica" android:host="habito" />
             </intent-filter>
         </activity>
         <receiver

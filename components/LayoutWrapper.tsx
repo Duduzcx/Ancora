@@ -40,6 +40,12 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
 
   // Widget "Como está o seu mar?" (com.zcx.norica://humor/<humor>): a Início registra e confirma.
   const openFromWidget = (url: string): boolean => {
+    const h = url.match(/:\/\/habito\/(\d+)/);
+    if (h) {
+      try { window.dispatchEvent(new CustomEvent('norica-widget-habit', { detail: h[1] })); } catch (_e) {}
+      router.push(`/?habito=${h[1]}`);
+      return true;
+    }
     const m = url.match(/:\/\/humor\/([a-z]+)/);
     if (!m) return false;
     if (m[1] !== 'abrir') {
@@ -145,11 +151,12 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
   useEffect(() => {
     if (!userId) return;
     const t = setTimeout(() => {
-      ['/porto/', '/farol/', '/perfil/', '/log/', '/arena/', '/cofre/', '/respiracao/', '/planos/', '/noite/']
+      ['/porto/', '/farol/', '/perfil/', '/log/', '/arena/', '/cofre/', '/respiracao/', '/planos/', '/noite/', '/exercicios/', '/trilhas/', '/cartas/', '/terapia/']
         .forEach((href) => { try { router.prefetch(href); } catch (_e) {} });
       warmUpServer(userId);
       startOfflineSync(); // envia Logs/humor marcados sem internet
       refreshEngagementNotifications().catch(() => {}); // resumo de domingo e "sentimos sua falta"
+      import('@/lib/terapia').then(({ getTherapy, scheduleTherapy }) => scheduleTherapy(getTherapy())).catch(() => {}); // próxima consulta (se repete)
     }, 400);
     return () => clearTimeout(t);
   }, [userId, router]);

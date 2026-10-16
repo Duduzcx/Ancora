@@ -70,10 +70,13 @@ export type WeeklySummary = {
   summary: string | null;
   stats: { moods: Record<string, number>; daysWithLogs: number; conversations: number; journalEntries: number };
 };
-export type JournalKind = 'voz' | 'gratidao' | 'conversa' | 'aterramento' | 'noite';
+export type JournalKind = 'voz' | 'gratidao' | 'conversa' | 'aterramento' | 'noite' | 'terapia';
 export type JournalEntry = { id: string; kind: JournalKind; mood: string | null; created_at: string; summary: string; content: string; title?: string };
 export type OrgSector = { id: string; name: string };
-export type OrgInfo = { name: string; role: 'member' | 'admin'; sectorId?: string | null; sectorLabel?: string; sectors?: OrgSector[] } | null;
+export type CampaignKind = 'setembro' | 'provas' | 'pausa' | 'sono' | 'livre';
+export type OrgCampaign = { id: string; kind: CampaignKind; title: string; message: string; starts_on: string; ends_on: string };
+export type OrgInfo = { name: string; role: 'member' | 'admin'; sectorId?: string | null; sectorLabel?: string; sectors?: OrgSector[]; campaigns?: OrgCampaign[] } | null;
+export type FutureLetter = { id: string; created_at: string; deliver_at: string; opened: boolean; delivered: boolean; content: string | null };
 export type OrgWeek = {
   active: number;
   moodPct: Record<string, number>;
@@ -112,6 +115,7 @@ export type OrgDashboard = {
   actions: string[];
   weeks: { label: string; active: number | null; hardPeoplePct: number | null }[];
   demo?: boolean;
+  campaigns?: OrgCampaign[];
 };
 
 export const MOODS = ['calmo', 'ansioso', 'agitado', 'sos'] as const;
@@ -204,6 +208,12 @@ export const noricaApi = {
 
   achievements: () => call<{ stats: AchievementStats }>('achievements'),
   monthlyReport: (refresh = false) => call<MonthlyReport>('monthly_report', { refresh }),
+  orgCampaignCreate: (c: { kind: CampaignKind; title: string; message: string; startsOn: string; endsOn: string }) => call<{ campaigns: OrgCampaign[] }>('org_campaign_create', c),
+  orgCampaignDelete: (id: string) => call<{ campaigns: OrgCampaign[] }>('org_campaign_delete', { id }),
+  letterSave: (content: string, days: number) => call<{ letter: FutureLetter; crisis: boolean }>('letter_save', { content, days }),
+  letterList: () => call<{ letters: FutureLetter[] }>('letter_list'),
+  letterOpen: (id: string) => call<{ letter: FutureLetter }>('letter_open', { id }),
+  letterDelete: (id: string) => call<{ ok: boolean }>('letter_delete', { id }),
   ttsInfo: () => call<{ available: boolean; voices: { id: string; label: string }[] }>('tts_info'),
   tts: (text: string, voice: string) => call<{ audio: string; mime: string }>('tts', { text, voice }),
 
@@ -370,6 +380,21 @@ export async function fetchDailyLog(day = todayKey()): Promise<DailyLog | null> 
 export async function saveDailyLog(log: DailyLog) {
   // Grava no aparelho primeiro; sincroniza com a conta quando houver conexão.
   await queueHabitLog(log);
+}
+
+const BASE_HABITS = 21; // hábitos fixos da aba Logs (ids 1–21)
+
+/** Marca um hábito de hoje (usado pelo widget). Devolve false se já estava marcado. */
+export async function markHabitToday(id: number): Promise<boolean> {
+  const day = todayKey();
+  const current = (await fetchDailyLog(day)) ?? { day, completed: [], custom_tasks: [], progress: 0 };
+  if (current.completed.includes(id)) return false;
+  const completed = [...current.completed, id];
+  const customDone = current.custom_tasks.filter((t) => t.completed).length;
+  const progress = ((completed.length + customDone) / (BASE_HABITS + current.custom_tasks.length)) * 100;
+  await saveDailyLog({ ...current, completed, progress });
+  try { localStorage.setItem('norica-progress', String(progress)); } catch (_e) {}
+  return true;
 }
 
 // Adiciona ações sugeridas pela IA na lista de hoje (aba Logs).

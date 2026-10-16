@@ -39,6 +39,7 @@ const SECTIONS: Section[] = [
           <li><strong>Áudio:</strong> quando você usa o microfone, o áudio é enviado só para virar texto. O arquivo de áudio não é guardado.</li>
           <li><strong>Memória da Nórica:</strong> um resumo curto das conversas (pessoas importantes, temas e o que costuma ajudar). Você vê, desliga e apaga em <strong>Perfil → Memória da Nórica</strong>.</li>
           <li><strong>Diário, exercícios e Modo noite:</strong> o que você grava ou escreve, o resumo semanal e o relatório mensal que a IA escreve para você.</li>
+          <li><strong>Cartas para o futuro:</strong> o texto fica criptografado e só é liberado na data que você escolher. A agenda da terapia, a lista do que levar para a sessão e o progresso das trilhas ficam apenas no seu celular.</li>
           <li><strong>Plano de segurança:</strong> o que você escrever, incluindo nomes e telefones das suas pessoas de confiança. Só são usados quando você mesmo(a) toca para avisá-las.</li>
           <li><strong>Avaliações e registros técnicos:</strong> nota e motivo quando você toca em 👍/👎 (não o texto da conversa), além de erros e lentidão (tela, versão do app e modelo do celular).</li>
         </ul>
@@ -67,7 +68,7 @@ const SECTIONS: Section[] = [
           <li><strong>Supabase</strong> — banco de dados, login e servidor do app.</li>
           <li><strong>Groq</strong> — inteligência artificial (respostas do Porto e da Arena, títulos, resumos e transcrição de voz).</li>
           <li><strong>Google</strong> — login com conta Google, pagamento do Pro pela Google Play (não recebemos dados do seu cartão) e, quando você escolhe uma <strong>voz natural</strong>, o texto da resposta é enviado para virar áudio (o áudio não é guardado).</li>
-          <li><strong>Instituição parceira</strong> (escola, cursinho ou empresa) — só se você digitar o código dela. Ela vê apenas números somados e anônimos de grupos com pelo menos 5 pessoas ativas, inclusive por setor ou turma. Nunca recebe suas conversas, Cofre, diário, plano de segurança ou o seu humor individual. Você pode sair quando quiser em Perfil → Instituição Parceira.</li>
+          <li><strong>Instituição parceira</strong> (escola, cursinho ou empresa) — só se você digitar o código dela. Ela vê apenas números somados e anônimos de grupos com pelo menos 5 pessoas ativas, inclusive por setor ou turma, e pode publicar campanhas que aparecem na sua Início. Nunca recebe suas conversas, Cofre, diário, plano de segurança ou o seu humor individual. Você pode sair quando quiser em Perfil → Instituição Parceira.</li>
         </ul>
         <p>Esses fornecedores podem processar dados fora do Brasil (inclusive nos Estados Unidos), apenas para prestar o serviço e com garantias compatíveis com a LGPD.</p>
       </>
@@ -79,7 +80,7 @@ const SECTIONS: Section[] = [
     body: (
       <ul>
         <li>Todo o tráfego é criptografado (HTTPS).</li>
-        <li>Mensagens do Porto, títulos, Cofre, diário, memória, plano de segurança, resumos e relatórios são <strong>criptografados no servidor com AES-256</strong> antes de ir para o banco.</li>
+        <li>Mensagens do Porto, títulos, Cofre, diário, cartas, memória, plano de segurança, resumos e relatórios são <strong>criptografados no servidor com AES-256</strong> antes de ir para o banco.</li>
         <li>Cada conta só acessa os próprios dados (regras de acesso no banco) e a IA só atende usuários autenticados.</li>
       </ul>
     ),

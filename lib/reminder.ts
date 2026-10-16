@@ -390,3 +390,32 @@ export function shouldInviteReminder(): boolean {
 export function dismissReminderInvite() {
   try { localStorage.setItem(INVITE_KEY, new Date().toISOString()); } catch (_e) {}
 }
+
+// ---------------------------------------------------------------------
+// Avisos avulsos (trilhas, cartas para o futuro, consulta da terapia)
+// Só agendam se a pessoa já permitiu notificações; nunca pedem permissão sozinhos.
+// ---------------------------------------------------------------------
+
+export type LocalNotice = { id: number; at: Date; title: string; body: string; route: string };
+
+export async function scheduleNotices(list: LocalNotice[]): Promise<boolean> {
+  const future = list.filter((n) => n.at.getTime() > Date.now() + 30_000);
+  if (!future.length) return false;
+  const ln = await grantedPlugin();
+  if (!ln) return false;
+  await cancelIds(future.map((n) => n.id));
+  try {
+    await withTimeout(ln.schedule({
+      notifications: future.map((n) => ({
+        id: n.id, title: n.title, body: n.body, channelId: CHANNEL_ID, smallIcon: 'ic_stat_norica', iconColor: '#34d399',
+        extra: { route: n.route }, schedule: { at: n.at, allowWhileIdle: true },
+      })),
+    }), NATIVE_TIMEOUT, 'agendar avisos');
+    return true;
+  } catch (e) {
+    reportError(e, 'lembrete:avisos');
+    return false;
+  }
+}
+
+export const cancelNotices = (ids: number[]) => cancelIds(ids);
