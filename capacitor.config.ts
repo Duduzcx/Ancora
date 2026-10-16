@@ -12,6 +12,10 @@ const config: CapacitorConfig = {
     CapacitorHttp: {
       enabled: true
     },
+    LocalNotifications: {
+      smallIcon: 'ic_stat_norica',
+      iconColor: '#34d399'
+    },
     SplashScreen: {
       launchShowDuration: 1000,
       launchAutoHide: true,

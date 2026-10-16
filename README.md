@@ -38,7 +38,7 @@ NEXT_PUBLIC_GOOGLE_CLIENT_ID=...   # login nativo com Google
 ## Publicar esta versão (1.3.0)
 
 1. **Revogue as chaves antigas** (estavam expostas): Groq e Gemini. Gere uma chave nova da Groq.
-2. **Banco** — rode, nesta ordem, os dois arquivos de `supabase/migrations/` no SQL Editor do Supabase (ou `supabase db push`).
+2. **Banco** — rode, nesta ordem, os arquivos de `supabase/migrations/` no SQL Editor do Supabase (ou `supabase db push`).
 3. **Secrets das Edge Functions**:
    ```bash
    supabase login
@@ -71,6 +71,31 @@ supabase secrets set GROQ_CHAT_MODEL=openai/gpt-oss-120b GROQ_FAST_MODEL=openai/
 ```
 
 Acompanhe: https://console.groq.com/docs/deprecations
+
+## Porto com resposta aparecendo enquanto é escrita
+
+A ação `chat_stream` da função `norica` devolve a resposta aos pedaços (NDJSON: `start` → `delta`… → `done`).
+O app lê com o fetch original do WebView (`window.CapacitorWebFetch`), porque o CapacitorHttp espera a resposta inteira.
+Se a função publicada ainda for a antiga, o app usa a ação `chat` (resposta inteira) automaticamente.
+
+## Logs e humor sem internet
+
+`lib/offline-sync.ts`: o que a pessoa marca vai primeiro para uma fila no aparelho e é enviado ao Supabase
+ao abrir o app, ao voltar para ele e quando a internet volta. Os Logs mostram "Salvo no aparelho" enquanto houver pendência.
+
+## Lembrete diário
+
+Notificação local (`@capacitor/local-notifications`), configurada em **Perfil → Lembrete Diário**.
+Uma mensagem por dia da semana, no horário escolhido. Ícone: `android/app/src/main/res/drawable/ic_stat_norica.xml`.
+
+## Erros e lentidão
+
+O app registra sozinho erros inesperados e lentidão (abertura > 4s, primeira palavra do Porto > 8s) na tabela `app_errors`
+(migration `20261016120000_norica_erros.sql`). Ninguém do app consegue ler a tabela. Para ver:
+
+```sql
+select * from app_errors_resumo;   -- últimos 30 dias, agrupado
+```
 
 ## Verificar se tudo funciona
 

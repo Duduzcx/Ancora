@@ -53,6 +53,64 @@ export async function groqChat(
   return (data.choices?.[0]?.message?.content ?? "").trim();
 }
 
+/**
+ * Mesma chamada do groqChat, mas recebendo a resposta aos pedaços (streaming).
+ * Cada trecho novo de texto é entregue em onDelta; no fim, devolve o texto completo.
+ */
+export async function groqChatStream(
+  messages: ChatMessage[],
+  onDelta: (text: string) => void,
+  opts: { model?: string; temperature?: number; maxTokens?: number; signal?: AbortSignal } = {},
+): Promise<string> {
+  const model = opts.model ?? CHAT_MODEL;
+  const reasoning = isReasoningModel(model);
+  const res = await fetch(`${GROQ_URL}/chat/completions`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey()}`, "Content-Type": "application/json" },
+    signal: opts.signal,
+    body: JSON.stringify({
+      model,
+      messages,
+      stream: true,
+      temperature: opts.temperature ?? 0.7,
+      max_completion_tokens: (opts.maxTokens ?? 600) + (reasoning ? 600 : 0),
+      ...(reasoning ? { reasoning_effort: "low", include_reasoning: false } : {}),
+    }),
+  });
+  if (!res.ok || !res.body) {
+    throw new GroqError(res.status, `Groq ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let full = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    // Formato SSE: linhas "data: {...}" separadas por linha em branco; termina com "data: [DONE]".
+    let newline: number;
+    while ((newline = buffer.indexOf("\n")) >= 0) {
+      const line = buffer.slice(0, newline).trim();
+      buffer = buffer.slice(newline + 1);
+      if (!line.startsWith("data:")) continue;
+      const data = line.slice(5).trim();
+      if (data === "[DONE]") return full.trim();
+      try {
+        const delta = JSON.parse(data).choices?.[0]?.delta?.content;
+        if (typeof delta === "string" && delta) {
+          full += delta;
+          onDelta(delta);
+        }
+      } catch (_e) {
+        // linha incompleta ou de controle: ignora
+      }
+    }
+  }
+  return full.trim();
+}
+
 /** Extrai o primeiro objeto JSON de uma resposta de texto (o modelo às vezes adiciona texto em volta). */
 export function parseJsonObject(text: string): Record<string, unknown> | null {
   const start = text.indexOf("{");

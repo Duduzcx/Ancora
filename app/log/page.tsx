@@ -15,6 +15,7 @@ import confetti from 'canvas-confetti';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import Link from 'next/link';
 import AnimatedBackground from '@/components/AnimatedBackground';
+import { usePendingSync } from '@/lib/offline-sync';
 import { fetchDailyLog, saveDailyLog, todayKey, noricaApi, type CustomTask } from '@/lib/norica-api';
 
 // Tarefas sugeridas pela IA no Porto entram numa categoria própria.
@@ -101,6 +102,16 @@ export default function LogPage() {
   const [isSynced, setIsSynced] = useState(false);
   const saveTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [streak, setStreak] = useState(0);
+  const pendingCount = usePendingSync();
+  // Só avisa "salvo no aparelho" se o envio estiver demorando (evita piscar a cada toque).
+  const [pendingSync, setPendingSync] = useState(0);
+  useEffect(() => {
+    if (!pendingCount) { setPendingSync(0); return; }
+    const t = setTimeout(() => setPendingSync(pendingCount), 3000);
+    return () => clearTimeout(t);
+  }, [pendingCount]);
+  // Se a pessoa marcar algo antes da conta responder, o que ela marcou vale mais.
+  const touchedRef = React.useRef(false);
   const [aiInsight, setAiInsight] = useState<string>("");
   
   // Estados para valores aleatórios estáveis (evita erro de hidratação)
@@ -171,7 +182,7 @@ export default function LogPage() {
     // Sincroniza com a conta: o registro de hoje no Supabase vence a cópia local.
     fetchDailyLog(today)
       .then(log => {
-        if (log) setTasks(withCustomTasks(defaultTasks, log.completed || [], log.custom_tasks || []));
+        if (log && !touchedRef.current) setTasks(withCustomTasks(defaultTasks, log.completed || [], log.custom_tasks || []));
       })
       .catch(() => {})
       .finally(() => setIsSynced(true));
@@ -277,6 +288,7 @@ export default function LogPage() {
   }, [isMounted, tasks]);
 
   const toggleTask = (id: number | string) => {
+    touchedRef.current = true;
     setTasks(prev => prev.map(t => {
       if (t.id === id) {
         const newState = !t.completed;
@@ -345,6 +357,11 @@ export default function LogPage() {
                 <span className="text-white font-black text-sm">
                   {new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}
                 </span>
+                {pendingSync > 0 && (
+                  <span className="text-[9px] font-black text-amber-300/80 uppercase tracking-widest mt-1">
+                    Salvo no aparelho · envia quando a internet voltar
+                  </span>
+                )}
               </div>
               <Sparkles size={16} className="text-emerald-400 ml-auto" />
             </div>

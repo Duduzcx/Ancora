@@ -9,7 +9,7 @@
 
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { decrypt, encrypt } from "../_shared/crypto.ts";
-import { CHAT_MODEL, type ChatMessage, FAST_MODEL, groqChat, parseJsonObject, TRANSCRIBE_MODEL } from "../_shared/groq.ts";
+import { CHAT_MODEL, type ChatMessage, FAST_MODEL, groqChat, groqChatStream, parseJsonObject, TRANSCRIBE_MODEL } from "../_shared/groq.ts";
 import { firstNameFrom } from "../_shared/names.ts";
 import { consume, getPlan, launchMode, PLAN_LIMITS, usageToday } from "../_shared/plans.ts";
 import { checkSubscription, PRO_PRODUCT_ID } from "../_shared/google-play.ts";
@@ -145,7 +145,22 @@ async function updateDailyLog(ctx: Ctx, transcript: ChatMessage[]) {
   }, { onConflict: "user_id,date" });
 }
 
-async function chat(ctx: Ctx, body: Record<string, unknown>) {
+type PreparedChat = {
+  chatId: string;
+  isNewChat: boolean;
+  history: ChatMessage[];
+  message: string;
+  crisis: boolean;
+  userMessageId: string | null;
+  system: string;
+};
+
+const CRISIS_FALLBACK =
+  "Estou aqui com você. O que você está sentindo é sério e você merece ajuda agora: **ligue 188 (CVV)**, é gratuito e funciona 24h. Se estiver em perigo imediato, **ligue 192**. Você está em segurança neste momento?";
+const ERROR_FALLBACK = "Tive um problema na navegação agora. Pode me contar de novo? ⚓";
+
+// Parte 1 da conversa: valida, abre/confere a conversa, aplica limites e salva a mensagem da pessoa.
+async function prepareChat(ctx: Ctx, body: Record<string, unknown>): Promise<PreparedChat> {
   const regenerate = body.regenerate === true; // depois de editar uma mensagem: responde de novo, sem salvar outra
   const mood = typeof body.mood === "string" && VALID_MOODS.includes(body.mood) ? body.mood : null;
   const persona = body.persona === "clara" ? "clara" : "norica";
@@ -214,18 +229,13 @@ async function chat(ctx: Ctx, body: Record<string, unknown>) {
   }
 
   const system = persona === "clara" ? claraSystemPrompt(mood, crisis, name) : portoSystemPrompt(mood, crisis, name);
-  let reply: string;
-  try {
-    reply = await groqChat([{ role: "system", content: system }, ...history, { role: "user", content: message }]);
-  } catch (e) {
-    console.error(e);
-    reply = "";
-  }
-  if (!reply) {
-    reply = crisis
-      ? "Estou aqui com você. O que você está sentindo é sério e você merece ajuda agora: **ligue 188 (CVV)**, é gratuito e funciona 24h. Se estiver em perigo imediato, **ligue 192**. Você está em segurança neste momento?"
-      : "Tive um problema na navegação agora. Pode me contar de novo? ⚓";
-  }
+  return { chatId: chatId!, isNewChat, history, message, crisis, userMessageId, system };
+}
+
+// Parte 2: salva a resposta, dá título à conversa, atualiza o resumo do dia e sugere passos.
+async function finishChat(ctx: Ctx, prep: PreparedChat, rawReply: string) {
+  const { chatId, isNewChat, history, message, crisis, userMessageId } = prep;
+  const reply = rawReply || (crisis ? CRISIS_FALLBACK : ERROR_FALLBACK);
 
   const { data: botRow } = await ctx.db
     .from("messages")
@@ -255,6 +265,81 @@ async function chat(ctx: Ctx, body: Record<string, unknown>) {
 
   const tasks = crisis ? [] : await extractTasks(reply);
   return { chatId, reply, crisis, title, tasks, userMessageId, assistantMessageId: botRow?.id ?? null };
+}
+
+function modelMessages(prep: PreparedChat): ChatMessage[] {
+  return [{ role: "system", content: prep.system }, ...prep.history, { role: "user", content: prep.message }];
+}
+
+// Conversa completa de uma vez (versões antigas do app e plano B do streaming).
+async function chat(ctx: Ctx, body: Record<string, unknown>) {
+  const prep = await prepareChat(ctx, body);
+  let reply = "";
+  try {
+    reply = await groqChat(modelMessages(prep));
+  } catch (e) {
+    console.error(e);
+  }
+  return finishChat(ctx, prep, reply);
+}
+
+// Conversa com a resposta chegando aos pedaços (a pessoa vê o texto sendo escrito).
+// Formato: uma linha JSON por evento (NDJSON):
+//   {"type":"start","chatId","userMessageId"} → {"type":"delta","text"}… → {"type":"done", ...resultado}
+// Se a pessoa tocar em "parar", o app fecha a conexão: a geração é cancelada e nada é salvo.
+async function chatStream(ctx: Ctx, body: Record<string, unknown>): Promise<Response> {
+  const prep = await prepareChat(ctx, body); // erros de limite/validação voltam como JSON normal
+  const encoder = new TextEncoder();
+  const upstream = new AbortController();
+  let cancelled = false;
+
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const send = (event: Record<string, unknown>) => {
+        if (cancelled) return;
+        try {
+          controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
+        } catch (_e) {
+          cancelled = true;
+        }
+      };
+      send({ type: "start", chatId: prep.chatId, userMessageId: prep.userMessageId, crisis: prep.crisis });
+
+      let reply = "";
+      try {
+        reply = await groqChatStream(modelMessages(prep), (text) => send({ type: "delta", text }), { signal: upstream.signal });
+      } catch (e) {
+        if (!cancelled) console.error(e);
+      }
+      if (cancelled) return;
+
+      // Sem resposta do modelo: manda o texto de apoio como se tivesse sido escrito.
+      if (!reply) send({ type: "delta", text: prep.crisis ? CRISIS_FALLBACK : ERROR_FALLBACK });
+      try {
+        const result = await finishChat(ctx, prep, reply);
+        send({ type: "done", ...result });
+      } catch (e) {
+        console.error(e);
+        send({ type: "error", error: "Não foi possível salvar a resposta." });
+      }
+      try {
+        controller.close();
+      } catch (_e) {}
+    },
+    cancel() {
+      cancelled = true;
+      upstream.abort();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      ...corsHeaders,
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+      "Cache-Control": "no-cache",
+      "X-Accel-Buffering": "no",
+    },
+  });
 }
 
 // Apagar mensagens específicas (menu da mensagem no Porto).
@@ -510,7 +595,7 @@ async function health(ctx: Ctx) {
     checks.criptografia = { ok: false, detail: String((e as Error).message) };
   }
 
-  for (const table of ["chats", "messages", "mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "user_plans", "usage_events"]) {
+  for (const table of ["chats", "messages", "mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "user_plans", "usage_events", "app_errors"]) {
     const { error } = await ctx.admin.from(table).select("*", { count: "exact", head: true });
     checks[`tabela_${table}`] = error ? { ok: false, detail: error.message } : { ok: true };
   }
@@ -573,18 +658,20 @@ Deno.serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
     const handler = actions[String(body.action ?? "")];
-    if (!handler) throw new HttpError(400, "Ação desconhecida");
+    if (!handler && body.action !== "chat_stream") throw new HttpError(400, "Ação desconhecida");
 
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
       auth: { persistSession: false },
     });
-    return json(await handler({
+    const ctx: Ctx = {
       db,
       admin,
       userId: user.id,
       email: user.email ?? null,
       meta: (user.user_metadata ?? {}) as Record<string, unknown>,
-    }, body));
+    };
+    if (body.action === "chat_stream") return await chatStream(ctx, body);
+    return json(await handler!(ctx, body));
   } catch (e) {
     if (e instanceof HttpError) return json({ error: e.message }, e.status);
     console.error(e);

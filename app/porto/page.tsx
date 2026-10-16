@@ -7,7 +7,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Send, Bot, User, Anchor, ArrowLeft, Clock, Loader2, Mic, MicOff, Search, Edit2, Copy, Sparkles, Trash2, SendHorizontal, LifeBuoy, Plus, CheckCircle2 } from 'lucide-react';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { createClient } from '@/lib/supabase-client';
-import { noricaApi, toMood, addTasksToToday } from '@/lib/norica-api';
+import { noricaApi, toMood, addTasksToToday, streamChat, StreamUnavailableError } from '@/lib/norica-api';
+import { reportError, reportSlow } from '@/lib/error-report';
 import { HelpSheet, CrisisCard } from '@/components/AjudaAgora';
 import ChatHistorySidebar from '@/components/ChatHistorySidebar';
 import AnimatedBackground from '@/components/AnimatedBackground';
@@ -198,20 +199,80 @@ function PortoContent() {
     const isClara = action === 'suporte-b2b' || messages.some(m => m.content && m.content.includes("Clara"));
     const welcomeMsg = !chatId ? messages.find(m => m.id === 'welcome') : undefined;
     if (!chatId) isInitializingNewChat.current = true;
+    const chatOpts = {
+      mood,
+      persona: (isClara ? 'clara' : 'norica') as 'clara' | 'norica',
+      welcome: welcomeMsg?.content,
+      regenerate: opts.regenerate,
+      signal: controller.signal,
+    };
+    const goToChat = (newChatId: string) => {
+      if (!chatId && newChatId) {
+        router.replace(`/porto/?chatId=${newChatId}${action ? `&action=${action}` : ''}${humor !== 'default' ? `&humor=${encodeURIComponent(humor)}` : ''}`, { scroll: false });
+      }
+    };
+
+    // A resposta chega aos pedaços: a bolha da Nórica aparece logo e vai sendo escrita.
+    // A chave visual (uiKey) fica fixa para a bolha não recomeçar quando o id do servidor chega.
+    const botKey = `stream-${Date.now()}`;
+    const startedAt = Date.now();
+    let shown = false;
+    let pending = '';
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
+    const flush = () => {
+      flushTimer = null;
+      if (cancelarRef.current) return; // a pessoa tocou em "parar"
+      const content = pending;
+      if (!shown) {
+        shown = true;
+        const wait = Date.now() - startedAt;
+        if (wait > 8000) reportSlow('Porto: primeira palavra', wait);
+        setIsLoading(false);
+        setAnimatedIds(prev => new Set(prev).add(botKey));
+        setStreamingMessageId(botKey);
+        setMessages(prev => [...prev, { id: botKey, uiKey: botKey, role: 'assistant', content, tasks: [] }]);
+      } else {
+        setMessages(prev => prev.map(m => (m.uiKey === botKey ? { ...m, content } : m)));
+      }
+    };
 
     try {
-      const result = await noricaApi.chat(text, chatId, {
-        mood,
-        persona: isClara ? 'clara' : 'norica',
-        welcome: welcomeMsg?.content,
-        regenerate: opts.regenerate,
-        signal: controller.signal,
-      });
+      try {
+        const result = await streamChat(text, chatId, chatOpts, (event) => {
+          if (cancelarRef.current) return;
+          if (event.type === 'start') {
+            goToChat(event.chatId);
+            setMessages(prev => [
+              ...prev.map(m => (opts.tempUserId && m.id === opts.tempUserId && event.userMessageId) ? { ...m, id: event.userMessageId } : m),
+              ...(event.crisis ? [{ id: `crisis-${Date.now()}`, role: 'crisis', content: '' }] : []),
+            ]);
+            if (event.crisis) setIsHelpOpen(true);
+          } else if (event.type === 'delta') {
+            pending += event.text;
+            if (!flushTimer) flushTimer = setTimeout(flush, shown ? 60 : 0); // junta pedaços: menos redesenhos
+          }
+        });
+        if (cancelarRef.current) return;
+        if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+        if (result.title) setChatTitle(result.title);
+        const finalId = result.assistantMessageId || botKey;
+        setAnimatedIds(prev => new Set(prev).add(finalId));
+        if (!shown) {
+          setMessages(prev => [...prev, { id: finalId, uiKey: botKey, role: 'assistant', content: result.reply, tasks: result.tasks || [] }]);
+        } else {
+          setMessages(prev => prev.map(m => (m.uiKey === botKey ? { ...m, id: finalId, content: result.reply, tasks: result.tasks || [] } : m)));
+        }
+        setIsLoading(false);
+        return;
+      } catch (streamErr: any) {
+        if (!(streamErr instanceof StreamUnavailableError)) throw streamErr;
+        // Plano B: servidor ainda sem streaming ou conexão que não permite — resposta inteira de uma vez.
+      }
+
+      const result = await noricaApi.chat(text, chatId, chatOpts);
       if (cancelarRef.current) return;
 
-      if (!chatId && result.chatId) {
-        router.replace(`/porto/?chatId=${result.chatId}${action ? `&action=${action}` : ''}${humor !== 'default' ? `&humor=${encodeURIComponent(humor)}` : ''}`, { scroll: false });
-      }
+      goToChat(result.chatId);
       if (result.title) setChatTitle(result.title);
 
       const botMessageId = result.assistantMessageId || (Date.now() + 1).toString();
@@ -224,7 +285,9 @@ function PortoContent() {
       setIsLoading(false);
       if (result.crisis) setIsHelpOpen(true);
     } catch (err: any) {
+      if (flushTimer) clearTimeout(flushTimer);
       if (err?.name === 'AbortError' || cancelarRef.current) return;
+      if (/conexão caiu/i.test(err?.message || '')) reportError(err, 'porto-stream');
       setMessages(prev => [...prev, { id: `error-${Date.now()}`, role: 'assistant', content: `⚠️ ${err?.message || "Sinal fraco no Porto. Verifique sua conexão."}` }]);
       setIsResponding(false);
     } finally {
@@ -376,6 +439,7 @@ function PortoContent() {
 
   const mensagens = messages.map((m) => ({
     id: m.id,
+    uiKey: (m.uiKey ?? m.id) as string,
     texto: m.content,
     autor: m.role === 'user' ? 'User' : m.role === 'crisis' ? 'Crise' : 'IA',
     tasks: (m.tasks || []) as string[],
@@ -462,11 +526,11 @@ function PortoContent() {
           msg.autor === 'Crise' ? (
             <div key={msg.id} className="self-start w-full"><CrisisCard /></div>
           ) : msg.autor === 'IA' ? (
-            <div key={msg.id} className="flex flex-col gap-2">
+            <div key={msg.uiKey} className="flex flex-col gap-2">
               <MensagemIA 
                 textoOriginal={msg.texto} 
-                isStreaming={msg.id === streamingMessageId}
-                shouldAnimate={animatedIds.has(msg.id)}
+                isStreaming={msg.uiKey === streamingMessageId}
+                shouldAnimate={animatedIds.has(msg.id) || animatedIds.has(msg.uiKey)}
                 cancelarRef={cancelarRef}
                 onFinalizado={() => setIsResponding(false)} 
               />

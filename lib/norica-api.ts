@@ -3,6 +3,8 @@
 
 import { createClient } from '@/lib/supabase-client';
 import { cacheGet, cacheSet } from '@/lib/cache';
+import { queueHabitLog, queueMood, readHabitLog } from '@/lib/offline-sync';
+import { reportError } from '@/lib/error-report';
 
 export type ChatResult = {
   chatId: string;
@@ -63,7 +65,13 @@ async function call<T>(action: string, payload: Record<string, unknown> = {}, si
     ...(signal ? { signal } : {}),
   } as any);
   if (signal?.aborted) throw new DOMException('Cancelado', 'AbortError');
-  if (error) throw new Error(await readError(error));
+  if (error) {
+    const message = await readError(error);
+    // Falha do servidor (5xx) vai para o registro de erros; limites e validações (4xx) não.
+    const status = (error as any)?.context?.status;
+    if (typeof status === 'number' && status >= 500) reportError(new Error(`${action}: ${status} ${message}`), 'servidor');
+    throw new Error(message);
+  }
   if (data?.error) throw new Error(data.error);
   return data as T;
 }
@@ -112,6 +120,95 @@ export const noricaApi = {
 };
 
 // ---------------------------------------------------------------------
+// Porto com resposta aparecendo enquanto é escrita (streaming)
+// ---------------------------------------------------------------------
+
+export type ChatStreamEvent =
+  | { type: 'start'; chatId: string; userMessageId: string | null; crisis: boolean }
+  | { type: 'delta'; text: string }
+  | ({ type: 'done' } & ChatResult)
+  | { type: 'error'; error: string };
+
+/** O servidor ainda não tem o streaming (função antiga) ou a conexão não permite: use noricaApi.chat. */
+export class StreamUnavailableError extends Error {
+  constructor() {
+    super('streaming indisponível');
+    this.name = 'StreamUnavailableError';
+  }
+}
+
+export async function streamChat(
+  message: string,
+  chatId: string | null,
+  opts: ChatOptions,
+  onEvent: (event: ChatStreamEvent) => void,
+): Promise<ChatResult> {
+  const { signal, ...rest } = opts;
+  const supabase = createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Faça login para continuar');
+
+  // No Android, o fetch padrão do Capacitor (CapacitorHttp) espera a resposta inteira.
+  // O fetch original do WebView entrega os pedaços conforme chegam.
+  const w = window as any;
+  const webFetch: typeof fetch = w.CapacitorWebFetch ? w.CapacitorWebFetch.bind(w) : window.fetch.bind(window);
+
+  let res: Response;
+  try {
+    res = await webFetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/norica`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ action: 'chat_stream', message, chatId, ...rest }),
+      signal,
+    });
+  } catch (e: any) {
+    if (e?.name === 'AbortError') throw e;
+    throw new StreamUnavailableError();
+  }
+
+  const type = res.headers.get('Content-Type') ?? '';
+  if (!res.ok || !type.includes('ndjson') || !res.body) {
+    const body = await res.json().catch(() => null);
+    if (body?.error && body.error !== 'Ação desconhecida') throw new Error(body.error);
+    throw new StreamUnavailableError();
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let result: ChatResult | null = null;
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let newline: number;
+    while ((newline = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, newline).trim();
+      buffer = buffer.slice(newline + 1);
+      if (!line) continue;
+      let event: ChatStreamEvent;
+      try {
+        event = JSON.parse(line);
+      } catch (_e) {
+        continue;
+      }
+      if (event.type === 'error') throw new Error(event.error);
+      if (event.type === 'done') {
+        const { type: _t, ...data } = event;
+        result = data as ChatResult;
+      }
+      onEvent(event);
+    }
+  }
+  if (!result) throw new Error('A conexão caiu no meio da resposta. Tente de novo.');
+  return result;
+}
+
+// ---------------------------------------------------------------------
 // Plano com cache: as telas usam o último plano conhecido na hora
 // ---------------------------------------------------------------------
 
@@ -145,10 +242,8 @@ export function toMood(value: string | null | undefined): Mood | null {
 }
 
 export async function logMood(mood: Mood) {
-  const supabase = createClient();
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.user) return;
-  await supabase.from('mood_logs').insert({ user_id: session.user.id, mood });
+  // Vai para a fila do aparelho e é enviado assim que houver internet.
+  await queueMood(mood);
 }
 
 // ---------------------------------------------------------------------
@@ -163,30 +258,12 @@ export function todayKey(date = new Date()): string {
 }
 
 export async function fetchDailyLog(day = todayKey()): Promise<DailyLog | null> {
-  const supabase = createClient();
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.user) return null;
-  const { data } = await supabase
-    .from('habit_logs')
-    .select('day, completed, custom_tasks, progress')
-    .eq('user_id', session.user.id)
-    .eq('day', day)
-    .maybeSingle();
-  return (data as DailyLog) ?? null;
+  return (await readHabitLog(day)) as DailyLog | null;
 }
 
 export async function saveDailyLog(log: DailyLog) {
-  const supabase = createClient();
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.user) return;
-  await supabase.from('habit_logs').upsert({
-    user_id: session.user.id,
-    day: log.day,
-    completed: log.completed,
-    custom_tasks: log.custom_tasks,
-    progress: log.progress,
-    updated_at: new Date().toISOString(),
-  });
+  // Grava no aparelho primeiro; sincroniza com a conta quando houver conexão.
+  await queueHabitLog(log);
 }
 
 // Adiciona ações sugeridas pela IA na lista de hoje (aba Logs).

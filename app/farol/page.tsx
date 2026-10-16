@@ -207,12 +207,13 @@ export default function FarolPage() {
     return path;
   };
 
-  const displayLogs = weeklyLogs.length >= 2 ? weeklyLogs : [
-    { humor: 'calmo', date: 'Simulação' }, 
-    { humor: 'ansioso', date: 'Simulação' }, 
-    { humor: 'agitado', date: 'Simulação' }, 
-    { humor: 'calmo', date: 'Simulação' }
-  ];
+  // Marés reais: humor marcado na Início + resumo do dia feito pelo Porto (sem dados de exemplo).
+  const readingDays = (isPro ? reading.month : reading.week)
+    .filter(d => d.mood)
+    .map(d => ({ humor: d.mood as string, date: d.day }));
+  const displayLogs = readingDays.length >= weeklyLogs.length ? readingDays : weeklyLogs;
+  const hasTide = displayLogs.length >= 2;
+  const daysMissing = Math.max(0, 2 - displayLogs.length);
 
   return (
     <div className="relative w-full h-[100dvh] overflow-y-auto flex flex-col bg-transparent font-sans">
@@ -363,32 +364,51 @@ export default function FarolPage() {
                 <Activity size={20} className="text-emerald-400" />
                 <h3 className="text-sm font-black text-emerald-400 uppercase tracking-widest">Marés ({isPro ? 30 : 7} Dias)</h3>
               </div>
-              <div className="w-full h-24 relative flex items-end justify-between">
-                <svg className="absolute inset-0 w-full h-full overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none">
-                  <path 
-                    d={generateTidePath(displayLogs)} 
-                    fill="none" 
-                    stroke="#34d399" 
-                    strokeWidth="3" 
-                    strokeLinecap="round" 
-                    strokeLinejoin="round" 
-                    className="drop-shadow-[0_0_8px_rgba(52,211,153,0.8)]"
-                    vectorEffect="non-scaling-stroke"
-                  />
-                </svg>
-                {displayLogs.map((log, i) => {
-                  const x = (i / Math.max(1, displayLogs.length - 1)) * 100;
-                  const y = getMoodY(log.humor);
-                  return (
-                    <div 
-                      key={i} 
-                      className="absolute w-3 h-3 bg-white rounded-full shadow-[0_0_10px_#fff]" 
-                      style={{ left: `calc(${x}% - 6px)`, top: `calc(${y}% - 6px)` }} 
-                      title={`${log.date}: ${log.humor}`} 
+              {hasTide ? (
+                <div className="w-full h-24 relative flex items-end justify-between">
+                  <svg className="absolute inset-0 w-full h-full overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none">
+                    <path 
+                      d={generateTidePath(displayLogs)} 
+                      fill="none" 
+                      stroke="#34d399" 
+                      strokeWidth="3" 
+                      strokeLinecap="round" 
+                      strokeLinejoin="round" 
+                      className="drop-shadow-[0_0_8px_rgba(52,211,153,0.8)]"
+                      vectorEffect="non-scaling-stroke"
                     />
-                  );
-                })}
-              </div>
+                  </svg>
+                  {displayLogs.map((log, i) => {
+                    const x = (i / Math.max(1, displayLogs.length - 1)) * 100;
+                    const y = getMoodY(log.humor);
+                    return (
+                      <div 
+                        key={i} 
+                        className="absolute w-3 h-3 bg-white rounded-full shadow-[0_0_10px_#fff]" 
+                        style={{ left: `calc(${x}% - 6px)`, top: `calc(${y}% - 6px)` }} 
+                        title={`${log.date}: ${log.humor}`} 
+                      />
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="w-full min-h-24 relative flex flex-col justify-center gap-3">
+                  <svg className="w-full h-8 overflow-visible opacity-40" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                    <path d="M 0 50 C 25 10, 25 90, 50 50 C 75 10, 75 90, 100 50" fill="none" stroke="#34d399" strokeWidth="2" strokeDasharray="4 6" vectorEffect="non-scaling-stroke" />
+                  </svg>
+                  <p className="relative text-sm text-white/80 font-bold leading-relaxed">
+                    {daysMissing === 2
+                      ? 'Suas marés aparecem a partir do 2º dia com o humor registrado.'
+                      : 'Falta só mais 1 dia para suas marés aparecerem.'}
+                  </p>
+                  <p className="relative text-[11px] text-white/50 font-semibold leading-relaxed">
+                    Marque como está o seu mar na Início ou converse no Porto.
+                  </p>
+                  <Link href="/" className="relative self-start text-[10px] font-black text-emerald-400 uppercase tracking-widest underline underline-offset-4">
+                    Marcar meu mar de hoje
+                  </Link>
+                </div>
+              )}
             </motion.div>
 
             {/* Exercício de Respiração 4-7-8 */}

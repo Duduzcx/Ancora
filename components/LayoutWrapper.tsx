@@ -11,6 +11,9 @@ import NavigationDock from '@/components/NavigationDock';
 import ConsentGate from '@/components/ConsentGate';
 import { useAuth } from '@/lib/auth-store';
 import { warmUpServer } from '@/lib/norica-api';
+import { flushOutbox, startOfflineSync } from '@/lib/offline-sync';
+import { reportError, reportSlow } from '@/lib/error-report';
+import { listenReminderTaps } from '@/lib/reminder';
 
 const publicPages = ['/auth', '/auth/signup', '/auth/forgot-password', '/privacidade', '/excluir-conta'];
 
@@ -31,6 +34,7 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
   const pathname = usePathname();
   const router = useRouter();
   const pathnameRef = useRef(pathname);
+  const openedRef = useRef(false);
   pathnameRef.current = pathname;
 
   // Ouvintes registrados UMA vez (antes eram recriados a cada troca de tela,
@@ -69,19 +73,29 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
 
       // Mantém o login vivo: renova o token quando o app volta para a tela.
       listeners.push(App.addListener('appStateChange', ({ isActive }) => {
-        if (isActive) supabase.auth.startAutoRefresh();
-        else supabase.auth.stopAutoRefresh();
+        if (isActive) {
+          supabase.auth.startAutoRefresh();
+          flushOutbox().catch(() => {});
+        } else {
+          supabase.auth.stopAutoRefresh();
+        }
       }));
     }
 
     const handleGlobalError = (event: ErrorEvent) => {
       log(`GLOBAL ERROR: "${event.message || ''}"`);
-      if (isChunkError(event.error, event.message || '')) window.location.reload();
+      if (isChunkError(event.error, event.message || '')) { window.location.reload(); return; }
+      reportError(event.error ?? event.message, 'global');
     };
     const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
       log(`UNHANDLED REJECTION: "${event.reason?.message || String(event.reason)}"`);
-      if (isChunkError(event.reason)) window.location.reload();
+      if (isChunkError(event.reason)) { window.location.reload(); return; }
+      reportError(event.reason, 'promise');
     };
+    // Toque no lembrete diário abre a Início.
+    let stopReminderTaps: (() => void) | null = null;
+    listenReminderTaps((route) => router.push(route)).then((stop) => { stopReminderTaps = stop; }).catch(() => {});
+
     window.addEventListener('error', handleGlobalError);
     window.addEventListener('unhandledrejection', handleUnhandledRejection);
 
@@ -89,6 +103,7 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
       window.removeEventListener('error', handleGlobalError);
       window.removeEventListener('unhandledrejection', handleUnhandledRejection);
       listeners.forEach(p => p.then(l => l.remove()).catch(() => {}));
+      stopReminderTaps?.();
     };
   }, []);
 
@@ -98,6 +113,12 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
     const isPublic = publicPages.some(page => pathname?.startsWith(page));
     log(`checkRedirect: session=${session ? 'YES' : 'NO'}, path="${pathname}", isPublic=${isPublic}`);
     if (!session && !isPublic && pathname !== '/') router.replace('/');
+    // Abertura demorada (do toque no ícone até a primeira tela): registra para a equipe ver.
+    if (!openedRef.current) {
+      openedRef.current = true;
+      const ms = typeof performance !== 'undefined' ? performance.now() : 0;
+      if (ms > 4000) reportSlow('abertura do app', ms);
+    }
     setLoading(false);
   }, [authReady, session, pathname, router]);
 
@@ -110,6 +131,7 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
       ['/porto/', '/farol/', '/perfil/', '/log/', '/arena/', '/cofre/', '/respiracao/', '/planos/']
         .forEach((href) => { try { router.prefetch(href); } catch (_e) {} });
       warmUpServer(userId);
+      startOfflineSync(); // envia Logs/humor marcados sem internet
     }, 400);
     return () => clearTimeout(t);
   }, [userId, router]);

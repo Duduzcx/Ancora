@@ -9,12 +9,13 @@ import {
   Anchor, LifeBuoy, Mail, Calendar, 
   LogOut, Settings, Fingerprint, AlertCircle, Loader2,
   ChevronRight, BadgeCheck, Shield, Key, Sparkles,
-  ShipWheel, Compass, Waves, Camera, Crown, Trash2
+  ShipWheel, Compass, Waves, Camera, Crown, Trash2, Bell
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import AnimatedBackground from '@/components/AnimatedBackground';
 import { getAuthState, useAuth } from '@/lib/auth-store';
 import { cacheGet, cacheSet } from '@/lib/cache';
+import { DEFAULT_REMINDER, disableReminder, enableReminder, formatTime, getReminder, type ReminderSettings } from '@/lib/reminder';
 
 // Foto do Google em alta resolução. A URL padrão vem com 96px ("=s96-c"),
 // que fica borrada no avatar grande em telas de celular.
@@ -229,6 +230,37 @@ export default function PerfilPage() {
       setDeleteError(err?.message || 'Não foi possível excluir agora.');
       setIsDeleting(false);
     }
+  };
+
+  // Lembrete diário
+  const [reminder, setReminder] = useState<ReminderSettings>(DEFAULT_REMINDER);
+  const [isReminderOpen, setIsReminderOpen] = useState(false);
+  const [reminderTime, setReminderTime] = useState('20:00');
+  const [reminderMsg, setReminderMsg] = useState<string | null>(null);
+  const [reminderBusy, setReminderBusy] = useState(false);
+  useEffect(() => {
+    const r = getReminder();
+    setReminder(r);
+    setReminderTime(formatTime(r));
+  }, []);
+
+  const saveReminder = async (on: boolean) => {
+    setReminderBusy(true);
+    setReminderMsg(null);
+    if (!on) {
+      await disableReminder();
+      setReminder({ ...getReminder() });
+      setReminderBusy(false);
+      return;
+    }
+    const [h, m] = reminderTime.split(':').map(Number);
+    const result = await enableReminder(h || 20, m || 0);
+    setReminder({ ...getReminder() });
+    setReminderBusy(false);
+    if (result === 'ok') setReminderMsg(`Pronto! Todo dia às ${reminderTime} a Nórica te chama. 🌊`);
+    else if (result === 'denied') setReminderMsg('O celular bloqueou as notificações. Libere em Configurações → Apps → Nórica → Notificações.');
+    else if (result === 'unsupported') setReminderMsg('O lembrete funciona no app instalado no celular.');
+    else setReminderMsg('Não foi possível agendar agora. Tente de novo.');
   };
 
   const [health, setHealth] = useState<HealthReport | null>(null);
@@ -539,6 +571,30 @@ export default function PerfilPage() {
           <ChevronRight size={20} className="text-white/40 group-hover:translate-x-1 transition-transform" />
         </motion.button>
 
+        {/* Lembrete diário */}
+        <motion.button 
+          initial={{ opacity: 0, y: 15 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.5, delay: 0.24 }}
+          whileTap={{ scale: 0.96 }}
+          onClick={() => { setReminderMsg(null); setIsReminderOpen(true); }}
+          className="w-full flex items-center justify-between p-7 bg-white/5 border border-white/10 rounded-[2.5rem] shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] hover:bg-sky-500/10 hover:border-sky-500/20 transition-all group"
+        >
+          <div className="flex items-center gap-4">
+             <div className="w-12 h-12 bg-sky-500/10 text-sky-400 border border-sky-500/20 rounded-2xl flex items-center justify-center group-hover:rotate-12 transition-transform">
+                <Bell size={24} />
+             </div>
+             <div className="text-left">
+                <h3 className="text-sm font-black text-white uppercase tracking-tighter italic">Lembrete Diário</h3>
+                <p className="text-[9px] font-black text-sky-400 uppercase tracking-widest leading-none mt-1">
+                  {reminder.enabled ? `Todo dia às ${formatTime(reminder)}` : 'Desligado'}
+                </p>
+             </div>
+          </div>
+          <ChevronRight size={20} className="text-white/40 group-hover:translate-x-1 transition-transform" />
+        </motion.button>
+
         {/* Privacidade */}
         <motion.button 
           initial={{ opacity: 0, y: 15 }}
@@ -593,6 +649,75 @@ export default function PerfilPage() {
           Verificar sistema
         </button>
       </motion.div>
+      <AnimatePresence>
+        {isReminderOpen && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => !reminderBusy && setIsReminderOpen(false)} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[1000]" />
+            <motion.div
+              initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 28, stiffness: 260 }}
+              className="fixed inset-x-0 bottom-0 z-[1001] bg-[#0b0f19] border-t border-white/10 rounded-t-[2.5rem] p-6 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] shadow-2xl max-w-lg mx-auto max-h-[80dvh] overflow-y-auto"
+            >
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-12 h-12 rounded-2xl bg-sky-500/15 text-sky-400 flex items-center justify-center"><Bell size={22} /></div>
+                <div>
+                  <h3 className="text-sm font-black text-white uppercase tracking-tighter leading-none">Lembrete diário</h3>
+                  <p className="text-[9px] font-black text-sky-400 uppercase tracking-widest mt-1">“Como está o seu mar hoje?”</p>
+                </div>
+              </div>
+              <p className="text-sm text-white/60 font-semibold leading-relaxed mb-5">
+                Um convite por dia, no horário que você escolher, para registrar seu mar ou conversar no Porto. Funciona mesmo sem internet.
+              </p>
+              <p className="text-[10px] font-black text-white/40 uppercase tracking-widest mb-3">Horário</p>
+              <div className="grid grid-cols-4 gap-2 mb-3">
+                {['08:00', '12:30', '20:00', '22:00'].map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => setReminderTime(t)}
+                    className={`py-3 rounded-2xl border text-xs font-black transition-all ${reminderTime === t ? 'bg-sky-500/20 border-sky-400/40 text-sky-300' : 'bg-white/5 border-white/10 text-white/60'}`}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+              <label className="flex items-center justify-between gap-3 p-4 rounded-2xl bg-white/5 border border-white/10 mb-5">
+                <span className="text-[10px] font-black text-white/50 uppercase tracking-widest">Outro horário</span>
+                <input
+                  type="time"
+                  value={reminderTime}
+                  onChange={(e) => e.target.value && setReminderTime(e.target.value)}
+                  className="bg-transparent text-white font-black text-sm outline-none [color-scheme:dark]"
+                />
+              </label>
+              {reminderMsg && <p className="text-xs font-bold text-sky-300 mb-4 leading-relaxed">{reminderMsg}</p>}
+              <div className="flex flex-col gap-3">
+                <motion.button
+                  whileTap={{ scale: 0.97 }}
+                  disabled={reminderBusy}
+                  onClick={() => saveReminder(true)}
+                  className="w-full py-4 rounded-2xl bg-sky-500 text-slate-950 font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-2"
+                >
+                  {reminderBusy && <Loader2 size={14} className="animate-spin" />}
+                  {reminder.enabled ? 'Salvar horário' : 'Ligar lembrete'}
+                </motion.button>
+                {reminder.enabled && (
+                  <button
+                    disabled={reminderBusy}
+                    onClick={() => saveReminder(false)}
+                    className="w-full py-4 rounded-2xl bg-white/5 border border-white/10 text-white/60 font-black uppercase tracking-widest text-[10px]"
+                  >
+                    Desligar lembrete
+                  </button>
+                )}
+                <button onClick={() => setIsReminderOpen(false)} className="w-full py-3 text-white/40 font-black uppercase tracking-widest text-[10px]">
+                  Fechar
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
       <AnimatePresence>
         {isHealthOpen && (
           <>
