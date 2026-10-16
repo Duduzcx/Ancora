@@ -15,6 +15,7 @@ import { GoogleSignIn } from '@capawesome/capacitor-google-sign-in';
 import AnimatedBackground from '@/components/AnimatedBackground';
 import NoiteCard from '@/components/NoiteCard';
 import HojeCards from '@/components/HojeCards';
+import ShineText from '@/components/ShineText';
 import RevealOnScroll from '@/components/RevealOnScroll';
 import LoginBackground from '@/components/LoginBackground';
 import NeblinaSOS from '@/components/NeblinaSOS';
@@ -341,16 +342,7 @@ export default function Home() {
           >
             <span className="text-[34px] md:text-[42px] block leading-none mb-3">
               Sua
-              <span
-                className="font-brain text-6xl md:text-7xl normal-case px-1 ml-1 mr-2 inline-block bg-[linear-gradient(110deg,#DB2777,46%,#fff,54%,#DB2777)] bg-[length:200%_auto] text-shine"
-                style={{
-                  WebkitBackgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent',
-                  backgroundClip: 'text',
-                }}
-              >
-                mente
-              </span>
+              <ShineText base="#DB2777" band="#ffffff" duration={2.5} className="font-brain text-6xl md:text-7xl normal-case px-1 ml-1 mr-2">mente</ShineText>
               em
             </span>
             <span className="text-emerald-400 italic block text-[52px] md:text-[64px] tracking-[-0.05em]">Solo firme.</span>
@@ -397,7 +389,7 @@ export default function Home() {
               {/* Question */}
               <div className="text-center py-1">
                  <h3 className="text-2xl font-black text-white tracking-tighter italic leading-none">
-                   Como está seu <span className="text-water inline-block px-1">mar</span> hoje?
+                   Como está seu <ShineText base="#3b82f6" band="#7dd3fc" duration={3} sweep="loop" className="px-1">mar</ShineText> hoje?
                  </h3>
               </div>
 

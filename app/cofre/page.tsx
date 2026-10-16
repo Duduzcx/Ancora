@@ -109,15 +109,10 @@ export default function CofrePage() {
       `}</style>
       <div className="absolute inset-0 pointer-events-none opacity-20 z-0">
         {[...Array(15)].map((_: any, i: number) => (
-          <motion.div
+          <div
             key={i}
-            animate={{ 
-              y: [-10, 10, -10],
-              opacity: [0.1, 0.3, 0.1]
-            }}
-            transition={{ duration: 3 + i, repeat: Infinity }}
-            className="absolute w-px h-px bg-emerald-500 rounded-full shadow-[0_0_10px_#10b981]"
-            style={{ top: `${Math.random() * 100}%`, left: `${Math.random() * 100}%` }}
+            className="absolute w-px h-px bg-emerald-500 rounded-full shadow-[0_0_10px_#10b981] css-float-dot"
+            style={{ top: `${(i * 37) % 100}%`, left: `${(i * 61 + 13) % 100}%`, animationDuration: `${3 + i}s` }}
           />
         ))}
       </div>

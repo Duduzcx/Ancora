@@ -247,6 +247,44 @@ html, body {
 @keyframes text-shine { to { background-position: -200% center; } }
 .text-shine { animation: text-shine 2.5s linear infinite; }
 
+/* Animações que antes eram feitas por JavaScript a cada quadro (framer-motion "repeat: Infinity") */
+@keyframes css-blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+.css-blink { animation: css-blink 1s linear infinite; }
+@keyframes css-wobble { 0%, 100% { transform: rotate(0deg); } 33% { transform: rotate(8deg); } 66% { transform: rotate(-8deg); } }
+.css-wobble { animation: css-wobble 6s ease-in-out infinite; }
+@keyframes css-radar { 0%, 100% { transform: scale(1); opacity: 0.3; } 50% { transform: scale(1.2); opacity: 0.6; } }
+.css-radar { animation: css-radar 6s ease-in-out infinite; }
+@keyframes css-float-dot { 0%, 100% { transform: translateY(-10px); opacity: 0.1; } 50% { transform: translateY(10px); opacity: 0.3; } }
+.css-float-dot { animation: css-float-dot 3s ease-in-out infinite; }
+@keyframes css-ring { from { transform: scale(1); opacity: var(--ring-from, 0.5); } to { transform: scale(var(--ring-to, 3)); opacity: 0; } }
+.css-ring { animation: css-ring 2.5s ease-out infinite; }
+@keyframes css-pulse-scale { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.1); } }
+.css-pulse-scale { animation: css-pulse-scale 2.5s ease-in-out infinite; }
+@keyframes css-fade-pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+.css-fade-pulse { animation: css-fade-pulse 2s ease-in-out infinite; }
+@keyframes css-tilt { 0%, 100% { transform: rotate(-2deg); } 50% { transform: rotate(2deg); } }
+.css-tilt { animation: css-tilt 4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .css-blink, .css-wobble, .css-radar, .css-float-dot, .css-ring, .css-pulse-scale, .css-fade-pulse, .css-tilt { animation: none !important; }
+}
+
+/* Brilho em texto só com transform (components/ShineText.tsx) */
+.shine-text { position: relative; display: inline-block; }
+.shine-window {
+  position: absolute; inset: 0; overflow: hidden; pointer-events: none; padding: inherit;
+  -webkit-mask-image: linear-gradient(110deg, transparent 38%, #000 50%, transparent 62%);
+  mask-image: linear-gradient(110deg, transparent 38%, #000 50%, transparent 62%);
+  will-change: transform;
+}
+.shine-glyphs { position: absolute; inset: 0; padding: inherit; white-space: nowrap; will-change: transform; }
+@keyframes shine-rev-win { 0% { transform: translateX(100%); } 50%, 100% { transform: translateX(-100%); } }
+@keyframes shine-rev-glyph { 0% { transform: translateX(-100%); } 50%, 100% { transform: translateX(100%); } }
+@keyframes shine-win { 0% { transform: translateX(-100%); } 50%, 100% { transform: translateX(100%); } }
+@keyframes shine-glyph { 0% { transform: translateX(100%); } 50%, 100% { transform: translateX(-100%); } }
+@keyframes shine-loop-win { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+@keyframes shine-loop-glyph { from { transform: translateX(100%); } to { transform: translateX(-100%); } }
+@media (prefers-reduced-motion: reduce) { .shine-window { display: none; } }
+
 /* Pulso de respiração dos botões (antes animava box-shadow, que redesenha a cada quadro) */
 .breath-pulse, .breath-pulse-rose { position: relative; isolation: isolate; }
 .breath-pulse::after, .breath-pulse-rose::after {
@@ -271,6 +309,12 @@ html, body {
 .breathe-scale { animation: breathe-scale 4.5s ease-in-out infinite; will-change: transform; }
 @keyframes spin-full { to { transform: rotate(360deg); } }
 .spin-10s { animation: spin-full 10s linear infinite; }
+.spin-20s { animation: spin-full 20s linear infinite; }
+.spin-24s { animation: spin-full 24s linear infinite; }
+@keyframes sos-breath { 0%, 100% { transform: scale(1); opacity: 0.15; } 50% { transform: scale(1.4); opacity: 0.65; } }
+.sos-breath { animation: sos-breath 8s ease-in-out infinite; will-change: transform, opacity; }
+@keyframes sos-breath-text { 0%, 100% { opacity: 0.3; } 50% { opacity: 0.8; } }
+.sos-breath-text { animation: sos-breath-text 8s ease-in-out infinite; }
 
 /* Luz que percorre a borda do card da vez na Início (3s) e o fio até o próximo card (0,3s). */
 @keyframes snake-border {
@@ -340,9 +384,8 @@ html, body {
   aspect-ratio: 1 / 1;
   translate: -50% -50%;
   opacity: 0;
-  will-change: transform, opacity;
 }
-.snake-ring.is-on .snake-spin { animation: snake-spin 3s cubic-bezier(0.45, 0, 0.55, 1) forwards; }
+.snake-ring.is-on .snake-spin { will-change: transform, opacity; animation: snake-spin 3s cubic-bezier(0.45, 0, 0.55, 1) forwards; }
 @keyframes snake-spin {
   0% { transform: rotate(-30deg); opacity: 0; }
   12% { opacity: 1; }
@@ -353,7 +396,8 @@ html, body {
 /* ---------- Troca de tela: entrada suave (opacity + translate na GPU) ---------- */
 /* Sem "translate" no fim: elementos fixos da tela (cabeçalhos, painéis) continuam presos à tela. */
 @keyframes page-in {
-  from { opacity: 0; translate: 0 10px; }
+  /* Começa já meio visível: a troca de tela fica suave sem o "piscar" do fundo. */
+  from { opacity: 0.35; translate: 0 8px; }
   to { opacity: 1; translate: none; }
 }
 .page-enter { animation: page-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) backwards; }
@@ -409,7 +453,7 @@ html, body {
 
 @media (prefers-reduced-motion: reduce) {
   .bg-drift, .anchor-float, .animate-bubble-rise, .sea-shadow, .shimmer-pass, .text-shine,
-  .breath-pulse::after, .breath-pulse-rose::after, .breathe-scale, .spin-10s, .reveal,
+  .breath-pulse::after, .breath-pulse-rose::after, .breathe-scale, .spin-10s, .spin-20s, .spin-24s, .sos-breath, .sos-breath-text, .reveal,
   .snake-border, .snake-gap.is-on, .snake-loop, .snake-ring.is-on .snake-spin, .page-enter, .stagger-in > *, .log-particle, .log-anchor, .log-sway, .log-bubble, .log-fish, .log-sparkle, .text-water, .ocean-bg, .skeleton::after, .badge-glow::after, .twinkle {
     animation: none !important;
   }

@@ -14,6 +14,7 @@ import { useAuth } from '@/lib/auth-store';
 import { warmUpServer } from '@/lib/norica-api';
 import { flushOutbox, startOfflineSync } from '@/lib/offline-sync';
 import { reportError, reportSlow } from '@/lib/error-report';
+import { sampleFps } from '@/lib/perf-monitor';
 import { countAppOpen, listenReminderTaps, refreshEngagementNotifications } from '@/lib/reminder';
 
 const publicPages = ['/auth', '/auth/signup', '/auth/forgot-password', '/privacidade', '/excluir-conta'];
@@ -144,6 +145,11 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
     }
     setLoading(false);
   }, [authReady, session, pathname, router]);
+
+  // Mede a fluidez de cada tela no celular de verdade (registra só quando trava).
+  useEffect(() => {
+    if (session?.user?.id && pathname) sampleFps(pathname);
+  }, [pathname, session?.user?.id]);
 
   // Logado: deixa as telas principais e o servidor da IA prontos em segundo plano,
   // para a troca de página e a primeira resposta do Porto serem rápidas.

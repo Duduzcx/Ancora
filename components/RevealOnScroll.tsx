@@ -13,6 +13,9 @@ type Props = React.HTMLAttributes<HTMLDivElement> & {
 };
 
 let sharedObserver: IntersectionObserver | null = null;
+// Cada tela anima a entrada dos cards só na primeira visita da sessão. Ao voltar para ela,
+// os cards já aparecem prontos (antes sumiam e voltavam toda vez, parecendo "piscar").
+const seenPages = new Set<string>();
 const callbacks = new WeakMap<Element, () => void>();
 
 function observe(el: Element, onVisible: () => void) {
@@ -35,11 +38,12 @@ function observe(el: Element, onVisible: () => void) {
 
 export default function RevealOnScroll({ children, delay = 0, className = '', style, ...rest }: Props) {
   const ref = useRef<HTMLDivElement>(null);
-  const [visible, setVisible] = useState(false);
+  const [visible, setVisible] = useState(() => typeof window !== 'undefined' && seenPages.has(window.location.pathname));
 
   useEffect(() => {
-    if (!ref.current) return;
-    return observe(ref.current, () => setVisible(true));
+    if (!ref.current || visible) return;
+    const page = window.location.pathname;
+    return observe(ref.current, () => { setVisible(true); seenPages.add(page); });
   }, []);
 
   return (

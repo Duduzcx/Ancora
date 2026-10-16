@@ -17,7 +17,7 @@ import AnimatedBackground from '@/components/AnimatedBackground';
 import { getAuthState, useAuth } from '@/lib/auth-store';
 import { cacheGet, cacheSet } from '@/lib/cache';
 import { RATES, getVoicePrefs, listPortugueseVoices, naturalVoices, openVoiceInstall, setVoicePrefs, speak, stopSpeaking, type NaturalVoice, type VoiceOption } from '@/lib/speech';
-import { DEFAULT_REMINDER, disableReminder, enableReminder, formatTime, getReminder, sendTestNotification, setNotificationPref, type ReminderSettings } from '@/lib/reminder';
+import { DEFAULT_REMINDER, disableReminder, enableReminder, formatTime, getReminder, notificationStatus, sendTestNotification, setNotificationPref, type ReminderSettings } from '@/lib/reminder';
 
 // Foto do Google em alta resolução. A URL padrão vem com 96px ("=s96-c"),
 // que fica borrada no avatar grande em telas de celular.
@@ -55,11 +55,7 @@ const TypingName = ({ text }: { text: string }) => {
       className="inline-block"
     >
       {displayedText}
-      <motion.span
-        animate={{ opacity: [1, 0] }}
-        transition={{ duration: 1, repeat: Infinity }}
-        className="inline-block ml-1 w-1 h-8 bg-emerald-500"
-      />
+      <span className="inline-block ml-1 w-1 h-8 bg-emerald-500 css-blink" />
     </motion.span>
   );
 };
@@ -240,6 +236,7 @@ export default function PerfilPage() {
   const [reminderTime, setReminderTime] = useState('20:00');
   const [reminderMsg, setReminderMsg] = useState<string | null>(null);
   const [reminderBusy, setReminderBusy] = useState(false);
+  const [notifStatus, setNotifStatus] = useState<string | null>(null);
   useEffect(() => {
     const r = getReminder();
     setReminder(r);
@@ -451,33 +448,19 @@ export default function PerfilPage() {
             
             <div className="relative z-10 flex flex-col items-center justify-center">
               <div className="relative flex items-center justify-center mb-8">
-                <motion.div
-                  animate={{ scale: [1, 3], opacity: [0.5, 0] }}
-                  transition={{ duration: 2.5, repeat: Infinity, ease: "easeOut" }}
-                  className="absolute w-24 h-24 rounded-full border border-emerald-500/20"
-                />
-                <motion.div
-                  animate={{ scale: [1, 2], opacity: [0.8, 0] }}
-                  transition={{ duration: 2.5, repeat: Infinity, ease: "easeOut", delay: 0.5 }}
-                  className="absolute w-24 h-24 rounded-full border border-emerald-400/40"
-                />
-                <motion.div
-                  animate={{ scale: [1, 1.1, 1] }}
-                  transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut" }}
-                  className="w-20 h-20 bg-emerald-500/10 rounded-full flex items-center justify-center backdrop-blur-sm border border-emerald-500/20 shadow-[0_0_30px_rgba(16,185,129,0.3)] relative z-10"
+                <div className="absolute w-24 h-24 rounded-full border border-emerald-500/20 css-ring" />
+                <div className="absolute w-24 h-24 rounded-full border border-emerald-400/40 css-ring" style={{ ['--ring-from' as any]: 0.8, ['--ring-to' as any]: 2, animationDelay: '0.5s' }} />
+                <div
+                  className="css-pulse-scale w-20 h-20 bg-emerald-500/10 rounded-full flex items-center justify-center backdrop-blur-sm border border-emerald-500/20 shadow-[0_0_30px_rgba(16,185,129,0.3)] relative z-10"
                 >
                   <Anchor size={40} className="text-emerald-400" />
-                </motion.div>
+                </div>
               </div>
               
               <div className="space-y-2 text-center relative z-10">
-                <motion.p 
-                  animate={{ opacity: [0.5, 1, 0.5] }}
-                  transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-                  className="text-emerald-400 font-black uppercase tracking-[0.4em] text-[11px]"
-                >
+                <p className="text-emerald-400 font-black uppercase tracking-[0.4em] text-[11px] css-fade-pulse">
                   Desatracando
-                </motion.p>
+                </p>
                 <p className="text-white/40 font-bold tracking-widest text-[9px] uppercase">Saindo do porto seguro</p>
               </div>
             </div>
@@ -505,9 +488,7 @@ export default function PerfilPage() {
           <div className="relative inline-block">
             {/* Timão Oscilante / Avatar */}
             <motion.div 
-              animate={{ rotate: avatarUrl ? 0 : [0, 8, -8, 0] }}
-              transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
-              className="w-32 h-32 bg-gradient-to-br from-emerald-500 via-teal-600 to-emerald-700 rounded-[3.2rem] flex items-center justify-center border-[6px] border-white/10 shadow-2xl relative z-10 overflow-hidden"
+              className={`${avatarUrl ? '' : 'css-wobble '}w-32 h-32 bg-gradient-to-br from-emerald-500 via-teal-600 to-emerald-700 rounded-[3.2rem] flex items-center justify-center border-[6px] border-white/10 shadow-2xl relative z-10 overflow-hidden`}
             >
               {avatarUrl && !avatarFailed ? (
                 <img
@@ -698,7 +679,7 @@ export default function PerfilPage() {
         {/* Lembrete diário */}
         <motion.button 
           whileTap={{ scale: 0.96 }}
-          onClick={() => { setReminderMsg(null); setIsReminderOpen(true); }}
+          onClick={() => { setReminderMsg(null); setNotifStatus(null); setIsReminderOpen(true); notificationStatus().then(setNotifStatus); }}
           className="w-full flex items-center justify-between p-7 bg-white/5 border border-white/10 rounded-[2.5rem] shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] hover:bg-sky-500/10 hover:border-sky-500/20 transition-all group"
         >
           <div className="flex items-center gap-4">
@@ -1116,6 +1097,14 @@ export default function PerfilPage() {
                   className="bg-transparent text-white font-black text-sm outline-none [color-scheme:dark]"
                 />
               </label>
+              {notifStatus && notifStatus !== 'unsupported' && (
+                <p className={`text-[11px] font-bold mb-3 leading-relaxed ${notifStatus === 'granted' ? 'text-emerald-300' : notifStatus === 'prompt' ? 'text-white/50' : 'text-amber-300'}`} data-testid="notif-status">
+                  {notifStatus === 'granted' && '✓ Notificações permitidas neste celular.'}
+                  {notifStatus === 'prompt' && 'O Android vai pedir sua permissão ao ligar o lembrete.'}
+                  {notifStatus === 'denied' && 'As notificações da Nórica estão bloqueadas. Abra Configurações → Apps → Nórica → Notificações e ative.'}
+                  {notifStatus === 'error' && 'O celular não respondeu sobre as notificações. Feche e abra o app e tente de novo.'}
+                </p>
+              )}
               {reminderMsg && <p className="text-xs font-bold text-sky-300 mb-4 leading-relaxed">{reminderMsg}</p>}
               <p className="text-[10px] font-black text-white/40 uppercase tracking-widest mb-3">Outros avisos</p>
               <div className="space-y-2 mb-5">

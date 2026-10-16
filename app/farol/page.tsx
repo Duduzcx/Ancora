@@ -311,13 +311,9 @@ export default function FarolPage() {
             >
 
               {/* Ícone Target Animado como Radar */}
-              <motion.div 
-                className="absolute top-8 right-8 text-emerald-500/30 pointer-events-none"
-                animate={{ scale: [1, 1.2, 1], opacity: [0.3, 0.6, 0.3] }}
-                transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
-                    >
+              <div className="absolute top-8 right-8 text-emerald-500/30 pointer-events-none css-radar">
                 <Target size={120} strokeWidth={1} />
-              </motion.div>
+              </div>
               
               <div className="relative z-10 space-y-12">
                 <div className="space-y-4">

@@ -293,42 +293,17 @@ export default function NeblinaSOS({ onClareou }: NeblinaSOSProps) {
 
       {/* CAMADA 1.5: METÁFORA DO FAROL (Luz guiando no fundo com ritmo de respiração 4s/4s) */}
       <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
-        {/* Rotating Lighthouse Beacon Beam */}
-        <motion.div
-          animate={{ rotate: 360 }}
-          transition={{ duration: 24, repeat: Infinity, ease: "linear" }}
-          className="absolute w-[180%] h-[180%] bg-[conic-gradient(from_0deg,transparent_40%,rgba(253,244,210,0.18)_50%,transparent_60%)]"
-        />
+        {/* Rotating Lighthouse Beacon Beam (CSS na placa de vídeo) */}
+        <div className="absolute w-[180%] h-[180%] bg-[conic-gradient(from_0deg,transparent_40%,rgba(253,244,210,0.18)_50%,transparent_60%)] spin-24s" />
 
-        {/* Breathing Guide Radial Glow */}
-        <motion.div
-          animate={{
-            scale: [1, 1.4, 1],
-            opacity: [0.15, 0.65, 0.15],
-          }}
-          transition={{
-            duration: 8, // 4s inhale, 4s exhale
-            repeat: Infinity,
-            ease: "easeInOut",
-          }}
-          className="absolute w-80 h-80 rounded-full bg-amber-200/20 blur-[75px]"
-        />
+        {/* Breathing Guide Radial Glow: 4s inspira, 4s expira */}
+        <div className="absolute w-80 h-80 rounded-full bg-amber-200/20 blur-[75px] sos-breath" />
         
         {/* Breathing guide text */}
         {!isCleared && (
-          <motion.div
-            animate={{
-              opacity: [0.3, 0.8, 0.3],
-            }}
-            transition={{
-              duration: 8,
-              repeat: Infinity,
-              ease: "easeInOut",
-            }}
-            className="absolute bottom-24 z-30 text-center text-white/50 text-[9px] font-black uppercase tracking-[0.35em]"
-          >
+          <div className="absolute bottom-24 z-30 text-center text-white/50 text-[9px] font-black uppercase tracking-[0.35em] sos-breath-text">
             Sincronize sua respiração com a luz
-          </motion.div>
+          </div>
         )}
       </div>
 

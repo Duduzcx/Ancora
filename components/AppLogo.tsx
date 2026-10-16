@@ -21,13 +21,9 @@ export default function AppLogo({ size = 40, className = "" }) {
       <circle cx="12" cy="12" r="10" />
       
       {/* Agulha da Bússola Animada (Minimalista) */}
-      <motion.g
-        animate={{ rotate: [-2, 2, -2] }}
-        transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-        style={{ transformOrigin: "12px 12px" }}
-      >
+      <g className="css-tilt" style={{ transformOrigin: "12px 12px", transformBox: "view-box" }}>
         <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" fill="currentColor" />
-      </motion.g>
+      </g>
     </motion.svg>
   );
 }

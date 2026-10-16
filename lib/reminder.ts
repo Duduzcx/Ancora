@@ -419,3 +419,16 @@ export async function scheduleNotices(list: LocalNotice[]): Promise<boolean> {
 }
 
 export const cancelNotices = (ids: number[]) => cancelIds(ids);
+
+/** Situação das notificações no celular (para mostrar na tela e ajudar a resolver). */
+export async function notificationStatus(): Promise<'granted' | 'denied' | 'prompt' | 'unsupported' | 'error'> {
+  const ln = await withTimeout(plugin(), NATIVE_TIMEOUT, 'carregar plugin').catch(() => null);
+  if (!ln) return Capacitor.isNativePlatform() ? 'error' : 'unsupported';
+  try {
+    const p = await withTimeout(ln.checkPermissions(), NATIVE_TIMEOUT, 'checar permissão') as { display: string };
+    return p.display === 'granted' ? 'granted' : p.display === 'denied' ? 'denied' : 'prompt';
+  } catch (e) {
+    reportError(e, 'lembrete:status');
+    return 'error';
+  }
+}
