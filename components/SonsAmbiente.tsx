@@ -4,10 +4,10 @@
 // Usado na Respiração e no Modo noite. O som continua ao trocar de tela.
 
 import React, { useEffect, useState } from 'react';
-import { Waves, CloudRain, Radio, Moon, Square, Timer } from 'lucide-react';
+import { Waves, CloudRain, Radio, Moon, Square, Timer, Flame, Trees, Coffee } from 'lucide-react';
 import { SOUNDS, playSound, stopSound, setVolume, setTimer, useAmbient, type SoundId } from '@/lib/ambient';
 
-const ICONS: Record<SoundId, any> = { mar: Waves, chuva: CloudRain, branco: Radio, marrom: Moon };
+const ICONS: Record<SoundId, any> = { mar: Waves, chuva: CloudRain, branco: Radio, marrom: Moon, lareira: Flame, floresta: Trees, cafe: Coffee };
 const TIMERS = [0, 15, 30, 60];
 
 export default function SonsAmbiente({ compact = false, defaultTimer = 0 }: { compact?: boolean; defaultTimer?: number }) {

@@ -13,6 +13,9 @@ const TONE: Record<string, { text: string; bg: string; border: string; bar: stri
   amber: { text: 'text-amber-300', bg: 'bg-amber-400/10', border: 'border-amber-300/25', bar: 'bg-amber-300' },
   indigo: { text: 'text-indigo-300', bg: 'bg-indigo-400/10', border: 'border-indigo-300/25', bar: 'bg-indigo-300' },
   emerald: { text: 'text-emerald-300', bg: 'bg-emerald-400/10', border: 'border-emerald-300/25', bar: 'bg-emerald-300' },
+  sky: { text: 'text-sky-300', bg: 'bg-sky-400/10', border: 'border-sky-300/25', bar: 'bg-sky-300' },
+  rose: { text: 'text-rose-300', bg: 'bg-rose-400/10', border: 'border-rose-300/25', bar: 'bg-rose-300' },
+  violet: { text: 'text-violet-300', bg: 'bg-violet-400/10', border: 'border-violet-300/25', bar: 'bg-violet-300' },
 };
 
 export default function TrilhasPage() {

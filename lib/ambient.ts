@@ -6,12 +6,15 @@
 
 import { useSyncExternalStore } from 'react';
 
-export type SoundId = 'mar' | 'chuva' | 'branco' | 'marrom';
+export type SoundId = 'mar' | 'chuva' | 'branco' | 'marrom' | 'lareira' | 'floresta' | 'cafe';
 export const SOUNDS: { id: SoundId; label: string; hint: string }[] = [
   { id: 'mar', label: 'Ondas do mar', hint: 'Vai e vem lento das ondas' },
   { id: 'chuva', label: 'Chuva', hint: 'Chuva constante na janela' },
   { id: 'branco', label: 'Ruído branco', hint: 'Abafa barulhos de fora' },
   { id: 'marrom', label: 'Ruído marrom', hint: 'Grave e profundo, para dormir' },
+  { id: 'lareira', label: 'Lareira', hint: 'Fogo crepitando baixinho' },
+  { id: 'floresta', label: 'Floresta', hint: 'Vento nas folhas e passarinhos' },
+  { id: 'cafe', label: 'Café', hint: 'Burburinho de cafeteria para estudar' },
 ];
 
 type State = { playing: SoundId | null; volume: number; endsAt: number | null };
@@ -23,6 +26,7 @@ let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
 let nodes: AudioNode[] = [];
 let stopTimer: ReturnType<typeof setTimeout> | null = null;
+let loops: ReturnType<typeof setInterval>[] = []; // sons pontuais (estalos, pássaros, xícaras)
 const buffers: Partial<Record<'white' | 'pink' | 'brown', AudioBuffer>> = {};
 
 function audio(): AudioContext {
@@ -128,15 +132,90 @@ function build(id: SoundId): AudioNode[] {
     const g = c.createGain();
     g.gain.value = 0.35;
     chain(source('white'), [filter('lowpass', 9000)], g);
-  } else {
+  } else if (id === 'marrom') {
     const g = c.createGain();
     g.gain.value = 0.9;
     chain(source('brown'), [filter('lowpass', 700)], g);
+  } else if (id === 'lareira') {
+    const base = c.createGain();
+    base.gain.value = 0.6;
+    chain(source('brown'), [filter('lowpass', 320)], base);
+    // Estalos: rajadas curtas de ruído, em momentos aleatórios
+    loops.push(setInterval(() => { if (Math.random() < 0.55) crackle(0.15 + Math.random() * 0.35); }, 180));
+  } else if (id === 'floresta') {
+    const wind = c.createGain();
+    const bp = filter('bandpass', 900, 0.4);
+    chain(source('pink'), [filter('highpass', 300), bp], wind);
+    made.push(...swell(wind.gain, 0.3, 0.18, 0.06));
+    made.push(...swell(bp.frequency, 900, 400, 0.04));
+    loops.push(setInterval(() => { if (Math.random() < 0.35) chirp(); }, 1400));
+  } else {
+    const murmur = c.createGain();
+    chain(source('pink'), [filter('bandpass', 700, 0.5), filter('lowpass', 2200)], murmur);
+    made.push(...swell(murmur.gain, 0.45, 0.12, 0.13));
+    const room = c.createGain();
+    room.gain.value = 0.25;
+    chain(source('brown'), [filter('lowpass', 250)], room);
+    loops.push(setInterval(() => { if (Math.random() < 0.25) clink(); }, 1600));
   }
   return made;
 }
 
+/** Um estalo curto de fogo. */
+function crackle(level: number) {
+  const c = audio();
+  const s = c.createBufferSource();
+  s.buffer = noise('white');
+  const hp = c.createBiquadFilter();
+  hp.type = 'highpass'; hp.frequency.value = 1500 + Math.random() * 2500;
+  const g = c.createGain();
+  const t = c.currentTime;
+  g.gain.setValueAtTime(level, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.03 + Math.random() * 0.06);
+  s.connect(hp).connect(g).connect(master!);
+  s.start(t, Math.random() * 4, 0.12);
+}
+
+/** Um canto curto de passarinho (duas ou três notas que sobem). */
+function chirp() {
+  const c = audio();
+  const notes = 2 + Math.floor(Math.random() * 2);
+  const base = 2600 + Math.random() * 1600;
+  for (let i = 0; i < notes; i++) {
+    const t = c.currentTime + i * 0.13;
+    const o = c.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(base, t);
+    o.frequency.exponentialRampToValueAtTime(base * 1.35, t + 0.08);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.05, t + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.1);
+    o.connect(g).connect(master!);
+    o.start(t);
+    o.stop(t + 0.12);
+  }
+}
+
+/** O tilintar de uma xícara ao longe. */
+function clink() {
+  const c = audio();
+  const t = c.currentTime;
+  for (const f of [2200 + Math.random() * 600, 3300 + Math.random() * 500]) {
+    const o = c.createOscillator();
+    o.frequency.value = f;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.025, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+    o.connect(g).connect(master!);
+    o.start(t);
+    o.stop(t + 0.4);
+  }
+}
+
 function teardown() {
+  loops.forEach(clearInterval);
+  loops = [];
   for (const n of nodes) {
     try { (n as AudioScheduledSourceNode).stop?.(); } catch (_e) {}
     try { n.disconnect(); } catch (_e) {}

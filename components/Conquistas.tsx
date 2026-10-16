@@ -108,6 +108,8 @@ export default function Conquistas() {
       </div>
       )}
 
+      <a href="/mural/" className="block text-center text-[10px] font-black uppercase tracking-widest text-amber-300/80 underline underline-offset-4">Ver meu mural de vitórias</a>
+
       {selected && stats && (
         <p className="text-xs text-white/70 font-semibold leading-relaxed">
           <b className="text-white">{selected.title}:</b> {selected.desc}.{' '}

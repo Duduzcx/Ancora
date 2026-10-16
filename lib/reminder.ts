@@ -14,13 +14,17 @@ export type ReminderSettings = {
   weekly: boolean; // domingo 19h: resumo da semana pronto
   streak: boolean; // sequência dos Logs (não perder a ofensiva)
   comeback: boolean; // depois de 3 dias sem abrir o app
+  evening: boolean; // 21h: "como foi o seu dia?" com respostas direto na notificação
+  water: boolean; // 10h e 15h: lembrete leve de água
+  sun: boolean; // 9h30: lembrete de 10 minutos de luz do dia
+  movement: boolean; // 16h: pausa de movimento de 2 minutos
 };
 export type ReminderResult = 'ok' | 'denied' | 'unsupported' | 'error';
 
 const KEY = 'norica-reminder';
 const CHANNEL_ID = 'lembrete-diario';
 const BASE_ID = 7100; // ids 7101..7114: próximos 14 lembretes diários
-export const DEFAULT_REMINDER: ReminderSettings = { enabled: false, hour: 20, minute: 0, weekly: true, streak: true, comeback: true };
+export const DEFAULT_REMINDER: ReminderSettings = { enabled: false, hour: 20, minute: 0, weekly: true, streak: true, comeback: true, evening: true, water: false, sun: false, movement: false };
 const WEEKLY_ID = 7301;
 const STREAK_ID = 7302;
 const COMEBACK_ID = 7303;
@@ -84,7 +88,7 @@ export function dailyMessage(date: Date, c: PersonalContext, dayIndex: number) {
     return { title: `${hi(c.name)}, como você está hoje? 💙`, body: 'Passando para saber de você. Hoje pode ser mais leve — a Nórica está aqui.' };
   }
   if (dayIndex === 0 && c.streak >= 2) {
-    return { title: `🔥 ${c.streak} dias seguidos${c.name ? `, ${c.name}` : ''}!`, body: `Marque uma pérola hoje e chegue a ${c.streak + 1} dias cuidando de você.` };
+    return { title: `🔥 ${c.streak} dias seguidos${c.name ? `, ${c.name}` : ''}!`, body: `Se der, marque uma pérola hoje. Se não der, tudo bem — cuidar também é descansar.` };
   }
   return POOL[date.getDay()](c);
 }
@@ -238,12 +242,19 @@ export async function disableReminder() {
 }
 
 /** Ao tocar na notificação, abre a tela indicada (Início, Porto, Logs ou o resumo no Farol). */
-export async function listenReminderTaps(navigate: (route: string) => void) {
+export async function listenReminderTaps(navigate: (route: string) => void, onCheckin?: (answer: 'bem' | 'mais' | 'dificil') => void) {
   const ln = (await plugin().catch(() => null))?.ln;
   if (!ln) return () => {};
   const handle = await ln.addListener('localNotificationActionPerformed', (event) => {
-    const route = (event.notification?.extra as { route?: string } | undefined)?.route ?? '/';
-    navigate(route);
+    const extra = (event.notification?.extra ?? {}) as { route?: string; kind?: string };
+    const action = event.actionId as string;
+    // Respondeu o check-in da noite direto na notificação
+    if (extra.kind === 'checkin' && (action === 'bem' || action === 'mais' || action === 'dificil')) {
+      onCheckin?.(action);
+      navigate(action === 'dificil' ? '/porto/?humor=agitado' : `/?checkin=${action}`);
+      return;
+    }
+    navigate(extra.route ?? '/');
   });
   return () => handle.remove();
 }
@@ -342,7 +353,7 @@ export async function scheduleStreak(streak: number) {
   at.setDate(at.getDate() + 1);
   at.setHours(19, 30, 0, 0);
   const name = personalContext().name;
-  await scheduleOne(STREAK_ID, `🔥 ${streak} dias seguidos${name ? `, ${name}` : ''}`, 'Marque uma pérola hoje nos Logs para manter sua sequência.', '/log/',
+  await scheduleOne(STREAK_ID, `🔥 ${streak} dias seguidos${name ? `, ${name}` : ''}`, 'Uma pérola pequena hoje já mantém a sequência. E se não der, tudo bem.', '/log/',
     { at, allowWhileIdle: true });
 }
 
@@ -358,11 +369,14 @@ export async function scheduleComeback() {
 }
 
 /** Liga/desliga um tipo de aviso e reagenda. */
-export async function setNotificationPref(key: 'weekly' | 'streak' | 'comeback', value: boolean) {
+export type NotificationPref = 'weekly' | 'streak' | 'comeback' | 'evening' | 'water' | 'sun' | 'movement';
+export async function setNotificationPref(key: NotificationPref, value: boolean) {
   save({ ...getReminder(), [key]: value });
   if (key === 'weekly') await scheduleWeeklySummary();
   if (key === 'comeback') await scheduleComeback();
   if (key === 'streak' && !value) await cancelOne(STREAK_ID);
+  if (key === 'evening') await scheduleEveningCheckins();
+  if (key === 'water' || key === 'sun' || key === 'movement') await scheduleCareNudges();
 }
 
 /** Ao abrir o app: mantém os avisos em dia (sem pedir permissão). */
@@ -375,6 +389,8 @@ export async function refreshEngagementNotifications() {
   }
   await scheduleWeeklySummary().catch(() => {});
   await scheduleComeback().catch(() => {});
+  await scheduleEveningCheckins().catch(() => {});
+  await scheduleCareNudges().catch(() => {});
 }
 
 // Convite na Início para ligar o lembrete (aparece uma vez, a partir da 2ª visita).
@@ -486,4 +502,108 @@ export async function askNotificationPermission(): Promise<'granted' | 'asked' |
     }
   }
   return (await openNotificationSettings()) ? 'settings' : 'error';
+}
+
+
+// ---------------------------------------------------------------------
+// Check-in da noite (21h): "Como foi o seu dia?" com 3 respostas direto na notificação
+// ---------------------------------------------------------------------
+
+const EVENING_BASE = 7150; // 7151..7164: próximas 2 semanas
+const EVENING_DAYS = 14;
+export const CHECKIN_ACTIONS = { bem: 'calmo', mais: 'ansioso', dificil: 'agitado' } as const;
+let actionTypesReady = false;
+
+async function ensureCheckinActions(ln: LN) {
+  if (actionTypesReady) return;
+  await withTimeout(ln.registerActionTypes({
+    types: [{
+      id: 'CHECKIN',
+      actions: [
+        { id: 'bem', title: '🙂 Bem' },
+        { id: 'mais', title: '😐 Mais ou menos' },
+        { id: 'dificil', title: '😣 Difícil' },
+      ],
+    }],
+  }), NATIVE_TIMEOUT, 'tipos de ação').catch(() => {});
+  actionTypesReady = true;
+}
+
+const EVENING_TEXTS = [
+  'Como foi o seu dia? Um toque já responde.',
+  'Antes de dormir: como você está?',
+  'Fim de dia. Como ficou o seu mar?',
+  'Passando para saber de você hoje.',
+];
+
+function markedMoodToday(): boolean {
+  try {
+    const last = JSON.parse(localStorage.getItem('norica-last-mood') || 'null');
+    return !!last?.at && new Date(last.at).toDateString() === new Date().toDateString();
+  } catch (_e) {
+    return false;
+  }
+}
+
+export async function scheduleEveningCheckins() {
+  const ids = Array.from({ length: EVENING_DAYS }, (_, i) => EVENING_BASE + i + 1);
+  await cancelIds(ids);
+  if (!getReminder().evening) return;
+  const ln = (await grantedPlugin())?.ln;
+  if (!ln) return;
+  await ensureCheckinActions(ln);
+  const name = personalContext().name;
+  const notifications = [];
+  for (let d = 0; d < EVENING_DAYS; d++) {
+    const at = new Date();
+    at.setDate(at.getDate() + d);
+    at.setHours(21, 0, 0, 0);
+    if (at.getTime() <= Date.now() + 30_000) continue;
+    if (d === 0 && markedMoodToday()) continue; // já contou como está hoje
+    notifications.push({
+      id: EVENING_BASE + d + 1,
+      title: name ? `${name}, como foi o seu dia? 🌙` : 'Como foi o seu dia? 🌙',
+      body: EVENING_TEXTS[d % EVENING_TEXTS.length],
+      channelId: CHANNEL_ID, smallIcon: 'ic_stat_norica', iconColor: '#34d399',
+      actionTypeId: 'CHECKIN',
+      extra: { route: '/', kind: 'checkin' },
+      schedule: { at, allowWhileIdle: true },
+    });
+  }
+  if (notifications.length) await withTimeout(ln.schedule({ notifications }), NATIVE_TIMEOUT, 'check-in').catch((e) => reportError(e, 'lembrete:checkin'));
+}
+
+/** Depois de um dia difícil: amanhã às 9h, um bom-dia gentil. */
+export async function scheduleMorningAfter() {
+  const at = new Date();
+  at.setDate(at.getDate() + 1);
+  at.setHours(9, 0, 0, 0);
+  const name = personalContext().name;
+  await scheduleNotices([{ id: 7203, at, title: name ? `Bom dia, ${name} 🌤️` : 'Bom dia 🌤️', body: 'Ontem foi pesado. Hoje pode ser mais leve — e a Nórica está aqui se precisar.', route: '/' }]);
+}
+
+// ---------------------------------------------------------------------
+// Cuidados do corpo (opcionais): água, sol e movimento
+// ---------------------------------------------------------------------
+
+const CARE = [
+  { key: 'water' as const, id: 7311, h: 10, m: 0, title: 'Um copo de água? 💧', body: 'Seu corpo agradece. Dá para marcar a pérola nos Logs.', route: '/log/' },
+  { key: 'water' as const, id: 7312, h: 15, m: 0, title: 'Hora de um gole de água 💧', body: 'Pequenos cuidados somam.', route: '/log/' },
+  { key: 'sun' as const, id: 7313, h: 9, m: 30, title: '10 minutos de luz do dia ☀️', body: 'Luz da manhã ajuda o humor e o sono de hoje à noite.', route: '/log/' },
+  { key: 'movement' as const, id: 7314, h: 16, m: 0, title: 'Pausa de 2 minutos 🧘', body: 'Levanta, alonga o pescoço e os ombros. Tem um guia na Nórica.', route: '/movimento/' },
+];
+
+export async function scheduleCareNudges() {
+  const prefs = getReminder();
+  await cancelIds(CARE.map((c) => c.id));
+  const active = CARE.filter((c) => prefs[c.key]);
+  if (!active.length) return;
+  const ln = (await grantedPlugin())?.ln;
+  if (!ln) return;
+  await withTimeout(ln.schedule({
+    notifications: active.map((c) => ({
+      id: c.id, title: c.title, body: c.body, channelId: CHANNEL_ID, smallIcon: 'ic_stat_norica', iconColor: '#34d399',
+      extra: { route: c.route }, schedule: { on: { hour: c.h, minute: c.m }, allowWhileIdle: true },
+    })),
+  }), NATIVE_TIMEOUT, 'cuidados').catch((e) => reportError(e, 'lembrete:cuidados'));
 }

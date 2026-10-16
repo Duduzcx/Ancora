@@ -102,7 +102,7 @@ export default function ForgotPasswordPage() {
 
                 <form onSubmit={handleSubmit} className="space-y-8">
                   <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-6">Identidade Digital</label>
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-6">Seu e-mail</label>
                     <div className="group relative">
                       <Mail className="absolute left-7 top-1/2 -translate-y-1/2 text-slate-600 group-focus-within:text-emerald-400 transition-colors" size={20} />
                       <input
@@ -154,7 +154,7 @@ export default function ForgotPasswordPage() {
                 </div>
 
                 <div className="space-y-4">
-                  <h3 className="text-3xl font-black text-white italic uppercase tracking-tighter">Protocolo Enviado</h3>
+                  <h3 className="text-3xl font-black text-white italic uppercase tracking-tighter">E-mail enviado</h3>
                   <div className="bg-white/5 py-3 px-4 rounded-2xl border border-white/5 overflow-hidden">
                     <p className="text-slate-400 font-bold text-xs uppercase tracking-widest leading-loose">
                       Verifique o e-mail:

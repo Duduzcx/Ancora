@@ -4,7 +4,8 @@ import React, { useState, useEffect, useSyncExternalStore } from 'react';
 import { Anchor, Mail, Lock, ArrowRight, Loader2, User, Wind, Cloud, Zap, LifeBuoy, MessageCircle, Sword, Lightbulb, CheckCircle2, Shield, Eye, EyeOff, Compass } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { createClient } from '@/lib/supabase-client';
-import { logMood, markHabitToday, toMood } from '@/lib/norica-api';
+import { logMood, markHabitToday, toMood, type Mood } from '@/lib/norica-api';
+import RodaEmocoes from '@/components/RodaEmocoes';
 import { TASK_LABELS } from '@/lib/farol';
 import { firstName } from '@/lib/user-name';
 import { useRouter } from 'next/navigation';
@@ -171,6 +172,7 @@ export default function Home() {
   // Convite para o lembrete diário (uma vez, a partir da 2ª visita) e registro vindo do widget.
   const [showInvite, setShowInvite] = useState(false);
   const [inviteMsg, setInviteMsg] = useState<string | null>(null);
+  const [feelingFor, setFeelingFor] = useState<Exclude<Mood, 'sos'> | null>(null);
   const [habitToast, setHabitToast] = useState<{ label: string; fresh: boolean } | null>(null);
   const [widgetToast, setWidgetToast] = useState<string | null>(null);
   useEffect(() => {
@@ -205,6 +207,9 @@ export default function Home() {
     const cleanUrl = () => { try { window.history.replaceState(window.history.state, '', '/'); } catch (_e) {} };
     if (param) { fromWidget(param); cleanUrl(); }
     if (habitParam) { fromHabit(habitParam); cleanUrl(); }
+    // Respondeu o check-in da noite pela notificação (o humor já foi registrado)
+    const checkin = qs.get('checkin');
+    if (checkin === 'bem' || checkin === 'mais') { setWidgetToast(checkin === 'bem' ? 'calmo' : 'ansioso'); setTimeout(() => setWidgetToast(null), 8000); cleanUrl(); }
     const onWidget = (e: any) => { fromWidget(e.detail); setTimeout(cleanUrl, 300); };
     const onHabit = (e: any) => { fromHabit(e.detail); setTimeout(cleanUrl, 300); };
     window.addEventListener('norica-widget', onWidget);
@@ -406,14 +411,14 @@ export default function Home() {
                       style={{ willChange: 'transform' }}
                       whileHover={{ scale: 1.02, y: -2 }} 
                       whileTap={{ scale: 0.98 }} 
-                      onClick={(e) => {
-                        // Mapa emocional: cada escolha de humor fica registrada (sem travar a navegação).
+                      onClick={() => {
+                        // S.O.S abre o resgate na hora; os outros abrem a roda das emoções.
                         const mood = toMood(item.h);
-                        if (mood) logMood(mood).catch(() => {});
                         if (item.h === 'S.O.S') {
+                          if (mood) logMood(mood).catch(() => {});
                           setMostrarNeblina(true);
-                        } else {
-                          handleNavigate(e, `/porto/?humor=${item.h.toLowerCase()}`);
+                        } else if (mood && mood !== 'sos') {
+                          setFeelingFor(mood);
                         }
                       }}
                       className={`w-full h-full bg-white/5 border ${item.border} rounded-[2rem] p-4 flex flex-col items-center gap-3 transition-all hover:bg-white/10 hover:shadow-[0_8px_32px_0_rgba(255,255,255,0.05)] ${item.h === 'S.O.S' ? 'breath-pulse-rose' : ''}`}
@@ -471,7 +476,7 @@ export default function Home() {
       {/* Divisor Visual */}
         <RevealOnScroll className="px-10 py-20 flex items-center gap-4">
            <div className="h-[1px] flex-1 bg-white/10"></div>
-           <span className="text-[10px] font-black text-emerald-400/80 uppercase tracking-[0.6em] italic">Sistema Nórica</span>
+           <span className="text-[10px] font-black text-emerald-400/80 uppercase tracking-[0.6em] italic">Nórica</span>
            <div className="h-[1px] flex-1 bg-white/10"></div>
         </RevealOnScroll>
 
@@ -638,11 +643,21 @@ export default function Home() {
                   <div className="absolute w-2 h-2 bg-sky-400 rounded-full shadow-[0_0_10px_rgba(56,189,248,0.5)]" />
                 </div>
               </div>
-              <p className="text-[11px] font-bold text-white/60 uppercase tracking-widest mt-10 opacity-80 italic">Sincronize sua respiração e ritmo vital</p>
+              <p className="text-[11px] font-bold text-white/60 uppercase tracking-widest mt-10 opacity-80 italic">Respire no ritmo do círculo e desacelere</p>
             </div>
           </RevealOnScroll>
         </div>
       </motion.div>
+      <RodaEmocoes
+        mood={feelingFor}
+        onClose={() => setFeelingFor(null)}
+        onDone={(mood, feeling, talk) => {
+          setFeelingFor(null);
+          logMood(mood, feeling).catch(() => {});
+          if (talk) router.push(`/porto/?humor=${mood}${feeling ? `&sentimento=${encodeURIComponent(feeling)}` : ''}`);
+          else { setWidgetToast(mood); setTimeout(() => setWidgetToast(null), 6000); }
+        }}
+      />
       {/* Confirmação da pérola marcada pelo widget */}
       <AnimatePresence>
         {habitToast && (
@@ -702,7 +717,7 @@ export default function Home() {
           <h1 className="text-3xl font-black tracking-tighter text-white uppercase italic leading-none drop-shadow-md">
             Porto Seguro
           </h1>
-          <p className="text-emerald-500/80 font-bold text-[10px] uppercase tracking-[0.3em] mt-3">Nórica • Mental Navigation</p>
+          <p className="text-emerald-500/80 font-bold text-[10px] uppercase tracking-[0.3em] mt-3">Nórica • Seu porto seguro</p>
         </div>
 
         <div className="w-full bg-[#0d1424]/80 backdrop-blur-md rounded-3xl p-8 shadow-[0_20px_40px_rgba(0,0,0,0.4)] relative overflow-hidden">

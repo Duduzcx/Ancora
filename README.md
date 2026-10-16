@@ -132,6 +132,19 @@ Rode antes e depois de mudar o prompt ou o modelo e compare as médias. O relat�
 - **Relatório da instituição em PDF:** botão no `/painel/` com visão geral, evolução de 4 semanas, setores/turmas, alertas, ações e campanhas.
 - Migration: `20261017090000_norica_cartas_campanhas.sql`.
 
+## Acolhimento (1.5.0)
+
+- **Check-in da noite:** 21h, "Como foi o seu dia?" com 🙂 Bem / 😐 Mais ou menos / 😣 Difícil direto na notificação (registra o humor; "Difícil" abre o Porto). Depois de um dia difícil, bom-dia gentil às 9h.
+- **Roda das emoções:** ao tocar no humor da Início, a pessoa escolhe a palavra exata (coluna `mood_logs.feeling`); a IA conversa usando essa palavra.
+- **Pergunta do dia** no Diário por voz (`lib/perguntas.ts`).
+- **Caixa de calma** (`/calma/`): frases, fotos, músicas e áudios gravados por quem a pessoa ama — só no aparelho (IndexedDB). Abre primeiro no S.O.S.
+- **Acalmar só com toques** (`/toque/`): respirar segurando o círculo ou estourar bolhas. Também no S.O.S.
+- **Datas que pesam** (`/datas/`), **mural de vitórias** (`/mural/`) e **mapa do mar** no Farol (ação `patterns`).
+- **Foguinho com amigos** (`/amigos/`): duplas de cuidado, chama compartilhada com 1 dia de descanso por semana, apoio/pensei/parabéns; amigo só vê se o outro marcou o dia. Tabelas `care_invites`, `care_pairs`, `care_nudges`. **"Pensei em você"**: cartão para WhatsApp.
+- **Pausa de movimento** (`/movimento/`), lembretes opcionais de água, sol e movimento; sons de lareira, floresta e café; **leitura fácil** no Perfil; trilhas novas (quem cuida, pais de primeira viagem, LGBTQIA+) — **revisar o texto das trilhas com o(a) psicólogo(a) responsável antes de divulgar**.
+- Pendente: vídeos em Libras (precisam de intérprete).
+- Migration: `20261017120000_norica_amigos.sql`.
+
 ## Logs e humor sem internet
 
 `lib/offline-sync.ts`: o que a pessoa marca vai primeiro para uma fila no aparelho e é enviado ao Supabase

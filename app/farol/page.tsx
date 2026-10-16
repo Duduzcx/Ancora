@@ -21,6 +21,7 @@ import { loadFarolReading, EMPTY_FAROL, type FarolReading } from '@/lib/farol';
 import ResumoSemanal from '@/components/ResumoSemanal';
 import Conquistas from '@/components/Conquistas';
 import RelatorioMensal from '@/components/RelatorioMensal';
+import MapaGatilhos from '@/components/MapaGatilhos';
 
 export default function FarolPage() {
   const [progress, setProgress] = useState<number>(0);
@@ -403,6 +404,9 @@ export default function FarolPage() {
 
         {/* RESUMO DA SEMANA (Pro) */}
         <ResumoSemanal />
+
+        {/* MAPA DO MAR: o que vem junto dos dias calmos e difíceis */}
+        <MapaGatilhos />
 
         {/* RELATÓRIO MENSAL EM PDF (Pro) */}
         <RelatorioMensal />

@@ -15,8 +15,9 @@ import { warmUpServer } from '@/lib/norica-api';
 import { flushOutbox, startOfflineSync } from '@/lib/offline-sync';
 import { reportError, reportSlow } from '@/lib/error-report';
 import { sampleFps } from '@/lib/perf-monitor';
+import { applyEasyReading } from '@/lib/leitura';
 import { GlobalBackgroundContext, OceanBackground } from '@/components/AnimatedBackground';
-import { countAppOpen, listenReminderTaps, refreshEngagementNotifications } from '@/lib/reminder';
+import { CHECKIN_ACTIONS, countAppOpen, listenReminderTaps, refreshEngagementNotifications } from '@/lib/reminder';
 
 const LIVELY_BG = ['/porto', '/farol']; // telas com o fundo mais vivo (as demais usam o suave)
 const publicPages = ['/auth', '/auth/signup', '/auth/forgot-password', '/privacidade', '/excluir-conta'];
@@ -62,6 +63,7 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
   // o que podia tentar usar o mesmo código de login duas vezes e falhar).
   useEffect(() => {
     setIsMounted(true);
+    applyEasyReading();
     countAppOpen();
     log(`Montado! Pathname inicial: "${pathname}"`);
 
@@ -120,7 +122,9 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
     };
     // Toque no lembrete diário abre a Início.
     let stopReminderTaps: (() => void) | null = null;
-    listenReminderTaps((route) => router.push(route)).then((stop) => { stopReminderTaps = stop; }).catch(() => {});
+    listenReminderTaps((route) => router.push(route), (answer) => {
+      import('@/lib/norica-api').then(({ logMood }) => logMood(CHECKIN_ACTIONS[answer])).catch(() => {});
+    }).then((stop) => { stopReminderTaps = stop; }).catch(() => {});
 
     window.addEventListener('error', handleGlobalError);
     window.addEventListener('unhandledrejection', handleUnhandledRejection);
@@ -159,7 +163,7 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
   useEffect(() => {
     if (!userId) return;
     const t = setTimeout(() => {
-      ['/porto/', '/farol/', '/perfil/', '/log/', '/arena/', '/cofre/', '/respiracao/', '/planos/', '/noite/', '/exercicios/', '/trilhas/', '/cartas/', '/terapia/']
+      ['/porto/', '/farol/', '/perfil/', '/log/', '/arena/', '/cofre/', '/respiracao/', '/planos/', '/noite/', '/exercicios/', '/trilhas/', '/cartas/', '/terapia/', '/amigos/', '/calma/', '/mural/', '/datas/', '/movimento/', '/toque/']
         .forEach((href) => { try { router.prefetch(href); } catch (_e) {} });
       warmUpServer(userId);
       startOfflineSync(); // envia Logs/humor marcados sem internet

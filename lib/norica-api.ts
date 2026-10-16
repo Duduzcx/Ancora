@@ -28,6 +28,8 @@ export type ChatOptions = {
   persona?: 'norica' | 'clara';
   welcome?: string; // saudação mostrada no app, salva ao criar a conversa
   regenerate?: boolean; // responder de novo depois de editar uma mensagem
+  feeling?: string | null; // nome que a pessoa deu ao que sente (roda das emoções)
+  todayNote?: string | null; // hoje é uma data que pesa para a pessoa (ela mesma marcou)
   signal?: AbortSignal;
 };
 
@@ -76,6 +78,17 @@ export type OrgSector = { id: string; name: string };
 export type CampaignKind = 'setembro' | 'provas' | 'pausa' | 'sono' | 'livre';
 export type OrgCampaign = { id: string; kind: CampaignKind; title: string; message: string; starts_on: string; ends_on: string };
 export type OrgInfo = { name: string; role: 'member' | 'admin'; sectorId?: string | null; sectorLabel?: string; sectors?: OrgSector[]; campaigns?: OrgCampaign[] } | null;
+export type Patterns =
+  | { enough: false; daysMarked: number; needed: number }
+  | {
+      enough: true; daysMarked: number; hardDays: number; calmDays: number;
+      helps: { id: number; calm: number; hard: number }[]; missing: { id: number; calm: number; hard: number }[];
+      heavyWeekday: { day: string; pct: number } | null; hardTopics: string[];
+      feelingsHard: string[]; feelingsCalm: string[]; recovery: number | null;
+    };
+export type Friend = { pairId: string; name: string; since: string; streak: number; restUsed: boolean; bothToday: boolean; meToday: boolean; friendToday: boolean };
+export type FriendNudge = { id: string; kind: 'apoio' | 'pensei' | 'parabens'; from: string; created_at: string };
+export type FriendsState = { friends: Friend[]; nudges: FriendNudge[]; max: number };
 export type FutureLetter = { id: string; created_at: string; deliver_at: string; opened: boolean; delivered: boolean; content: string | null };
 export type OrgWeek = {
   active: number;
@@ -214,6 +227,13 @@ export const noricaApi = {
   letterList: () => call<{ letters: FutureLetter[] }>('letter_list'),
   letterOpen: (id: string) => call<{ letter: FutureLetter }>('letter_open', { id }),
   letterDelete: (id: string) => call<{ ok: boolean }>('letter_delete', { id }),
+  patterns: () => call<Patterns>('patterns'),
+  friendsInvite: () => call<{ code: string; expiresInDays: number }>('friends_invite'),
+  friendsJoin: (code: string) => call<FriendsState>('friends_join', { code }),
+  friendsList: () => call<FriendsState>('friends_list'),
+  friendsNudge: (pairId: string, kind: FriendNudge['kind']) => call<{ ok: boolean }>('friends_nudge', { pairId, kind }),
+  friendsSeen: () => call<{ ok: boolean }>('friends_seen'),
+  friendsRemove: (pairId: string) => call<FriendsState>('friends_remove', { pairId }),
   ttsInfo: () => call<{ available: boolean; voices: { id: string; label: string }[] }>('tts_info'),
   tts: (text: string, voice: string) => call<{ audio: string; mime: string }>('tts', { text, voice }),
 
@@ -355,11 +375,16 @@ export function toMood(value: string | null | undefined): Mood | null {
   return (MOODS as readonly string[]).includes(v) ? (v as Mood) : null;
 }
 
-export async function logMood(mood: Mood) {
+export async function logMood(mood: Mood, feeling?: string | null) {
   // Último humor personaliza o lembrete de amanhã ("como você está hoje?").
   try { localStorage.setItem('norica-last-mood', JSON.stringify({ mood, at: Date.now() })); } catch (_e) {}
+  // Dia difícil: um bom-dia gentil amanhã às 9h. Marcou hoje: o check-in das 21h não precisa vir.
+  import('@/lib/reminder').then((r) => {
+    if (mood === 'agitado' || mood === 'sos') r.scheduleMorningAfter().catch(() => {});
+    r.scheduleEveningCheckins().catch(() => {});
+  }).catch(() => {});
   // Vai para a fila do aparelho e é enviado assim que houver internet.
-  await queueMood(mood);
+  await queueMood(mood, feeling);
 }
 
 // ---------------------------------------------------------------------

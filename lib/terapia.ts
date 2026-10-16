@@ -47,10 +47,10 @@ export async function scheduleTherapy(s: TherapyState) {
     const eve = new Date(at);
     eve.setDate(eve.getDate() - 1);
     eve.setHours(19, 0, 0, 0);
-    list.push({ id: DAY_BEFORE_ID, at: eve, title: 'Amanhã tem terapia 🛋️', body: 'Que tal anotar o que você quer levar para a sessão?', route: '/terapia/' });
+    list.push({ id: DAY_BEFORE_ID, at: eve, title: 'Amanhã tem um compromisso seu 🗓️', body: 'Que tal anotar na Nórica o que você quer levar?', route: '/terapia/' });
   }
   if (s.twoHours) {
-    list.push({ id: TWO_HOURS_ID, at: new Date(at.getTime() - 2 * 3600_000), title: 'Sua consulta é daqui a 2 horas', body: 'Sua lista do que quer falar está pronta na Nórica.', route: '/terapia/' });
+    list.push({ id: TWO_HOURS_ID, at: new Date(at.getTime() - 2 * 3600_000), title: 'Seu compromisso é daqui a 2 horas', body: 'Sua lista está pronta na Nórica.', route: '/terapia/' });
   }
   await scheduleNotices(list);
 }

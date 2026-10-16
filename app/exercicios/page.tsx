@@ -7,7 +7,7 @@ import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import {
-  ArrowLeft, Eye, Hand, Ear, Flower2, Coffee, Sparkles, MessagesSquare, Loader2, CheckCircle2, Sword, Heart, LifeBuoy, ChevronRight, Moon, Waves, Route, Mail, CalendarClock,
+  ArrowLeft, Eye, Hand, Ear, Flower2, Coffee, Sparkles, MessagesSquare, Loader2, CheckCircle2, Sword, Heart, LifeBuoy, ChevronRight, Moon, Waves, Route, Mail, CalendarClock, CalendarHeart, Trophy, Flame, PersonStanding,
 } from 'lucide-react';
 import { noricaApi, type JournalEntry } from '@/lib/norica-api';
 import { HelpSheet } from '@/components/AjudaAgora';
@@ -83,28 +83,45 @@ export default function ExerciciosPage() {
                 </motion.button>
               ))}
               {[
-                { href: '/trilhas/', title: 'Trilhas de 7 dias', desc: 'Ansiedade antes da prova, dormir melhor ou gentileza consigo: um passo curto por dia.', time: '7 dias', icon: Route, color: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/20' },
-                { href: '/cartas/', title: 'Carta para o futuro', desc: 'Escreva hoje para ler daqui a 1 semana, 1 mês ou 1 ano.', time: '5 min', icon: Mail, color: 'text-rose-300 bg-rose-500/10 border-rose-500/20' },
-                { href: '/terapia/', title: 'Agenda da terapia', desc: 'Lembrete da consulta e a lista do que você quer levar para a sessão.', time: '2 min', icon: CalendarClock, color: 'text-sky-300 bg-sky-500/10 border-sky-500/20' },
-                { href: '/noite/', title: 'Modo noite', desc: 'Para quando o sono não vem: respiração lenta, esvaziar a mente e sons com timer.', time: '5–30 min', icon: Moon, color: 'text-indigo-300 bg-indigo-500/10 border-indigo-500/20' },
-                { href: '/respiracao/', title: 'Respiração 4-7-8 com sons', desc: 'Ondas do mar, chuva ou ruído branco enquanto você respira.', time: '3 min', icon: Waves, color: 'text-teal-300 bg-teal-500/10 border-teal-500/20' },
-              ].map((c) => (
-                <motion.button
-                  key={c.href}
-                  whileTap={{ scale: 0.97 }}
-                  onClick={() => router.push(c.href)}
-                  className="w-full text-left p-6 bg-white/5 border border-white/10 rounded-[2.5rem] flex items-center gap-4"
-                >
-                  <div className={`w-14 h-14 rounded-2xl border flex items-center justify-center shrink-0 ${c.color}`}>
-                    <c.icon size={24} />
-                  </div>
-                  <div className="flex-1">
-                    <h2 className="text-sm font-black text-white uppercase tracking-tighter">{c.title}</h2>
-                    <p className="text-[12px] text-white/55 font-semibold leading-relaxed mt-1">{c.desc}</p>
-                    <p className="text-[9px] font-black text-emerald-400 uppercase tracking-widest mt-2">{c.time}</p>
-                  </div>
-                  <ChevronRight size={18} className="text-white/30" />
-                </motion.button>
+                { section: 'Para agora', items: [
+                  { href: '/calma/', title: 'Caixa de calma', desc: 'Frases, fotos, músicas e áudios de quem você ama. Abre primeiro no S.O.S.', time: 'sempre à mão', icon: Heart, color: 'text-amber-200 bg-amber-400/10 border-amber-300/20' },
+                  { href: '/toque/', title: 'Acalmar só com toques', desc: 'Para quando não dá vontade de escrever: respirar segurando o círculo ou estourar bolhas.', time: '1–3 min', icon: Hand, color: 'text-teal-300 bg-teal-500/10 border-teal-500/20' },
+                  { href: '/noite/', title: 'Modo noite', desc: 'Para quando o sono não vem: respiração lenta, esvaziar a mente e sons com timer.', time: '5–30 min', icon: Moon, color: 'text-indigo-300 bg-indigo-500/10 border-indigo-500/20' },
+                  { href: '/respiracao/', title: 'Respiração 4-7-8 com sons', desc: 'Ondas do mar, chuva, lareira, floresta ou café enquanto você respira.', time: '3 min', icon: Waves, color: 'text-teal-300 bg-teal-500/10 border-teal-500/20' },
+                ] },
+                { section: 'Para o dia a dia', items: [
+                  { href: '/trilhas/', title: 'Trilhas de 7 dias', desc: 'Prova, sono, gentileza consigo, quem cuida, pais de primeira viagem e LGBTQIA+.', time: '7 dias', icon: Route, color: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/20' },
+                  { href: '/movimento/', title: 'Pausa de movimento', desc: 'Alongamento guiado de 2 minutos para quem passa o dia sentado.', time: '2 min', icon: PersonStanding, color: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/20' },
+                  { href: '/cartas/', title: 'Carta para o futuro', desc: 'Escreva hoje para ler daqui a 1 semana, 1 mês ou 1 ano.', time: '5 min', icon: Mail, color: 'text-rose-300 bg-rose-500/10 border-rose-500/20' },
+                  { href: '/terapia/', title: 'Agenda da terapia', desc: 'Lembrete da consulta e a lista do que você quer levar para a sessão.', time: '2 min', icon: CalendarClock, color: 'text-sky-300 bg-sky-500/10 border-sky-500/20' },
+                  { href: '/datas/', title: 'Datas que pesam', desc: 'Marque dias difíceis e a Nórica fica mais atenta e gentil neles.', time: '1 min', icon: CalendarHeart, color: 'text-sky-300 bg-sky-500/10 border-sky-500/20' },
+                  { href: '/mural/', title: 'Mural de vitórias', desc: 'Tudo o que você já conquistou, para reler nos dias de dúvida.', time: 'quando quiser', icon: Trophy, color: 'text-amber-300 bg-amber-400/10 border-amber-300/20' },
+                ] },
+                { section: 'Com outras pessoas', items: [
+                  { href: '/amigos/', title: 'Foguinho com amigos 🔥', desc: 'Vocês marcam o dia e a chama cresce. Mande apoio e um "pensei em você".', time: 'todo dia', icon: Flame, color: 'text-orange-300 bg-orange-500/10 border-orange-500/20' },
+                ] },
+              ].map((group) => (
+                <div key={group.section} className="space-y-3 pt-2">
+                  <p className="text-[10px] font-black text-white/40 uppercase tracking-widest px-2">{group.section}</p>
+                  {group.items.map((c) => (
+                    <motion.button
+                      key={c.href}
+                      whileTap={{ scale: 0.97 }}
+                      onClick={() => router.push(c.href)}
+                      className="w-full text-left p-6 bg-white/5 border border-white/10 rounded-[2.5rem] flex items-center gap-4"
+                    >
+                      <div className={`w-14 h-14 rounded-2xl border flex items-center justify-center shrink-0 ${c.color}`}>
+                        <c.icon size={24} />
+                      </div>
+                      <div className="flex-1">
+                        <h2 className="text-sm font-black text-white uppercase tracking-tighter">{c.title}</h2>
+                        <p className="text-[12px] text-white/55 font-semibold leading-relaxed mt-1">{c.desc}</p>
+                        <p className="text-[9px] font-black text-emerald-400 uppercase tracking-widest mt-2">{c.time}</p>
+                      </div>
+                      <ChevronRight size={18} className="text-white/30" />
+                    </motion.button>
+                  ))}
+                </div>
               ))}
             </motion.div>
           )}

@@ -15,7 +15,7 @@ export type HabitLogPayload = {
   custom_tasks: { id: string; text: string; completed: boolean }[];
   progress: number;
 };
-type MoodItem = { id: string; mood: string; created_at: string };
+type MoodItem = { id: string; mood: string; created_at: string; feeling?: string };
 type Outbox = { habits: Record<string, HabitLogPayload>; moods: MoodItem[] };
 
 const EMPTY: Outbox = { habits: {}, moods: [] };
@@ -115,11 +115,11 @@ export async function readHabitLog(day: string): Promise<HabitLogPayload | null>
 }
 
 /** Humor marcado na Início: entra na fila com id próprio (reenviar nunca duplica). */
-export async function queueMood(mood: string) {
+export async function queueMood(mood: string, feeling?: string | null) {
   const uid = await currentUserId();
   if (!uid) return;
   const box = read(uid);
-  box.moods.push({ id: newId(), mood, created_at: new Date().toISOString() });
+  box.moods.push({ id: newId(), mood, created_at: new Date().toISOString(), ...(feeling ? { feeling: feeling.slice(0, 40) } : {}) });
   write(uid, box);
   await flushOutbox();
 }

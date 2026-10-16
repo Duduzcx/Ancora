@@ -104,8 +104,8 @@ export default function RespiracaoPage() {
           </motion.button>
           
           <div className="flex flex-col items-end">
-            <span className="text-[9px] font-black text-teal-500/80 uppercase tracking-[0.25em]">Ciclo de Foco Ativo</span>
-            <span className="text-xs font-bold text-white/60">Pausa de Concentração 4-7-8</span>
+            <span className="text-[9px] font-black text-teal-500/80 uppercase tracking-[0.25em]">Respiração guiada</span>
+            <span className="text-xs font-bold text-white/60">Técnica 4-7-8</span>
           </div>
         </div>
 

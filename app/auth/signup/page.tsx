@@ -228,7 +228,7 @@ export default function SignupPage() {
                 >
                   <div className="text-center space-y-2">
                     <h2 className="text-[24px] font-black text-white italic uppercase tracking-tighter leading-none">Sobre Você</h2>
-                    <p className="text-[#00D88B]/60 font-black text-[9px] uppercase tracking-[0.3em]">Passo 2: Identidade</p>
+                    <p className="text-[#00D88B]/60 font-black text-[9px] uppercase tracking-[0.3em]">Passo 2: Sobre você</p>
                   </div>
                   <div className="space-y-3">
                     <div className="group relative">
@@ -307,7 +307,7 @@ export default function SignupPage() {
                     <CheckCircle2 size={40} />
                   </div>
                   <div className="space-y-3">
-                    <h3 className="text-2xl font-black text-white italic uppercase tracking-tighter leading-none">Protocolo Enviado!</h3>
+                    <h3 className="text-2xl font-black text-white italic uppercase tracking-tighter leading-none">Quase lá!</h3>
                     <div className="bg-white/5 py-3 px-4 rounded-2xl border border-white/5">
                       <p className="text-white/30 font-bold text-[9px] uppercase tracking-widest leading-loose mb-1">
                         Confirme no e-mail:

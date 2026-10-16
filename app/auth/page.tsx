@@ -144,7 +144,7 @@ export default function AuthPage() {
           <h1 className="text-3xl font-black tracking-tighter text-white uppercase italic leading-none drop-shadow-md">
             Porto Seguro
           </h1>
-          <p className="text-emerald-500/80 font-bold text-[10px] uppercase tracking-[0.3em] mt-3">Nórica • Mental Navigation</p>
+          <p className="text-emerald-500/80 font-bold text-[10px] uppercase tracking-[0.3em] mt-3">Nórica • Seu porto seguro</p>
         </div>
 
         <div className="relative w-full rounded-3xl p-[2px] overflow-hidden shadow-[0_20px_40px_rgba(0,0,0,0.4)] z-10">

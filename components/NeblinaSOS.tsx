@@ -1,6 +1,9 @@
 "use client";
 
 import React, { useRef, useEffect, useState } from 'react';
+import { useCalm } from '@/lib/calma';
+import CaixaCalmaViewer from '@/components/CaixaCalmaViewer';
+import ToqueGuia from '@/components/ToqueGuia';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { HelpButton, HelpSheet, QuickTrustedButton } from '@/components/AjudaAgora';
@@ -205,6 +208,15 @@ function SeamlessVideo({ src }: { src: string }) {
 }
 
 export default function NeblinaSOS({ onClareou }: NeblinaSOSProps) {
+  // Caixa de calma: se a pessoa guardou algo, abre primeiro (uma vez por S.O.S).
+  const calmItems = useCalm();
+  const [showCalm, setShowCalm] = useState(false);
+  const [showTouch, setShowTouch] = useState(false);
+  const calmOpened = useRef(false);
+  useEffect(() => {
+    if (!calmOpened.current && calmItems && calmItems.length > 0) { calmOpened.current = true; setShowCalm(true); }
+  }, [calmItems]);
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const audioSynthRef = useRef<SOSAudioSynth | null>(null);
   const [isCleared, setIsCleared] = useState(false);
@@ -346,6 +358,18 @@ export default function NeblinaSOS({ onClareou }: NeblinaSOSProps) {
           </button>
         </motion.div>
       )}
+
+      {/* CAIXA DE CALMA e MODO SÓ TOQUES: na parte de baixo, sempre ao alcance */}
+      {!isCleared && (
+        <div className="absolute bottom-[calc(env(safe-area-inset-bottom)+1.5rem)] inset-x-0 z-[60] flex justify-center gap-2 px-4" data-testid="sos-atalhos">
+          {calmItems && calmItems.length > 0 && (
+            <button onClick={() => setShowCalm(true)} className="px-4 py-3 rounded-full bg-amber-300/90 text-slate-950 text-[10px] font-black uppercase tracking-widest">💛 Minha caixa de calma</button>
+          )}
+          <button onClick={() => setShowTouch(true)} className="px-4 py-3 rounded-full bg-white/15 border border-white/20 text-white text-[10px] font-black uppercase tracking-widest">Só tocar, sem falar</button>
+        </div>
+      )}
+      {showCalm && calmItems && calmItems.length > 0 && <CaixaCalmaViewer items={calmItems} onClose={() => setShowCalm(false)} />}
+      {showTouch && <ToqueGuia onClose={() => setShowTouch(false)} />}
 
       {/* PESSOA DE CONFIANÇA: um toque abre o WhatsApp com a mensagem pronta */}
       <div className="absolute top-[calc(env(safe-area-inset-top)+1rem)] left-4 z-[60]">

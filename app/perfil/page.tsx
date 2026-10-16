@@ -5,14 +5,14 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { createClient } from '@/lib/supabase-client';
 import pkg from '@/package.json';
 import PermitirNotificacoes from '@/components/PermitirNotificacoes';
+import { easyReading, setEasyReading } from '@/lib/leitura';
 import { noricaApi, type HealthReport, type OrgInfo } from '@/lib/norica-api';
 import { 
   User, Save, CheckCircle2, ArrowLeft, ShieldCheck, 
   Anchor, LifeBuoy, Mail, Calendar, 
   LogOut, Settings, Fingerprint, AlertCircle, Loader2,
   ChevronRight, BadgeCheck, Shield, Key, Sparkles,
-  ShipWheel, Compass, Waves, Camera, Crown, Trash2, Bell, Brain, ClipboardList, Building2, Volume2
-} from 'lucide-react';
+  ShipWheel, Compass, Waves, Camera, Crown, Trash2, Bell, Brain, ClipboardList, Building2, Volume2, Type } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import AnimatedBackground from '@/components/AnimatedBackground';
 import { getAuthState, useAuth } from '@/lib/auth-store';
@@ -238,6 +238,8 @@ export default function PerfilPage() {
   const [reminderMsg, setReminderMsg] = useState<string | null>(null);
   const [reminderBusy, setReminderBusy] = useState(false);
   const [notifKey, setNotifKey] = useState(0);
+  const [easy, setEasy] = useState(false);
+  useEffect(() => { setEasy(easyReading()); }, []);
   useEffect(() => {
     const r = getReminder();
     setReminder(r);
@@ -470,7 +472,7 @@ export default function PerfilPage() {
       </AnimatePresence>
 
       <header className="fixed top-0 inset-x-0 h-20 bg-white/5 backdrop-blur-2xl border-b border-white/10 z-50 flex items-center justify-center px-6 pt-[calc(env(safe-area-inset-top)+0.5rem)]">
-        <h2 className="text-[11px] font-black text-emerald-400 uppercase tracking-[0.5em] italic">Comando Central</h2>
+        <h2 className="text-[11px] font-black text-emerald-400 uppercase tracking-[0.5em] italic">Seu espaço</h2>
       </header>
 
       <motion.div
@@ -515,7 +517,7 @@ export default function PerfilPage() {
             <h1 className="text-3xl font-black text-white tracking-tighter uppercase italic min-h-[44px] flex items-center justify-center">
               {isDataLoaded ? <TypingName text={name || "Marujo"} /> : "..."}
             </h1>
-            <p className="text-[10px] font-black text-emerald-400 uppercase tracking-[0.4em]">Navegador Ativo</p>
+            <p className="text-[10px] font-black text-emerald-400 uppercase tracking-[0.4em]">Conta ativa</p>
           </div>
         </motion.div>
 
@@ -532,7 +534,7 @@ export default function PerfilPage() {
               )}
 
               <div className="space-y-3">
-                <label className="text-[10px] font-black text-white/40 uppercase tracking-widest px-2">Identidade de Bordo</label>
+                <label className="text-[10px] font-black text-white/40 uppercase tracking-widest px-2">Seus dados</label>
                 <div className="relative group">
                   <div className="absolute left-6 top-1/2 -translate-y-1/2 text-emerald-400 group-focus-within:text-emerald-300 transition-colors">
                     <Fingerprint size={20} />
@@ -617,7 +619,7 @@ export default function PerfilPage() {
                     <style dangerouslySetInnerHTML={{ __html: `@keyframes shimmer { 100% { left: 200%; } }` }} />
                     
                     <div className="relative flex items-center justify-center gap-3 z-10">
-                      {loading ? <Loader2 className="animate-spin" size={20} /> : "Registrar Identidade"}
+                      {loading ? <Loader2 className="animate-spin" size={20} /> : "Salvar perfil"}
                       {!loading && <ChevronRight size={18} strokeWidth={2.5} />}
                     </div>
                   </motion.button>
@@ -633,7 +635,7 @@ export default function PerfilPage() {
                     <ShieldCheck size={24} />
                   </div>
                   <div className="text-left">
-                    <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest leading-none">Identidade Ancorada</p>
+                    <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest leading-none">Perfil salvo</p>
                     <p className="text-[9px] font-bold text-white/40 uppercase mt-1 leading-none">Registro seguro no porto.</p>
                   </div>
                 </motion.div>
@@ -713,6 +715,28 @@ export default function PerfilPage() {
              </div>
           </div>
           <ChevronRight size={20} className="text-white/40 group-hover:translate-x-1 transition-transform" />
+        </motion.button>
+
+        {/* Leitura fácil */}
+        <motion.button
+          whileTap={{ scale: 0.96 }}
+          onClick={() => { const v = !easy; setEasy(v); setEasyReading(v); }}
+          aria-pressed={easy}
+          data-testid="leitura-facil"
+          className="w-full flex items-center justify-between p-7 bg-white/5 border border-white/10 rounded-[2.5rem] shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] transition-all"
+        >
+          <div className="flex items-center gap-4">
+             <div className="w-12 h-12 bg-sky-500/10 text-sky-300 border border-sky-500/20 rounded-2xl flex items-center justify-center">
+                <Type size={24} />
+             </div>
+             <div className="text-left">
+                <h3 className="text-sm font-black text-white uppercase tracking-tighter italic">Leitura fácil</h3>
+                <p className="text-[9px] font-black text-sky-300 uppercase tracking-widest leading-none mt-1">Letras maiores e menos animação</p>
+             </div>
+          </div>
+          <span className={`w-12 h-7 rounded-full p-1 shrink-0 transition-colors ${easy ? 'bg-sky-500' : 'bg-white/15'}`}>
+            <span className={`block w-5 h-5 rounded-full bg-white transition-transform ${easy ? 'translate-x-5' : ''}`} />
+          </span>
         </motion.button>
 
         {/* Memória da Nórica */}
@@ -808,7 +832,7 @@ export default function PerfilPage() {
         </motion.button>
 
         <p className="text-center text-[10px] font-black text-white/20 uppercase tracking-[0.5em] italic pt-10">
-          Nórica • Foco e Produtividade
+          Nórica • Cuidado de todo dia
         </p>
         <p className="text-center text-[10px] font-bold text-white/25 tracking-widest" data-testid="versao">Versão {pkg.version} ({pkg.versionCode})</p>
         <button
@@ -1106,6 +1130,10 @@ export default function PerfilPage() {
                   ['weekly', 'Resumo da semana', 'Domingo às 19h'],
                   ['streak', 'Sequência dos Logs', 'Para não perder seus dias seguidos'],
                   ['comeback', 'Sentimos sua falta', 'Depois de 3 dias sem abrir o app'],
+                  ['evening', 'Como foi o seu dia?', '21h, responde direto na notificação'],
+                  ['water', 'Beber água', '10h e 15h'],
+                  ['sun', 'Luz do dia', '9h30, 10 minutos de sol'],
+                  ['movement', 'Pausa de movimento', '16h, 2 minutos de alongamento'],
                 ] as const).map(([key, label, hint]) => (
                   <button
                     key={key}

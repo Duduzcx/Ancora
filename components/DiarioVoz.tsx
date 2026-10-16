@@ -3,6 +3,7 @@
 // Diário por voz: a pessoa fala até 1 minuto (ou escreve) e a Nórica transforma em
 // registro do dia — resumo, humor e, se fizer sentido, um passo pequeno para os Logs.
 
+import { todayQuestion } from '@/lib/perguntas';
 import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Mic, Square, Loader2, PenLine, Plus, CheckCircle2, Trash2, ChevronDown, BookHeart } from 'lucide-react';
@@ -18,6 +19,7 @@ const MOOD_LABEL: Record<string, { label: string; cls: string }> = {
 };
 
 export default function DiarioVoz({ onAddTasks }: { onAddTasks: (tasks: string[]) => void }) {
+  const question = todayQuestion();
   const [state, setState] = useState<'idle' | 'recording' | 'writing' | 'processing'>('idle');
   const [seconds, setSeconds] = useState(0);
   const [text, setText] = useState('');
@@ -122,6 +124,11 @@ export default function DiarioVoz({ onAddTasks }: { onAddTasks: (tasks: string[]
         </div>
       </div>
 
+      <div className="p-3 rounded-2xl bg-teal-500/5 border border-teal-500/15" data-testid="pergunta-do-dia">
+        <p className="text-[9px] font-black text-teal-300/80 uppercase tracking-widest">Pergunta do dia</p>
+        <p className="text-sm font-bold text-white/85 leading-snug mt-1">{question}</p>
+      </div>
+
       {state === 'recording' && (
         <div className="flex flex-col items-center gap-3 py-2">
           <motion.button
@@ -150,7 +157,7 @@ export default function DiarioVoz({ onAddTasks }: { onAddTasks: (tasks: string[]
             rows={4}
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder="Como foi seu dia? O que pesou, o que foi bom…"
+            placeholder={question}
             className="w-full bg-black/30 border border-white/10 rounded-2xl p-4 text-sm text-white outline-none focus:border-teal-500/50 placeholder:text-white/25"
           />
           <div className="flex gap-2">

@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, Suspense } from 'react';
+import { todaySensitiveNote } from '@/lib/datas';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Send, Bot, User, Anchor, ArrowLeft, Clock, Loader2, Mic, MicOff, Search, Edit2, Copy, Sparkles, Trash2, SendHorizontal, LifeBuoy, Plus, CheckCircle2, ThumbsUp, ThumbsDown, Volume2, Square, MessageCircleHeart, Compass, Wind, Footprints } from 'lucide-react';
@@ -233,6 +234,8 @@ function PortoContent() {
     if (!chatId) isInitializingNewChat.current = true;
     const chatOpts = {
       mood,
+      feeling: searchParams.get('sentimento'),
+      todayNote: todaySensitiveNote(),
       mode: chatModeRef.current as any,
       persona: (isClara ? 'clara' : 'norica') as 'clara' | 'norica',
       welcome: welcomeMsg?.content,

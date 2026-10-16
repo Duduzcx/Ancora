@@ -272,6 +272,8 @@ const ERROR_FALLBACK = "Tive um problema na navegação agora. Pode me contar de
 async function prepareChat(ctx: Ctx, body: Record<string, unknown>): Promise<PreparedChat> {
   const regenerate = body.regenerate === true; // depois de editar uma mensagem: responde de novo, sem salvar outra
   const mood = typeof body.mood === "string" && VALID_MOODS.includes(body.mood) ? body.mood : null;
+  const feeling = typeof body.feeling === "string" ? body.feeling.replace(/[^\p{L}\p{N} \-]/gu, "").trim().slice(0, 40) || null : null;
+  const todayNote = typeof body.todayNote === "string" ? body.todayNote.replace(/[\r\n]+/g, " ").trim().slice(0, 120) || null : null;
   const persona = body.persona === "clara" ? "clara" : "norica";
   const requestedMode = typeof body.mode === "string" && (MODES as readonly string[]).includes(body.mode) ? body.mode as ChatMode : null;
   let chatId = typeof body.chatId === "string" && body.chatId ? body.chatId : null;
@@ -356,7 +358,7 @@ async function prepareChat(ctx: Ctx, body: Record<string, unknown>): Promise<Pre
   const recentOpenings = history.filter((m) => m.role === "assistant").slice(-3)
     .map((m) => m.content.replace(/\s+/g, " ").trim().split(" ").slice(0, 5).join(" "))
     .filter((x) => x.length > 3);
-  const promptOptions = { mood, crisis, risk, name, mode, context, memory: memoryInfo.content, now: brtNow(), recentOpenings };
+  const promptOptions = { mood, feeling, todayNote, crisis, risk, name, mode, context, memory: memoryInfo.content, now: brtNow(), recentOpenings };
   const system = persona === "clara" ? claraSystemPrompt(promptOptions) : portoSystemPrompt(promptOptions);
   return {
     chatId: chatId!,
@@ -938,6 +940,214 @@ async function achievements(ctx: Ctx) {
 // ---------------------------------------------------------------------
 // Relatório mensal (Pro) — dados para o PDF que a pessoa leva ao psicólogo
 // ---------------------------------------------------------------------
+
+// ---------------------------------------------------------------------
+// Foguinho com amigos (duplas de cuidado)
+// Os dois marcam o dia (humor, Logs ou diário) e a chama cresce. Ninguém vê o conteúdo
+// do outro: só se marcou hoje e o tamanho da chama. Um "dia de descanso" por semana não apaga.
+// ---------------------------------------------------------------------
+
+const MAX_PAIRS = 5;
+const NUDGE_KINDS = ["apoio", "pensei", "parabens"];
+const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+async function activeDays(ctx: Ctx, userIds: string[], since: string): Promise<Map<string, Set<string>>> {
+  const out = new Map<string, Set<string>>(userIds.map((u) => [u, new Set<string>()]));
+  if (!userIds.length) return out;
+  const [{ data: moods }, { data: habits }, { data: journal }] = await Promise.all([
+    ctx.admin.from("mood_logs").select("user_id, created_at").in("user_id", userIds).gte("created_at", dayStartIso(since)),
+    ctx.admin.from("habit_logs").select("user_id, day, progress").in("user_id", userIds).gte("day", since),
+    ctx.admin.from("journal_entries").select("user_id, created_at").in("user_id", userIds).gte("created_at", dayStartIso(since)),
+  ]);
+  const dayOfTs = (ts: string) => brtDay(new Date(new Date(ts).getTime() - 3 * 3600_000));
+  for (const m of moods ?? []) out.get(m.user_id)?.add(dayOfTs(m.created_at));
+  for (const h of habits ?? []) if (Number(h.progress) > 0) out.get(h.user_id)?.add(h.day);
+  for (const j of journal ?? []) out.get(j.user_id)?.add(dayOfTs(j.created_at));
+  return out;
+}
+
+/** Chama da dupla: dias seguidos em que os dois marcaram. Hoje ainda pode acontecer. */
+function pairFlame(a: Set<string>, b: Set<string>, today: string) {
+  const both = (d: string) => a.has(d) && b.has(d);
+  let streak = 0;
+  let restUsedAt: string | null = null;
+  let day = both(today) ? today : addDays(today, -1);
+  for (let i = 0; i < 400; i++) {
+    if (both(day)) { streak++; day = addDays(day, -1); continue; }
+    // Dia de descanso: perdoa um dia por semana (se o dia antes dele também foi dos dois)
+    const restOk = !restUsedAt || (new Date(`${restUsedAt}T12:00:00Z`).getTime() - new Date(`${day}T12:00:00Z`).getTime()) >= 7 * 86400_000;
+    if (streak > 0 && restOk && both(addDays(day, -1))) { restUsedAt = day; day = addDays(day, -1); continue; }
+    break;
+  }
+  return { streak, restUsed: restUsedAt !== null, bothToday: both(today), meToday: a.has(today), friendToday: b.has(today) };
+}
+
+async function friendsInvite(ctx: Ctx) {
+  const name = (await personName(ctx)) ?? "Alguém";
+  let code = "";
+  for (let i = 0; i < 6; i++) code += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
+  await ctx.admin.from("care_invites").delete().eq("user_id", ctx.userId);
+  const { error } = await ctx.admin.from("care_invites").insert({ code, user_id: ctx.userId, name, expires_at: new Date(Date.now() + 7 * 86400_000).toISOString() });
+  if (error) throw new HttpError(500, "Não foi possível criar o convite");
+  return { code, expiresInDays: 7 };
+}
+
+async function myPairs(ctx: Ctx) {
+  const { data } = await ctx.admin.from("care_pairs").select("id, user_a, user_b, name_a, name_b, created_at")
+    .or(`user_a.eq.${ctx.userId},user_b.eq.${ctx.userId}`).limit(MAX_PAIRS + 1);
+  return data ?? [];
+}
+
+async function friendsJoin(ctx: Ctx, body: Record<string, unknown>) {
+  const code = String(body.code ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (code.length !== 6) throw new HttpError(400, "O código tem 6 letras e números");
+  const { data: inv } = await ctx.admin.from("care_invites").select("code, user_id, name, expires_at").eq("code", code).maybeSingle();
+  if (!inv || new Date(inv.expires_at).getTime() < Date.now()) throw new HttpError(404, "Convite não encontrado ou vencido. Peça um código novo.");
+  if (inv.user_id === ctx.userId) throw new HttpError(400, "Esse é o seu próprio código. Mande para um amigo 💛");
+  const pairs = await myPairs(ctx);
+  if (pairs.some((p) => p.user_a === inv.user_id || p.user_b === inv.user_id)) throw new HttpError(409, "Vocês já estão juntos no foguinho 🔥");
+  if (pairs.length >= MAX_PAIRS) throw new HttpError(409, `Você já tem ${MAX_PAIRS} amigos no foguinho.`);
+  const myName = (await personName(ctx)) ?? "Alguém";
+  const { error } = await ctx.admin.from("care_pairs").insert({ user_a: inv.user_id, user_b: ctx.userId, name_a: inv.name, name_b: myName });
+  if (error) throw new HttpError(409, "Não foi possível juntar vocês agora");
+  await ctx.admin.from("care_invites").delete().eq("code", code);
+  return friendsList(ctx);
+}
+
+async function friendsList(ctx: Ctx) {
+  const pairs = await myPairs(ctx);
+  const today = brtDay();
+  const friendIds = pairs.map((p) => (p.user_a === ctx.userId ? p.user_b : p.user_a));
+  const days = await activeDays(ctx, [ctx.userId, ...friendIds], addDays(today, -120));
+  const mine = days.get(ctx.userId) ?? new Set<string>();
+  const { data: unseen } = await ctx.admin.from("care_nudges").select("id, pair_id, kind, created_at").eq("to_user", ctx.userId).is("seen_at", null).order("created_at", { ascending: false }).limit(20);
+  return {
+    friends: pairs.map((p) => {
+      const friendId = p.user_a === ctx.userId ? p.user_b : p.user_a;
+      const flame = pairFlame(mine, days.get(friendId) ?? new Set(), today);
+      return {
+        pairId: p.id,
+        name: (p.user_a === ctx.userId ? p.name_b : p.name_a) || "Amigo",
+        since: p.created_at,
+        ...flame,
+      };
+    }),
+    nudges: (unseen ?? []).map((n) => {
+      const p = pairs.find((x) => x.id === n.pair_id);
+      return { id: n.id, kind: n.kind, created_at: n.created_at, from: p ? ((p.user_a === ctx.userId ? p.name_b : p.name_a) || "Um amigo") : "Um amigo" };
+    }),
+    max: MAX_PAIRS,
+  };
+}
+
+async function friendsNudge(ctx: Ctx, body: Record<string, unknown>) {
+  const kind = String(body.kind ?? "apoio");
+  if (!NUDGE_KINDS.includes(kind)) throw new HttpError(400, "Tipo inválido");
+  const pair = (await myPairs(ctx)).find((p) => p.id === body.pairId);
+  if (!pair) throw new HttpError(404, "Amigo não encontrado");
+  const to = pair.user_a === ctx.userId ? pair.user_b : pair.user_a;
+  const { count } = await ctx.admin.from("care_nudges").select("id", { count: "exact", head: true })
+    .eq("pair_id", pair.id).eq("from_user", ctx.userId).gte("created_at", dayStartIso(brtDay()));
+  if ((count ?? 0) >= 3) throw new HttpError(429, "Você já mandou carinho 3 vezes hoje para essa pessoa 💛");
+  await ctx.admin.from("care_nudges").insert({ pair_id: pair.id, from_user: ctx.userId, to_user: to, kind });
+  return { ok: true };
+}
+
+async function friendsSeen(ctx: Ctx) {
+  await ctx.admin.from("care_nudges").update({ seen_at: new Date().toISOString() }).eq("to_user", ctx.userId).is("seen_at", null);
+  return { ok: true };
+}
+
+async function friendsRemove(ctx: Ctx, body: Record<string, unknown>) {
+  const pair = (await myPairs(ctx)).find((p) => p.id === body.pairId);
+  if (pair) await ctx.admin.from("care_pairs").delete().eq("id", pair.id);
+  return friendsList(ctx);
+}
+
+// ---------------------------------------------------------------------
+// Mapa de gatilhos: o que costuma vir junto dos dias difíceis e dos dias calmos
+// (só com os registros da própria pessoa; nada de diagnóstico)
+// ---------------------------------------------------------------------
+
+const WEEKDAYS = ["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado"];
+
+async function patterns(ctx: Ctx) {
+  const today = brtDay();
+  const start = addDays(today, -59);
+  const [{ data: moods }, { data: habits }, { data: days }] = await Promise.all([
+    ctx.db.from("mood_logs").select("*").eq("user_id", ctx.userId).gte("created_at", dayStartIso(start)).order("created_at", { ascending: true }),
+    ctx.db.from("habit_logs").select("day, completed").eq("user_id", ctx.userId).gte("day", start),
+    ctx.db.from("daily_logs").select("date, humor, assunto").eq("user_id", ctx.userId).gte("date", start),
+  ]);
+  const moodByDay: Record<string, string> = {};
+  const feelingsHard = new Map<string, number>();
+  const feelingsCalm = new Map<string, number>();
+  for (const d of days ?? []) if (d.humor) moodByDay[d.date] = d.humor;
+  for (const m of moods ?? []) {
+    const day = brtDay(new Date(new Date(m.created_at).getTime() - 3 * 3600_000));
+    moodByDay[day] = m.mood;
+    const f = typeof m.feeling === "string" ? m.feeling : null;
+    if (f) {
+      const map = m.mood === "calmo" ? feelingsCalm : m.mood === "agitado" || m.mood === "sos" || m.mood === "ansioso" ? feelingsHard : null;
+      map?.set(f, (map.get(f) ?? 0) + 1);
+    }
+  }
+  const hard = (m: string) => m === "agitado" || m === "sos" || m === "ansioso";
+  const markedDays = Object.keys(moodByDay);
+  if (markedDays.length < 6) return { enough: false, daysMarked: markedDays.length, needed: 6 };
+
+  const habitsByDay: Record<string, number[]> = {};
+  for (const h of habits ?? []) habitsByDay[h.day] = (h.completed ?? []) as number[];
+  const hardDays = markedDays.filter((d) => hard(moodByDay[d]));
+  const calmDays = markedDays.filter((d) => moodByDay[d] === "calmo");
+  const rate = (list: string[], id: number) => (list.length ? list.filter((d) => (habitsByDay[d] ?? []).includes(id)).length / list.length : 0);
+  const ids = new Set<number>();
+  for (const d of markedDays) for (const id of habitsByDay[d] ?? []) ids.add(id);
+  const habitDiff = [...ids].map((id) => ({ id, calm: Math.round(100 * rate(calmDays, id)), hard: Math.round(100 * rate(hardDays, id)) }))
+    .filter((x) => Math.abs(x.calm - x.hard) >= 20);
+  const helps = habitDiff.filter((x) => x.calm > x.hard).sort((a, b) => (b.calm - b.hard) - (a.calm - a.hard)).slice(0, 3);
+  const missing = habitDiff.filter((x) => x.hard > x.calm).sort((a, b) => (b.hard - b.calm) - (a.hard - a.calm)).slice(0, 2);
+
+  // Dias da semana mais pesados
+  const byWeekday = Array.from({ length: 7 }, () => ({ total: 0, hard: 0 }));
+  for (const d of markedDays) {
+    const w = new Date(`${d}T12:00:00Z`).getUTCDay();
+    byWeekday[w].total++;
+    if (hard(moodByDay[d])) byWeekday[w].hard++;
+  }
+  const heavyWeekday = byWeekday.map((v, i) => ({ day: WEEKDAYS[i], pct: v.total >= 2 ? Math.round((100 * v.hard) / v.total) : -1 }))
+    .filter((x) => x.pct >= 50).sort((a, b) => b.pct - a.pct)[0] ?? null;
+
+  // Assuntos que aparecem nos dias difíceis
+  const topicCount = new Map<string, number>();
+  for (const d of days ?? []) if (d.assunto && hard(moodByDay[d.date] ?? "")) {
+    const t = String(d.assunto).toLowerCase();
+    topicCount.set(t, (topicCount.get(t) ?? 0) + 1);
+  }
+  const hardTopics = [...topicCount.entries()].filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([t]) => t);
+
+  // Depois de um dia difícil, o dia seguinte costuma ser melhor? (recuperação)
+  let after = 0, recovered = 0;
+  for (const d of hardDays) {
+    const next = moodByDay[addDays(d, 1)];
+    if (next) { after++; if (next === "calmo") recovered++; }
+  }
+  const top = (m: Map<string, number>) => [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([f]) => f);
+
+  return {
+    enough: true,
+    daysMarked: markedDays.length,
+    hardDays: hardDays.length,
+    calmDays: calmDays.length,
+    helps,
+    missing,
+    heavyWeekday,
+    hardTopics,
+    feelingsHard: top(feelingsHard),
+    feelingsCalm: top(feelingsCalm),
+    recovery: after >= 3 ? Math.round((100 * recovered) / after) : null,
+  };
+}
 
 async function monthlyReport(ctx: Ctx, body: Record<string, unknown>) {
   const info = await getPlan(ctx.admin, ctx.userId);
@@ -1563,9 +1773,11 @@ async function deleteAccount(ctx: Ctx) {
   const chatIds = (chats ?? []).map((c) => c.id);
   if (chatIds.length) await admin.from("messages").delete().in("chat_id", chatIds);
   await admin.from("chats").delete().eq("user_id", uid);
-  for (const table of ["mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "usage_events", "user_plans", "user_memory", "safety_plans", "message_feedback", "app_errors", "weekly_summaries", "journal_entries", "org_members", "monthly_reports", "future_letters"]) {
+  for (const table of ["mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "usage_events", "user_plans", "user_memory", "safety_plans", "message_feedback", "app_errors", "weekly_summaries", "journal_entries", "org_members", "monthly_reports", "future_letters", "care_invites"]) {
     await admin.from(table).delete().eq("user_id", uid);
   }
+  await admin.from("care_nudges").delete().or(`from_user.eq.${uid},to_user.eq.${uid}`);
+  await admin.from("care_pairs").delete().or(`user_a.eq.${uid},user_b.eq.${uid}`);
   await admin.from("profiles").delete().eq("id", uid);
   const { error } = await admin.auth.admin.deleteUser(uid);
   if (error) throw new HttpError(500, "Não foi possível excluir a conta. Tente de novo.");
@@ -1645,7 +1857,7 @@ async function health(ctx: Ctx) {
     checks.criptografia = { ok: false, detail: String((e as Error).message) };
   }
 
-  for (const table of ["chats", "messages", "mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "user_plans", "usage_events", "app_errors", "user_memory", "safety_plans", "message_feedback", "weekly_summaries", "journal_entries", "organizations", "org_members", "org_sectors", "monthly_reports", "future_letters", "org_campaigns"]) {
+  for (const table of ["chats", "messages", "mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "user_plans", "usage_events", "app_errors", "user_memory", "safety_plans", "message_feedback", "weekly_summaries", "journal_entries", "organizations", "org_members", "org_sectors", "monthly_reports", "future_letters", "org_campaigns", "care_pairs", "care_invites", "care_nudges"]) {
     const { error } = await ctx.admin.from(table).select("*", { count: "exact", head: true });
     checks[`tabela_${table}`] = error ? { ok: false, detail: error.message } : { ok: true };
   }
@@ -1712,6 +1924,13 @@ const actions: Record<string, (ctx: Ctx, body: Record<string, unknown>) => Promi
   letter_list: letterList,
   letter_open: letterOpen,
   letter_delete: letterDelete,
+  patterns,
+  friends_invite: friendsInvite,
+  friends_join: friendsJoin,
+  friends_list: friendsList,
+  friends_nudge: friendsNudge,
+  friends_seen: friendsSeen,
+  friends_remove: friendsRemove,
   tts_info: ttsInfo,
   tts,
   achievements,

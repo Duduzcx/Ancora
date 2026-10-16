@@ -105,6 +105,8 @@ export type PortoPromptOptions = {
   mode?: ChatMode | null;
   context?: string | null; // o que o app sabe dos últimos dias (humor, Logs, resumo)
   memory?: string | null; // o que a Nórica lembra de conversas anteriores
+  feeling?: string | null; // o nome que a pessoa deu ao que sente agora
+  todayNote?: string | null; // a pessoa marcou que hoje é uma data que pesa
   now?: Date; // hora local (Brasília) para o tom certo de manhã, à tarde ou de madrugada
   recentOpenings?: string[]; // como as últimas respostas começaram (para não repetir)
 };
@@ -161,6 +163,8 @@ ${o.context}`);
     blocks.push(`O que você lembra de conversas anteriores com esta pessoa (pode estar desatualizado; traga um detalhe só quando fizer sentido, como uma amiga que lembra — "E a entrevista, deu certo?"; nunca recite a lista):
 ${o.memory}`);
   }
+  if (o.feeling) blocks.push(`A pessoa deu nome ao que sente agora: "${o.feeling}". Use essa palavra dela, com cuidado.`);
+  if (o.todayNote) blocks.push(`A pessoa marcou que hoje é uma data que pesa para ela: "${o.todayNote}". Seja especialmente gentil; não force o assunto, mas acolha se ela trouxer.`);
   if (o.now) blocks.push(timeContext(o.now));
   if (o.recentOpenings?.length) {
     blocks.push(`Suas últimas respostas começaram assim: ${o.recentOpenings.map((x) => `"${x}"`).join(", ")}. Comece a próxima de um jeito diferente.`);
