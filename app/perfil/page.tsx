@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { createClient } from '@/lib/supabase-client';
 import pkg from '@/package.json';
+import PermitirNotificacoes from '@/components/PermitirNotificacoes';
 import { noricaApi, type HealthReport, type OrgInfo } from '@/lib/norica-api';
 import { 
   User, Save, CheckCircle2, ArrowLeft, ShieldCheck, 
@@ -17,7 +18,7 @@ import AnimatedBackground from '@/components/AnimatedBackground';
 import { getAuthState, useAuth } from '@/lib/auth-store';
 import { cacheGet, cacheSet } from '@/lib/cache';
 import { RATES, getVoicePrefs, listPortugueseVoices, naturalVoices, openVoiceInstall, setVoicePrefs, speak, stopSpeaking, type NaturalVoice, type VoiceOption } from '@/lib/speech';
-import { DEFAULT_REMINDER, disableReminder, enableReminder, formatTime, getReminder, notificationStatus, sendTestNotification, setNotificationPref, type ReminderSettings } from '@/lib/reminder';
+import { DEFAULT_REMINDER, disableReminder, enableReminder, formatTime, getReminder, sendTestNotification, setNotificationPref, type ReminderSettings } from '@/lib/reminder';
 
 // Foto do Google em alta resolução. A URL padrão vem com 96px ("=s96-c"),
 // que fica borrada no avatar grande em telas de celular.
@@ -236,7 +237,7 @@ export default function PerfilPage() {
   const [reminderTime, setReminderTime] = useState('20:00');
   const [reminderMsg, setReminderMsg] = useState<string | null>(null);
   const [reminderBusy, setReminderBusy] = useState(false);
-  const [notifStatus, setNotifStatus] = useState<string | null>(null);
+  const [notifKey, setNotifKey] = useState(0);
   useEffect(() => {
     const r = getReminder();
     setReminder(r);
@@ -267,7 +268,7 @@ export default function PerfilPage() {
     setReminder({ ...getReminder() });
     setReminderBusy(false);
     if (result === 'ok') setReminderMsg(`Pronto! Todo dia às ${reminderTime} a Nórica te chama. 🌊`);
-    else if (result === 'denied') setReminderMsg('O celular bloqueou as notificações. Libere em Configurações → Apps → Nórica → Notificações.');
+    else if (result === 'denied') { setReminderMsg('Falta permitir as notificações: toque no botão amarelo acima.'); setNotifKey((k) => k + 1); }
     else if (result === 'unsupported') setReminderMsg('O lembrete funciona no app instalado no celular.');
     else setReminderMsg('O celular não respondeu ao agendar. Toque em "Enviar teste" e, se não chegar, confira em Configurações → Apps → Nórica → Notificações.');
   };
@@ -679,7 +680,7 @@ export default function PerfilPage() {
         {/* Lembrete diário */}
         <motion.button 
           whileTap={{ scale: 0.96 }}
-          onClick={() => { setReminderMsg(null); setNotifStatus(null); setIsReminderOpen(true); notificationStatus().then(setNotifStatus); }}
+          onClick={() => { setReminderMsg(null); setNotifKey((k) => k + 1); setIsReminderOpen(true); }}
           className="w-full flex items-center justify-between p-7 bg-white/5 border border-white/10 rounded-[2.5rem] shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] hover:bg-sky-500/10 hover:border-sky-500/20 transition-all group"
         >
           <div className="flex items-center gap-4">
@@ -1097,14 +1098,7 @@ export default function PerfilPage() {
                   className="bg-transparent text-white font-black text-sm outline-none [color-scheme:dark]"
                 />
               </label>
-              {notifStatus && notifStatus !== 'unsupported' && (
-                <p className={`text-[11px] font-bold mb-3 leading-relaxed ${notifStatus === 'granted' ? 'text-emerald-300' : notifStatus === 'prompt' ? 'text-white/50' : 'text-amber-300'}`} data-testid="notif-status">
-                  {notifStatus === 'granted' && '✓ Notificações permitidas neste celular.'}
-                  {notifStatus === 'prompt' && 'O Android vai pedir sua permissão ao ligar o lembrete.'}
-                  {notifStatus === 'denied' && 'As notificações da Nórica estão bloqueadas. Abra Configurações → Apps → Nórica → Notificações e ative.'}
-                  {notifStatus === 'error' && 'O celular não respondeu sobre as notificações. Feche e abra o app e tente de novo.'}
-                </p>
-              )}
+              <PermitirNotificacoes key={notifKey} />
               {reminderMsg && <p className="text-xs font-bold text-sky-300 mb-4 leading-relaxed">{reminderMsg}</p>}
               <p className="text-[10px] font-black text-white/40 uppercase tracking-widest mb-3">Outros avisos</p>
               <div className="space-y-2 mb-5">

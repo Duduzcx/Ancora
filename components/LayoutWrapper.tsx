@@ -15,8 +15,10 @@ import { warmUpServer } from '@/lib/norica-api';
 import { flushOutbox, startOfflineSync } from '@/lib/offline-sync';
 import { reportError, reportSlow } from '@/lib/error-report';
 import { sampleFps } from '@/lib/perf-monitor';
+import { GlobalBackgroundContext, OceanBackground } from '@/components/AnimatedBackground';
 import { countAppOpen, listenReminderTaps, refreshEngagementNotifications } from '@/lib/reminder';
 
+const LIVELY_BG = ['/porto', '/farol']; // telas com o fundo mais vivo (as demais usam o suave)
 const publicPages = ['/auth', '/auth/signup', '/auth/forgot-password', '/privacidade', '/excluir-conta'];
 
 const log = (msg: string) => console.log(`[AUTH_DEBUG] ${new Date().toLocaleTimeString()}: ${msg}`);
@@ -170,17 +172,23 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
   if (!isMounted) return null;
 
   const isPublic = publicPages.some(page => pathname?.startsWith(page));
+  // Logado e fora das telas públicas: o fundo do mar fica no layout.
+  const globalBg = !!session && !isPublic;
 
   return (
     <div className="min-h-screen bg-transparent relative">
       {!loading && (
-        <div className="min-h-[100dvh] w-full relative z-0 flex flex-col">
-          {/* Troca de tela: entrada suave feita pelo navegador (CSS na placa de vídeo) */}
-          <div key={pathname} className="flex-1 w-full page-enter">
-            {children}
+        <GlobalBackgroundContext.Provider value={globalBg}>
+          <div className="min-h-[100dvh] w-full relative z-0 flex flex-col">
+            {/* Fundo do mar único e fixo: não é recriado ao trocar de tela */}
+            {globalBg && <OceanBackground subtle={!LIVELY_BG.some((p) => pathname?.startsWith(p))} />}
+            {/* Troca de tela: só opacidade (não mexe na posição de nada fixo na tela) */}
+            <div key={pathname} className="flex-1 w-full page-enter">
+              {children}
+            </div>
+            <NavigationDock />
           </div>
-          <NavigationDock />
-        </div>
+        </GlobalBackgroundContext.Provider>
       )}
       {/* Tela de abertura: some por cima do conteúdo já desenhado (antes a tela esperava a animação terminar). */}
       <AnimatePresence>

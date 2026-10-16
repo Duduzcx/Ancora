@@ -4,7 +4,7 @@
 // Notificações locais: agendadas no próprio celular, funcionam sem internet e sem servidor.
 // As mensagens são personalizadas (nome, sequência, último humor) e reagendadas a cada abertura.
 
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { reportError } from './error-report';
 
 export type ReminderSettings = {
@@ -100,10 +100,16 @@ function withTimeout<T>(promise: Promise<T>, ms: number, stage: string): Promise
   ]);
 }
 
-async function plugin() {
+// ATENÇÃO: nunca devolver o plugin "solto" de uma função async (return LocalNotifications).
+// O plugin do Capacitor responde a qualquer propriedade, inclusive "then"; a Promise acha que
+// ele é outra Promise, chama LocalNotifications.then() no Android e fica esperando para sempre.
+// Era isso que deixava o lembrete "carregando infinitamente" e nenhum aviso era agendado.
+// Por isso o plugin sempre viaja dentro de uma caixinha: { ln }.
+type LN = typeof import('@capacitor/local-notifications').LocalNotifications;
+async function plugin(): Promise<{ ln: LN } | null> {
   if (!Capacitor.isNativePlatform()) return null;
   const { LocalNotifications } = await import('@capacitor/local-notifications');
-  return LocalNotifications;
+  return { ln: LocalNotifications };
 }
 
 async function ensureChannel(ln: any) {
@@ -121,7 +127,7 @@ async function ensureChannel(ln: any) {
 }
 
 async function cancelIds(ids: number[]) {
-  const ln = await plugin();
+  const ln = (await plugin().catch(() => null))?.ln;
   if (!ln || !ids.length) return;
   await withTimeout(ln.cancel({ notifications: ids.map((id) => ({ id })) }), NATIVE_TIMEOUT, 'cancelar').catch(() => {});
 }
@@ -169,7 +175,7 @@ async function ensurePermission(ln: any, onStage?: (s: ReminderStage) => void): 
 
 /** Liga (ou muda o horário do) lembrete. Pede a permissão de notificação se precisar. */
 export async function enableReminder(hour: number, minute: number, onStage?: (s: ReminderStage) => void): Promise<ReminderResult> {
-  const ln = await withTimeout(plugin(), NATIVE_TIMEOUT, 'carregar plugin').catch(() => null);
+  const ln = (await withTimeout(plugin(), NATIVE_TIMEOUT, 'carregar plugin').catch(() => null))?.ln;
   if (!ln) {
     save({ ...getReminder(), enabled: false, hour, minute });
     return Capacitor.isNativePlatform() ? 'error' : 'unsupported';
@@ -201,7 +207,7 @@ export async function enableReminder(hour: number, minute: number, onStage?: (s:
 
 /** Notificação de teste em 5 segundos (para conferir que está tudo certo). */
 export async function sendTestNotification(): Promise<ReminderResult> {
-  const ln = await plugin().catch(() => null);
+  const ln = (await plugin().catch(() => null))?.ln;
   if (!ln) return 'unsupported';
   try {
     if (!(await ensurePermission(ln))) return 'denied';
@@ -233,7 +239,7 @@ export async function disableReminder() {
 
 /** Ao tocar na notificação, abre a tela indicada (Início, Porto, Logs ou o resumo no Farol). */
 export async function listenReminderTaps(navigate: (route: string) => void) {
-  const ln = await plugin();
+  const ln = (await plugin().catch(() => null))?.ln;
   if (!ln) return () => {};
   const handle = await ln.addListener('localNotificationActionPerformed', (event) => {
     const route = (event.notification?.extra as { route?: string } | undefined)?.route ?? '/';
@@ -255,7 +261,7 @@ export function rememberForNotifications(data: { name?: string | null; mood?: st
 // O texto é discreto de propósito: aparece na tela bloqueada.
 const CHECKIN_ID = 7200;
 export async function scheduleCheckIn(): Promise<boolean> {
-  const ln = await grantedPlugin();
+  const ln = (await grantedPlugin())?.ln;
   if (!ln) return false;
   try {
     const at = new Date();
@@ -285,21 +291,21 @@ export async function scheduleCheckIn(): Promise<boolean> {
 // Avisos para voltar todo dia (só agendam se a pessoa já permitiu notificações)
 // ---------------------------------------------------------------------
 
-async function grantedPlugin() {
-  const ln = await plugin().catch(() => null);
+async function grantedPlugin(): Promise<{ ln: LN } | null> {
+  const ln = (await plugin().catch(() => null))?.ln;
   if (!ln) return null;
   try {
     const perm = await withTimeout(ln.checkPermissions(), NATIVE_TIMEOUT, 'checar permissão');
     if (perm.display !== 'granted') return null;
     await ensureChannel(ln);
-    return ln;
+    return { ln };
   } catch (_e) {
     return null;
   }
 }
 
 async function scheduleOne(id: number, title: string, body: string, route: string, schedule: Record<string, unknown>) {
-  const ln = await grantedPlugin();
+  const ln = (await grantedPlugin())?.ln;
   if (!ln) return false;
   await cancelIds([id]);
   await withTimeout(ln.schedule({
@@ -364,7 +370,7 @@ export async function refreshEngagementNotifications() {
   // Lembrete diário: reagenda as próximas 2 semanas com mensagens atualizadas.
   const r = getReminder();
   if (r.enabled) {
-    const ln = await grantedPlugin();
+    const ln = (await grantedPlugin())?.ln;
     if (ln) await scheduleDaily(ln, r.hour, r.minute).catch((e) => reportError(e, 'lembrete:diario'));
   }
   await scheduleWeeklySummary().catch(() => {});
@@ -401,7 +407,7 @@ export type LocalNotice = { id: number; at: Date; title: string; body: string; r
 export async function scheduleNotices(list: LocalNotice[]): Promise<boolean> {
   const future = list.filter((n) => n.at.getTime() > Date.now() + 30_000);
   if (!future.length) return false;
-  const ln = await grantedPlugin();
+  const ln = (await grantedPlugin())?.ln;
   if (!ln) return false;
   await cancelIds(future.map((n) => n.id));
   try {
@@ -422,7 +428,15 @@ export const cancelNotices = (ids: number[]) => cancelIds(ids);
 
 /** Situação das notificações no celular (para mostrar na tela e ajudar a resolver). */
 export async function notificationStatus(): Promise<'granted' | 'denied' | 'prompt' | 'unsupported' | 'error'> {
-  const ln = await withTimeout(plugin(), NATIVE_TIMEOUT, 'carregar plugin').catch(() => null);
+  const np = notifyPlugin();
+  if (np) {
+    try {
+      const st = await withTimeout(np.status(), NATIVE_TIMEOUT, 'status nativo');
+      if (st.enabled) return 'granted';
+      if (st.sdk < 33) return 'denied'; // Android 12 ou antes: não há janela, só as Configurações
+    } catch (_e) {}
+  }
+  const ln = (await withTimeout(plugin(), NATIVE_TIMEOUT, 'carregar plugin').catch(() => null))?.ln;
   if (!ln) return Capacitor.isNativePlatform() ? 'error' : 'unsupported';
   try {
     const p = await withTimeout(ln.checkPermissions(), NATIVE_TIMEOUT, 'checar permissão') as { display: string };
@@ -431,4 +445,45 @@ export async function notificationStatus(): Promise<'granted' | 'denied' | 'prom
     reportError(e, 'lembrete:status');
     return 'error';
   }
+}
+
+// ---------------------------------------------------------------------
+// Permitir notificações direto no app
+// ---------------------------------------------------------------------
+
+type NoricaNotifyPlugin = { status(): Promise<{ enabled: boolean; sdk: number }>; openSettings(): Promise<void> };
+let nativeNotify: NoricaNotifyPlugin | null = null;
+function notifyPlugin(): NoricaNotifyPlugin | null {
+  if (!Capacitor.isNativePlatform() || !Capacitor.isPluginAvailable('NoricaNotify')) return null;
+  if (!nativeNotify) nativeNotify = registerPlugin<NoricaNotifyPlugin>('NoricaNotify');
+  return nativeNotify;
+}
+
+/** Abre a tela de notificações da Nórica nas Configurações do Android. */
+export async function openNotificationSettings(): Promise<boolean> {
+  const p = notifyPlugin();
+  if (!p) return false;
+  try { await withTimeout(p.openSettings(), NATIVE_TIMEOUT, 'abrir configurações'); return true; } catch (e) { reportError(e, 'lembrete:configuracoes'); return false; }
+}
+
+/**
+ * Um toque para permitir: se o Android ainda pode perguntar, mostra a janela dele;
+ * se já foi negado antes, abre direto a tela de notificações do app.
+ */
+export async function askNotificationPermission(): Promise<'granted' | 'asked' | 'settings' | 'unsupported' | 'error'> {
+  const status = await notificationStatus();
+  if (status === 'granted') return 'granted';
+  if (status === 'unsupported') return 'unsupported';
+  if (status === 'prompt') {
+    const ln = (await withTimeout(plugin(), NATIVE_TIMEOUT, 'carregar plugin').catch(() => null))?.ln;
+    if (ln) {
+      try {
+        const r = await withTimeout(ln.requestPermissions(), 30_000, 'pedir permissão') as { display: string };
+        if (r.display === 'granted') return 'granted';
+      } catch (e) {
+        reportError(e, 'lembrete:pedir');
+      }
+    }
+  }
+  return (await openNotificationSettings()) ? 'settings' : 'error';
 }

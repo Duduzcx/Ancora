@@ -13,6 +13,7 @@ import { CONSENT_VERSION } from '@/components/ConsentGate';
 import { dismissReminderInvite, enableReminder } from '@/lib/reminder';
 import { EMPTY_PLAN, cachedPlan, savePlan } from '@/lib/safety-plan';
 import { Capacitor } from '@capacitor/core';
+import PermitirNotificacoes from '@/components/PermitirNotificacoes';
 
 const doneKey = (uid: string) => `norica-onboarding:${uid}`;
 const TIMES = ['08:00', '12:30', '20:00', '22:00'];
@@ -52,7 +53,7 @@ export default function Onboarding() {
     const r = await enableReminder(h, m);
     dismissReminderInvite();
     setBusy(false);
-    if (r === 'denied') { setNote('Tudo bem — dá para ligar depois em Perfil → Notificações.'); setTimeout(() => setStep(2), 1600); return; }
+    if (r === 'denied') { setNote('Falta só permitir as notificações:'); return; }
     setStep(2);
   };
 
@@ -131,6 +132,7 @@ export default function Onboarding() {
                     ))}
                   </div>
                   {note && <p className="text-xs font-bold text-sky-300">{note}</p>}
+                  {note && <PermitirNotificacoes compact onGranted={() => { setNote(null); enableDaily(); }} />}
                   <div className="space-y-3">
                     <button onClick={enableDaily} disabled={busy} className="w-full py-4 rounded-2xl bg-sky-500 text-slate-950 font-black uppercase tracking-widest text-[11px] flex items-center justify-center gap-2">
                       {busy && <Loader2 size={14} className="animate-spin" />} Quero o lembrete às {time}

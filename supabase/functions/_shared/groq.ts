@@ -10,6 +10,9 @@ const GROQ_URL = "https://api.groq.com/openai/v1";
 
 export const CHAT_MODEL = Deno.env.get("GROQ_CHAT_MODEL") ?? "openai/gpt-oss-120b";
 export const FAST_MODEL = Deno.env.get("GROQ_FAST_MODEL") ?? "openai/gpt-oss-20b";
+// Quanto o modelo "pensa" antes de responder no Porto: "medium" dá respostas mais cuidadosas
+// (um pouco mais de espera). Pode trocar sem publicar: supabase secrets set GROQ_CHAT_REASONING=low
+export const CHAT_REASONING = (Deno.env.get("GROQ_CHAT_REASONING") ?? "medium") as "low" | "medium" | "high";
 export const TRANSCRIBE_MODEL = Deno.env.get("GROQ_TRANSCRIBE_MODEL") ?? "whisper-large-v3";
 
 export type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
@@ -30,7 +33,7 @@ const isReasoningModel = (model: string) => model.startsWith("openai/gpt-oss");
 
 export async function groqChat(
   messages: ChatMessage[],
-  opts: { model?: string; temperature?: number; maxTokens?: number } = {},
+  opts: { model?: string; temperature?: number; maxTokens?: number; reasoning?: "low" | "medium" | "high" } = {},
 ): Promise<string> {
   const model = opts.model ?? CHAT_MODEL;
   const reasoning = isReasoningModel(model);
@@ -42,8 +45,8 @@ export async function groqChat(
       messages,
       temperature: opts.temperature ?? 0.7,
       // Nos modelos com raciocínio, o limite inclui o "pensamento" interno: damos folga.
-      max_completion_tokens: (opts.maxTokens ?? 600) + (reasoning ? 600 : 0),
-      ...(reasoning ? { reasoning_effort: "low", include_reasoning: false } : {}),
+      max_completion_tokens: (opts.maxTokens ?? 600) + (reasoning ? (opts.reasoning && opts.reasoning !== "low" ? 1500 : 600) : 0),
+      ...(reasoning ? { reasoning_effort: opts.reasoning ?? "low", include_reasoning: false } : {}),
     }),
   });
   if (!res.ok) {
@@ -60,7 +63,7 @@ export async function groqChat(
 export async function groqChatStream(
   messages: ChatMessage[],
   onDelta: (text: string) => void,
-  opts: { model?: string; temperature?: number; maxTokens?: number; signal?: AbortSignal } = {},
+  opts: { model?: string; temperature?: number; maxTokens?: number; signal?: AbortSignal; reasoning?: "low" | "medium" | "high" } = {},
 ): Promise<string> {
   const model = opts.model ?? CHAT_MODEL;
   const reasoning = isReasoningModel(model);
@@ -73,8 +76,8 @@ export async function groqChatStream(
       messages,
       stream: true,
       temperature: opts.temperature ?? 0.7,
-      max_completion_tokens: (opts.maxTokens ?? 600) + (reasoning ? 600 : 0),
-      ...(reasoning ? { reasoning_effort: "low", include_reasoning: false } : {}),
+      max_completion_tokens: (opts.maxTokens ?? 600) + (reasoning ? (opts.reasoning && opts.reasoning !== "low" ? 1500 : 600) : 0),
+      ...(reasoning ? { reasoning_effort: opts.reasoning ?? "low", include_reasoning: false } : {}),
     }),
   });
   if (!res.ok || !res.body) {

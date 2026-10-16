@@ -501,7 +501,7 @@ function PortoContent() {
   };
 
   return (
-    <div className="fixed inset-0 w-full h-[100dvh] flex flex-col bg-[#050810] overflow-hidden font-sans overscroll-none" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
+    <div className="fixed inset-0 w-full h-[100dvh] flex flex-col bg-transparent overflow-hidden font-sans overscroll-none" onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
       <AnimatedBackground subtle={false} />
       <ChatHistorySidebar isOpen={isHistoryOpen} onClose={() => setIsHistoryOpen(false)} />
 

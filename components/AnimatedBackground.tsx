@@ -1,6 +1,6 @@
 "use client";
 
-import React from 'react';
+import React, { createContext, useContext } from 'react';
 import { Anchor } from 'lucide-react';
 
 interface AnimatedBackgroundProps {
@@ -37,7 +37,18 @@ function buildIcons(count: number): IconInstance[] {
 
 const ICONS = buildIcons(14);
 
-const AnimatedBackground = ({ subtle = false, noIcons = false }: AnimatedBackgroundProps) => {
+// O fundo do mar fica UM só, montado no layout e parado entre as telas.
+// Antes cada tela montava o seu: a cada troca o celular recriava ~25 camadas animadas
+// (e o fundo entrava junto com a animação da página) — era o "pisca" ao mudar de tela.
+export const GlobalBackgroundContext = createContext(false);
+
+const AnimatedBackground = (props: AnimatedBackgroundProps) => {
+  const global = useContext(GlobalBackgroundContext);
+  if (global) return null; // o layout já desenha o fundo
+  return <OceanBackground {...props} />;
+};
+
+export const OceanBackground = React.memo(function OceanBackground({ subtle = false, noIcons = false }: AnimatedBackgroundProps) {
   return (
     <div className="fixed inset-0 -z-20 overflow-hidden pointer-events-none ocean-bg">
       {/* Sombra Tecnológica e Malha Abstrata se mexendo (só transform, na placa de vídeo) */}
@@ -91,6 +102,6 @@ const AnimatedBackground = ({ subtle = false, noIcons = false }: AnimatedBackgro
       ))}
     </div>
   );
-};
+});
 
-export default React.memo(AnimatedBackground);
+export default AnimatedBackground;

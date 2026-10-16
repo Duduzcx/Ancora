@@ -354,12 +354,12 @@ html, body {
 
 /* ---------- Revelar ao rolar (IntersectionObserver + transição na GPU) ---------- */
 .reveal {
-  opacity: 0;
-  translate: 0 22px;
-  transition: opacity 0.55s cubic-bezier(0.22, 1, 0.36, 1), translate 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+  /* Sem esmaecer: os cards só deslizam um pouco ao entrar (o "sumir e aparecer" parecia piscar). */
+  translate: 0 18px;
+  transition: translate 0.5s cubic-bezier(0.22, 1, 0.36, 1);
   transition-delay: var(--reveal-delay, 0s);
 }
-.reveal.is-in { opacity: 1; translate: none; }
+.reveal.is-in { translate: none; }
 
 /* ---------- Luz que gira na borda do card da vez (transform = GPU) ---------- */
 /* Anel sempre montado; a máscara deixa aparecer só a borda de 2px (o meio fica transparente). */
@@ -396,11 +396,11 @@ html, body {
 /* ---------- Troca de tela: entrada suave (opacity + translate na GPU) ---------- */
 /* Sem "translate" no fim: elementos fixos da tela (cabeçalhos, painéis) continuam presos à tela. */
 @keyframes page-in {
-  /* Começa já meio visível: a troca de tela fica suave sem o "piscar" do fundo. */
-  from { opacity: 0.35; translate: 0 8px; }
-  to { opacity: 1; translate: none; }
+  /* Só opacidade: mover a página criava um "quadro" que deslocava cabeçalhos e folhas fixas. */
+  from { opacity: 0.4; }
+  to { opacity: 1; }
 }
-.page-enter { animation: page-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) backwards; }
+.page-enter { animation: page-in 0.22s ease-out backwards; }
 
 /* Cards entrando um após o outro (Perfil, Farol): CSS na GPU, sem JavaScript */
 .stagger-in > * { animation: page-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) backwards; }

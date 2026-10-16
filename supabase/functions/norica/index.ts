@@ -9,7 +9,7 @@
 
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { decrypt, encrypt } from "../_shared/crypto.ts";
-import { CHAT_MODEL, type ChatMessage, FAST_MODEL, groqChat, groqChatStream, parseJsonObject, TRANSCRIBE_MODEL } from "../_shared/groq.ts";
+import { CHAT_MODEL, CHAT_REASONING, type ChatMessage, FAST_MODEL, groqChat, groqChatStream, parseJsonObject, TRANSCRIBE_MODEL } from "../_shared/groq.ts";
 import { firstNameFrom } from "../_shared/names.ts";
 import { consume, getPlan, launchMode, PLAN_LIMITS, usageToday } from "../_shared/plans.ts";
 import { checkSubscription, PRO_PRODUCT_ID } from "../_shared/google-play.ts";
@@ -352,7 +352,11 @@ async function prepareChat(ctx: Ctx, body: Record<string, unknown>): Promise<Pre
     userMessageId = inserted?.id ?? null;
   }
 
-  const promptOptions = { mood, crisis, risk, name, mode, context, memory: memoryInfo.content };
+  // Como as últimas respostas começaram: a IA evita repetir a mesma abertura.
+  const recentOpenings = history.filter((m) => m.role === "assistant").slice(-3)
+    .map((m) => m.content.replace(/\s+/g, " ").trim().split(" ").slice(0, 5).join(" "))
+    .filter((x) => x.length > 3);
+  const promptOptions = { mood, crisis, risk, name, mode, context, memory: memoryInfo.content, now: brtNow(), recentOpenings };
   const system = persona === "clara" ? claraSystemPrompt(promptOptions) : portoSystemPrompt(promptOptions);
   return {
     chatId: chatId!,
@@ -429,7 +433,7 @@ async function chat(ctx: Ctx, body: Record<string, unknown>) {
   const prep = await prepareChat(ctx, body);
   let reply = "";
   try {
-    reply = await groqChat(modelMessages(prep));
+    reply = await groqChat(modelMessages(prep), { reasoning: CHAT_REASONING });
   } catch (e) {
     console.error(e);
   }
@@ -460,7 +464,7 @@ async function chatStream(ctx: Ctx, body: Record<string, unknown>): Promise<Resp
 
       let reply = "";
       try {
-        reply = await groqChatStream(modelMessages(prep), (text) => send({ type: "delta", text }), { signal: upstream.signal });
+        reply = await groqChatStream(modelMessages(prep), (text) => send({ type: "delta", text }), { signal: upstream.signal, reasoning: CHAT_REASONING });
       } catch (e) {
         if (!cancelled) console.error(e);
       }
