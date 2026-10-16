@@ -26,6 +26,9 @@ export default function Privacidade() {
               <li><strong>Dados emocionais (dados pessoais sensíveis):</strong> o estado do seu "mar" que você marca (calmo, ansioso, agitado, S.O.S), as conversas com a IA no Porto e os textos guardados no Cofre.</li>
               <li><strong>Registros de rotina:</strong> os hábitos marcados na aba Logs e as tarefas que você adiciona a partir do Porto.</li>
               <li><strong>Áudio:</strong> quando você usa o microfone, o áudio é enviado apenas para ser transcrito em texto. O arquivo de áudio não é guardado.</li>
+              <li><strong>Memória da Nórica:</strong> um resumo curto das suas conversas (pessoas importantes, temas e o que costuma te ajudar), para a IA lembrar nas próximas conversas. Você vê, desliga e apaga em <strong>Perfil → Memória da Nórica</strong>.</li>
+              <li><strong>Plano de segurança:</strong> o que você escrever no seu plano, incluindo nomes e telefones das suas pessoas de confiança. Esses contatos só são usados quando você mesmo(a) toca para avisá-los.</li>
+              <li><strong>Avaliações e registros técnicos:</strong> quando você toca em 👍/👎 numa resposta, guardamos só a nota e o motivo escolhido (não o texto da conversa). O app também registra erros técnicos e lentidão (tela, versão do app e modelo do celular) para corrigirmos problemas.</li>
             </ul>
             <p className="mt-3">As conversas da Arena (simulações) não são guardadas.</p>
           </section>
@@ -54,7 +57,7 @@ export default function Privacidade() {
             <h2 className="text-lg font-bold text-[#001f3f] mb-3">6. Como protegemos</h2>
             <ul className="list-disc pl-5 mt-3 space-y-2">
               <li>Todo o tráfego é criptografado (HTTPS).</li>
-              <li>As mensagens do Porto, os títulos das conversas e o conteúdo do Cofre são <strong>criptografados no servidor com AES-256</strong> antes de serem gravados no banco.</li>
+              <li>As mensagens do Porto, os títulos das conversas, o conteúdo do Cofre, a memória da Nórica e o plano de segurança são <strong>criptografados no servidor com AES-256</strong> antes de serem gravados no banco.</li>
               <li>Cada conta só consegue acessar os próprios dados (regras de acesso no banco) e a IA só é usada por usuários autenticados.</li>
             </ul>
           </section>

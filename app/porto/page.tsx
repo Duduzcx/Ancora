@@ -4,10 +4,12 @@
 import React, { useState, useEffect, useRef, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Bot, User, Anchor, ArrowLeft, Clock, Loader2, Mic, MicOff, Search, Edit2, Copy, Sparkles, Trash2, SendHorizontal, LifeBuoy, Plus, CheckCircle2 } from 'lucide-react';
+import { Send, Bot, User, Anchor, ArrowLeft, Clock, Loader2, Mic, MicOff, Search, Edit2, Copy, Sparkles, Trash2, SendHorizontal, LifeBuoy, Plus, CheckCircle2, ThumbsUp, ThumbsDown, Volume2, Square, MessageCircleHeart, Compass, Wind, Footprints } from 'lucide-react';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { createClient } from '@/lib/supabase-client';
-import { noricaApi, toMood, addTasksToToday, streamChat, StreamUnavailableError } from '@/lib/norica-api';
+import { noricaApi, toMood, addTasksToToday, streamChat, StreamUnavailableError, sendFeedback } from '@/lib/norica-api';
+import { scheduleCheckIn } from '@/lib/reminder';
+import { speak, stopSpeaking, onSpeakingChange } from '@/lib/speech';
 import { reportError, reportSlow } from '@/lib/error-report';
 import { HelpSheet, CrisisCard } from '@/components/AjudaAgora';
 import ChatHistorySidebar from '@/components/ChatHistorySidebar';
@@ -17,13 +19,23 @@ import { MensagemIA } from '@/components/MensagemIA';
 import TextareaAutosize from 'react-textarea-autosize';
 
 const greetingPool = {
-  calmo: ["Maré serena. É o momento ideal para aprofundarmos nossa reflexão diária e mapeamento de hábitos. O que deseja explorar? 🌊", "Que bom que o mar está tranquilo hoje. Vamos aproveitar essa calmaria para refletir?"],
-  ansioso: ["Percebo uma leve agitação nas águas. Faça uma pausa comigo. O Porto é seu lugar de reflexão e bem-estar. ⚓", "A neblina está um pouco densa? Vamos clarear o horizonte juntos."],
-  agitado: ["As ondas estão altas, mas o seu barco é forte. Estou aqui para ajudar você a encontrar seus insights emocionais. 🌪️", "O mar está revolto, mas você está seguro aqui. Vamos baixar as velas um pouco?"],
-  sos: ["Detectei uma maré alta. Vamos fazer uma pausa para realizar uma reflexão guiada. Respire fundo... ⚓", "Sinal de pausa recebido. Vamos estabilizar seus pensamentos e encontrar equilíbrio agora."],
-  neblina: ["O horizonte está mais claro agora, não está? **Que bom que você persistiu.** Agora que a neblina baixou, como posso te apoiar na sua reflexão diária aqui no Porto? ⚓✨", "Vejo que você limpou o caminho. Respire fundo... o pior da tempestade já passou. Estou aqui para te ouvir. 🌊💙"],
-  default: ["Bem-vindo ao Porto. Como posso te ajudar nas suas reflexões de bem-estar hoje? ⚓", "As portas do Porto estão abertas para seus insights emocionais."]
+  calmo: ["Que bom te ver com o mar calmo hoje. 🌊 Quer aproveitar para conversar sobre algo ou só registrar como foi o dia?", "Mar tranquilo por aí? Adoro. Me conta: o que deixou o dia mais leve?"],
+  ansioso: ["Oi. Percebi que a neblina está densa hoje. Estou aqui, sem pressa. Quer me contar o que está pesando?", "Ansiedade apertando? Vamos devagar. Você pode desabafar, ou a gente respira junto primeiro. ⚓"],
+  agitado: ["As ondas estão altas, né? Você não precisa atravessar isso sozinho(a). O que está acontecendo?", "Dia de tormenta. Respira um pouquinho comigo e me conta o que mais está mexendo com você."],
+  sos: ["Oi. Que bom que você veio. Estou aqui com calma. Você está em segurança agora?", "Você deu um passo importante vindo até aqui. Me conta, devagar, como você está neste momento?"],
+  neblina: ["O horizonte está um pouco mais claro agora, não está? **Que bom que você persistiu.** Como você está se sentindo?", "Você limpou o caminho até aqui. Respira fundo… o pior da tempestade já passou. Quer conversar? 🌊"],
+  default: ["Oi! Que bom te ver por aqui. Como você chegou hoje?", "Bem-vindo(a) ao Porto. Este espaço é seu: pode falar do jeito que vier. Como está o seu mar hoje?"]
 };
+
+// O que a pessoa precisa nesta conversa. Muda o jeito da Nórica ajudar (ver servidor: MODE_GUIDE).
+const MODE_CHIPS = [
+  { mode: 'desabafar', label: 'Só quero desabafar', text: 'Só quero desabafar um pouco.', icon: MessageCircleHeart },
+  { mode: 'organizar', label: 'Organizar ideias', text: 'Quero ajuda para organizar meus pensamentos.', icon: Compass },
+  { mode: 'acalmar', label: 'Preciso me acalmar', text: 'Preciso me acalmar agora.', icon: Wind },
+  { mode: 'passo', label: 'Um passo pra hoje', text: 'Quero dar um pequeno passo hoje.', icon: Footprints },
+];
+const FEEDBACK_REASONS = ['Não me entendeu', 'Longa demais', 'Genérica', 'Não ajudou'];
+const isServerId = (id: any) => /^[0-9a-f]{8}-[0-9a-f]{4}-/.test(String(id));
 
 // O prompt da IA (Nórica e Clara) agora fica no servidor: supabase/functions/_shared/safety.ts
 
@@ -61,6 +73,26 @@ function PortoContent() {
   const prefill = searchParams.get('prompt') || '';
   const [isHelpOpen, setIsHelpOpen] = useState(false);
   const [addedTasks, setAddedTasks] = useState<Record<string, boolean>>({});
+  // Modo escolhido nos botões do começo da conversa (o servidor guarda na conversa).
+  const chatModeRef = useRef<string | null>(null);
+  // 👍/👎 e "Ouvir"
+  const [feedback, setFeedback] = useState<Record<string, { rating: 1 | -1; reason?: string; askReason?: boolean }>>({});
+  const [speakingId, setSpeakingId] = useState<string | null>(null);
+  useEffect(() => {
+    const off = onSpeakingChange(setSpeakingId);
+    return () => { off(); stopSpeaking(); };
+  }, []);
+
+  const rate = (msg: any, rating: 1 | -1, reason?: string) => {
+    setFeedback(prev => ({ ...prev, [msg.id]: { rating, reason, askReason: rating === -1 && !reason } }));
+    sendFeedback(msg.id, rating, { reason: reason ?? null, mode: msg.mode ?? chatModeRef.current, promptVersion: msg.promptVersion ?? null }).catch(() => {});
+    try { Haptics.impact({ style: ImpactStyle.Light }); } catch (e) {}
+  };
+
+  const pickMode = (chip: typeof MODE_CHIPS[number]) => {
+    chatModeRef.current = chip.mode;
+    handleSendMessage(null, chip.text);
+  };
 
   const handleAddTasks = async (messageId: string, tasks: string[]) => {
     try {
@@ -201,6 +233,7 @@ function PortoContent() {
     if (!chatId) isInitializingNewChat.current = true;
     const chatOpts = {
       mood,
+      mode: chatModeRef.current as any,
       persona: (isClara ? 'clara' : 'norica') as 'clara' | 'norica',
       welcome: welcomeMsg?.content,
       regenerate: opts.regenerate,
@@ -246,7 +279,7 @@ function PortoContent() {
               ...prev.map(m => (opts.tempUserId && m.id === opts.tempUserId && event.userMessageId) ? { ...m, id: event.userMessageId } : m),
               ...(event.crisis ? [{ id: `crisis-${Date.now()}`, role: 'crisis', content: '' }] : []),
             ]);
-            if (event.crisis) setIsHelpOpen(true);
+            if (event.crisis) { setIsHelpOpen(true); scheduleCheckIn().catch(() => {}); }
           } else if (event.type === 'delta') {
             pending += event.text;
             if (!flushTimer) flushTimer = setTimeout(flush, shown ? 60 : 0); // junta pedaços: menos redesenhos
@@ -258,9 +291,9 @@ function PortoContent() {
         const finalId = result.assistantMessageId || botKey;
         setAnimatedIds(prev => new Set(prev).add(finalId));
         if (!shown) {
-          setMessages(prev => [...prev, { id: finalId, uiKey: botKey, role: 'assistant', content: result.reply, tasks: result.tasks || [] }]);
+          setMessages(prev => [...prev, { id: finalId, uiKey: botKey, role: 'assistant', content: result.reply, tasks: result.tasks || [], mode: result.mode, promptVersion: result.promptVersion }]);
         } else {
-          setMessages(prev => prev.map(m => (m.uiKey === botKey ? { ...m, id: finalId, content: result.reply, tasks: result.tasks || [] } : m)));
+          setMessages(prev => prev.map(m => (m.uiKey === botKey ? { ...m, id: finalId, content: result.reply, tasks: result.tasks || [], mode: result.mode, promptVersion: result.promptVersion } : m)));
         }
         setIsLoading(false);
         return;
@@ -280,10 +313,10 @@ function PortoContent() {
       setMessages(prev => [
         ...prev.map(m => (opts.tempUserId && m.id === opts.tempUserId && result.userMessageId) ? { ...m, id: result.userMessageId } : m),
         ...(result.crisis ? [{ id: `crisis-${Date.now()}`, role: 'crisis', content: '' }] : []),
-        { id: botMessageId, role: 'assistant', content: result.reply, tasks: result.tasks || [] },
+        { id: botMessageId, role: 'assistant', content: result.reply, tasks: result.tasks || [], mode: result.mode, promptVersion: result.promptVersion },
       ]);
       setIsLoading(false);
-      if (result.crisis) setIsHelpOpen(true);
+      if (result.crisis) { setIsHelpOpen(true); scheduleCheckIn().catch(() => {}); }
     } catch (err: any) {
       if (flushTimer) clearTimeout(flushTimer);
       if (err?.name === 'AbortError' || cancelarRef.current) return;
@@ -369,6 +402,7 @@ function PortoContent() {
           const pool = greetingPool[humor] || greetingPool.default;
           initialGreeting = pool[Math.floor(Math.random() * pool.length)];
         }
+        chatModeRef.current = null; // conversa nova: a pessoa escolhe de novo o que precisa
         setMessages([{ id: 'welcome', role: 'assistant', content: initialGreeting }]);
         // Atalhos do Farol chegam com uma sugestão pronta para enviar.
         if (prefill) setInput(prefill);
@@ -443,7 +477,10 @@ function PortoContent() {
     texto: m.content,
     autor: m.role === 'user' ? 'User' : m.role === 'crisis' ? 'Crise' : 'IA',
     tasks: (m.tasks || []) as string[],
+    mode: m.mode,
+    promptVersion: m.promptVersion,
   }));
+  const showModeChips = !chatId && !messages.some(m => m.role === 'user') && action !== 'suporte-b2b';
   const inputTexto = input;
   const touchStartXRef = useRef(0);
   const touchStartYRef = useRef(0);
@@ -548,6 +585,60 @@ function PortoContent() {
                     <Plus size={14} /> Adicionar {msg.tasks.length} {msg.tasks.length === 1 ? 'passo' : 'passos'} aos Logs
                   </motion.button>
                 )
+              )}
+              {/* Ouvir em voz + 👍/👎 (só depois que a resposta terminou de ser escrita) */}
+              {msg.uiKey !== streamingMessageId && !(isResponding && msg === mensagens[mensagens.length - 1]) && !String(msg.id).startsWith('error-') && (
+                <div className="flex items-center gap-1 pl-2 -mt-1 text-white/35">
+                  <button
+                    onClick={() => (speakingId === msg.uiKey ? stopSpeaking() : speak(msg.uiKey, msg.texto))}
+                    className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest transition-colors ${speakingId === msg.uiKey ? 'bg-teal-500/15 text-teal-300' : 'hover:text-white/70'}`}
+                    aria-label={speakingId === msg.uiKey ? 'Parar leitura' : 'Ouvir resposta'}
+                  >
+                    {speakingId === msg.uiKey ? <Square size={12} /> : <Volume2 size={13} />}
+                    {speakingId === msg.uiKey ? 'Parar' : 'Ouvir'}
+                  </button>
+                  {isServerId(msg.id) && (
+                    feedback[msg.id] && !feedback[msg.id].askReason ? (
+                      <span className="text-[9px] font-black uppercase tracking-widest text-teal-400/70 px-2">
+                        {feedback[msg.id].rating === 1 ? 'Obrigada! 💚' : 'Obrigada por avisar'}
+                      </span>
+                    ) : (
+                      <>
+                        <button onClick={() => rate(msg, 1)} className={`p-2 rounded-full transition-colors ${feedback[msg.id]?.rating === 1 ? 'text-teal-300' : 'hover:text-white/70'}`} aria-label="Gostei desta resposta">
+                          <ThumbsUp size={13} />
+                        </button>
+                        <button onClick={() => rate(msg, -1)} className={`p-2 rounded-full transition-colors ${feedback[msg.id]?.rating === -1 ? 'text-rose-300' : 'hover:text-white/70'}`} aria-label="Não gostei desta resposta">
+                          <ThumbsDown size={13} />
+                        </button>
+                      </>
+                    )
+                  )}
+                </div>
+              )}
+              {feedback[msg.id]?.askReason && (
+                <div className="flex flex-wrap gap-2 pl-2">
+                  {FEEDBACK_REASONS.map(r => (
+                    <button key={r} onClick={() => rate(msg, -1, r)} className="px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-white/60 text-[10px] font-bold">
+                      {r}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {/* Começo da conversa: o que você precisa agora? */}
+              {showModeChips && msg.id === 'welcome' && (
+                <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6 }} className="grid grid-cols-2 gap-2 max-w-[85%] mt-1">
+                  {MODE_CHIPS.map(chip => (
+                    <motion.button
+                      key={chip.mode}
+                      whileTap={{ scale: 0.96 }}
+                      onClick={() => pickMode(chip)}
+                      disabled={isLoading || isResponding}
+                      className="flex items-center gap-2 px-3 py-3 rounded-2xl bg-teal-500/10 border border-teal-500/25 text-teal-200 text-[11px] font-bold text-left leading-tight hover:bg-teal-500/20 transition-all"
+                    >
+                      <chip.icon size={15} className="shrink-0 text-teal-400" /> {chip.label}
+                    </motion.button>
+                  ))}
+                </motion.div>
               )}
             </div>
           ) : (

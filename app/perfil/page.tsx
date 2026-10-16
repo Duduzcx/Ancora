@@ -9,7 +9,7 @@ import {
   Anchor, LifeBuoy, Mail, Calendar, 
   LogOut, Settings, Fingerprint, AlertCircle, Loader2,
   ChevronRight, BadgeCheck, Shield, Key, Sparkles,
-  ShipWheel, Compass, Waves, Camera, Crown, Trash2, Bell
+  ShipWheel, Compass, Waves, Camera, Crown, Trash2, Bell, Brain, ClipboardList
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import AnimatedBackground from '@/components/AnimatedBackground';
@@ -261,6 +261,48 @@ export default function PerfilPage() {
     else if (result === 'denied') setReminderMsg('O celular bloqueou as notificações. Libere em Configurações → Apps → Nórica → Notificações.');
     else if (result === 'unsupported') setReminderMsg('O lembrete funciona no app instalado no celular.');
     else setReminderMsg('Não foi possível agendar agora. Tente de novo.');
+  };
+
+  // Memória da Nórica: a pessoa vê o que ela lembra, desliga ou apaga.
+  const [isMemoryOpen, setIsMemoryOpen] = useState(false);
+  const [memory, setMemory] = useState<{ enabled: boolean; items: string[] } | null>(null);
+  const [memoryBusy, setMemoryBusy] = useState(false);
+  const [memoryError, setMemoryError] = useState<string | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const openMemory = async () => {
+    setIsMemoryOpen(true);
+    setMemoryError(null);
+    setConfirmClear(false);
+    try {
+      const m = await noricaApi.memoryGet();
+      setMemory({ enabled: m.enabled, items: m.items });
+    } catch (err: any) {
+      setMemoryError(err?.message || 'Não foi possível carregar agora.');
+    }
+  };
+  const toggleMemory = async () => {
+    if (!memory) return;
+    setMemoryBusy(true);
+    try {
+      const r = await noricaApi.memorySet(!memory.enabled);
+      setMemory({ ...memory, enabled: r.enabled });
+    } catch (err: any) {
+      setMemoryError(err?.message || 'Não foi possível salvar agora.');
+    } finally {
+      setMemoryBusy(false);
+    }
+  };
+  const clearMemory = async () => {
+    setMemoryBusy(true);
+    try {
+      await noricaApi.memoryClear();
+      setMemory((m) => (m ? { ...m, items: [] } : m));
+      setConfirmClear(false);
+    } catch (err: any) {
+      setMemoryError(err?.message || 'Não foi possível apagar agora.');
+    } finally {
+      setMemoryBusy(false);
+    }
   };
 
   const [health, setHealth] = useState<HealthReport | null>(null);
@@ -595,6 +637,50 @@ export default function PerfilPage() {
           <ChevronRight size={20} className="text-white/40 group-hover:translate-x-1 transition-transform" />
         </motion.button>
 
+        {/* Memória da Nórica */}
+        <motion.button 
+          initial={{ opacity: 0, y: 15 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.5, delay: 0.24 }}
+          whileTap={{ scale: 0.96 }}
+          onClick={openMemory}
+          className="w-full flex items-center justify-between p-7 bg-white/5 border border-white/10 rounded-[2.5rem] shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] hover:bg-violet-500/10 hover:border-violet-500/20 transition-all group"
+        >
+          <div className="flex items-center gap-4">
+             <div className="w-12 h-12 bg-violet-500/10 text-violet-300 border border-violet-500/20 rounded-2xl flex items-center justify-center group-hover:rotate-12 transition-transform">
+                <Brain size={24} />
+             </div>
+             <div className="text-left">
+                <h3 className="text-sm font-black text-white uppercase tracking-tighter italic">Memória da Nórica</h3>
+                <p className="text-[9px] font-black text-violet-300 uppercase tracking-widest leading-none mt-1">O que ela lembra de você</p>
+             </div>
+          </div>
+          <ChevronRight size={20} className="text-white/40 group-hover:translate-x-1 transition-transform" />
+        </motion.button>
+
+        {/* Plano de segurança */}
+        <motion.button 
+          initial={{ opacity: 0, y: 15 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          transition={{ duration: 0.5, delay: 0.24 }}
+          whileTap={{ scale: 0.96 }}
+          onClick={() => router.push('/plano-seguranca/')}
+          className="w-full flex items-center justify-between p-7 bg-white/5 border border-white/10 rounded-[2.5rem] shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] hover:bg-rose-500/10 hover:border-rose-500/20 transition-all group"
+        >
+          <div className="flex items-center gap-4">
+             <div className="w-12 h-12 bg-rose-500/10 text-rose-300 border border-rose-500/20 rounded-2xl flex items-center justify-center group-hover:rotate-12 transition-transform">
+                <ClipboardList size={24} />
+             </div>
+             <div className="text-left">
+                <h3 className="text-sm font-black text-white uppercase tracking-tighter italic">Plano de Segurança</h3>
+                <p className="text-[9px] font-black text-rose-300 uppercase tracking-widest leading-none mt-1">Pessoas de confiança e o que te acalma</p>
+             </div>
+          </div>
+          <ChevronRight size={20} className="text-white/40 group-hover:translate-x-1 transition-transform" />
+        </motion.button>
+
         {/* Privacidade */}
         <motion.button 
           initial={{ opacity: 0, y: 15 }}
@@ -649,6 +735,85 @@ export default function PerfilPage() {
           Verificar sistema
         </button>
       </motion.div>
+      <AnimatePresence>
+        {isMemoryOpen && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => !memoryBusy && setIsMemoryOpen(false)} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[1000]" />
+            <motion.div
+              initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 28, stiffness: 260 }}
+              className="fixed inset-x-0 bottom-0 z-[1001] bg-[#0b0f19] border-t border-white/10 rounded-t-[2.5rem] p-6 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] shadow-2xl max-w-lg mx-auto max-h-[85dvh] overflow-y-auto"
+            >
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-12 h-12 rounded-2xl bg-violet-500/15 text-violet-300 flex items-center justify-center"><Brain size={22} /></div>
+                <div>
+                  <h3 className="text-sm font-black text-white uppercase tracking-tighter leading-none">Memória da Nórica</h3>
+                  <p className="text-[9px] font-black text-violet-300 uppercase tracking-widest mt-1">Para você não precisar recontar tudo</p>
+                </div>
+              </div>
+              <p className="text-sm text-white/60 font-semibold leading-relaxed mb-5">
+                A Nórica guarda um resumo curto das suas conversas (pessoas importantes, temas e o que costuma te ajudar) para lembrar nas próximas. Fica criptografado e só você vê.
+              </p>
+              {!memory && !memoryError && (
+                <div className="flex items-center gap-3 text-white/60 text-sm font-bold py-6 justify-center">
+                  <Loader2 size={18} className="animate-spin" /> Carregando...
+                </div>
+              )}
+              {memoryError && <p className="text-rose-400 text-sm font-bold mb-4">{memoryError}</p>}
+              {memory && (
+                <div className="space-y-5">
+                  <button
+                    onClick={toggleMemory}
+                    disabled={memoryBusy}
+                    className="w-full flex items-center justify-between p-4 rounded-2xl bg-white/5 border border-white/10"
+                  >
+                    <span className="text-[11px] font-black text-white/80 uppercase tracking-widest">Lembrar das minhas conversas</span>
+                    <span className={`w-12 h-7 rounded-full p-1 transition-colors ${memory.enabled ? 'bg-violet-500' : 'bg-white/15'}`}>
+                      <span className={`block w-5 h-5 rounded-full bg-white transition-transform ${memory.enabled ? 'translate-x-5' : ''}`} />
+                    </span>
+                  </button>
+                  <div>
+                    <p className="text-[10px] font-black text-white/40 uppercase tracking-widest mb-3">O que ela lembra agora</p>
+                    {memory.items.length ? (
+                      <ul className="space-y-2">
+                        {memory.items.map((item, i) => (
+                          <li key={i} className="flex gap-3 text-sm text-white/75 font-semibold leading-relaxed">
+                            <span className="mt-2 w-1.5 h-1.5 rounded-full bg-violet-400 shrink-0" /> {item}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-sm text-white/40 font-semibold">
+                        {memory.enabled ? 'Ainda nada. A memória se forma depois de algumas conversas no Porto.' : 'Memória desligada.'}
+                      </p>
+                    )}
+                  </div>
+                  {memory.items.length > 0 && (
+                    confirmClear ? (
+                      <div className="flex gap-2">
+                        <button onClick={clearMemory} disabled={memoryBusy} className="flex-1 py-4 rounded-2xl bg-rose-500 text-white font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-2">
+                          {memoryBusy && <Loader2 size={14} className="animate-spin" />} Sim, apagar
+                        </button>
+                        <button onClick={() => setConfirmClear(false)} className="flex-1 py-4 rounded-2xl bg-white/5 border border-white/10 text-white/60 font-black uppercase tracking-widest text-[10px]">
+                          Cancelar
+                        </button>
+                      </div>
+                    ) : (
+                      <button onClick={() => setConfirmClear(true)} className="w-full py-4 rounded-2xl bg-white/5 border border-rose-500/30 text-rose-300 font-black uppercase tracking-widest text-[10px]">
+                        Apagar tudo que a Nórica lembra
+                      </button>
+                    )
+                  )}
+                </div>
+              )}
+              <button onClick={() => setIsMemoryOpen(false)} className="w-full mt-4 py-3 text-white/40 font-black uppercase tracking-widest text-[10px]">
+                Fechar
+              </button>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
       <AnimatePresence>
         {isReminderOpen && (
           <>

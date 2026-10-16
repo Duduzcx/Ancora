@@ -8,7 +8,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ShieldCheck, Loader2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase-client';
 
-export const CONSENT_VERSION = '2026-10';
+// Mude a versão quando o uso dos dados mudar: todo mundo vê o aviso de novo e aceita.
+export const CONSENT_VERSION = '2026-10b';
 const LOCAL_KEY = `norica-consent-${CONSENT_VERSION}`;
 
 export default function ConsentGate({ userId }: { userId: string | null }) {
@@ -79,7 +80,8 @@ export default function ConsentGate({ userId }: { userId: string | null }) {
             <p className="text-[9px] font-black text-emerald-400 uppercase tracking-widest mb-5">Seus dados, suas regras</p>
             <div className="space-y-3 text-sm text-white/70 font-semibold leading-relaxed">
               <p>Para funcionar, o Nórica guarda informações sobre como você se sente: o estado do seu mar, suas conversas no Porto e o que você sela no Cofre. A lei trata isso como <b className="text-white">dado sensível</b>, por isso pedimos sua autorização.</p>
-              <p>Conversas e Cofre são <b className="text-white">criptografados</b>. Usamos a Supabase (servidor) e a Groq (inteligência artificial) só para o app funcionar. Nunca vendemos nem usamos seus dados para anúncios.</p>
+              <p>Para te acompanhar melhor, a Nórica também pode <b className="text-white">lembrar de conversas anteriores</b> (você vê, desliga e apaga quando quiser em Perfil → Memória da Nórica).</p>
+              <p>Conversas, Cofre e memória são <b className="text-white">criptografados</b>. Usamos a Supabase (servidor) e a Groq (inteligência artificial) só para o app funcionar. Nunca vendemos nem usamos seus dados para anúncios.</p>
               <p>Você pode excluir tudo quando quiser em <b className="text-white">Perfil → Excluir Minha Conta</b>.</p>
               <p className="text-[11px] text-white/40">O Nórica é um apoio e não substitui atendimento profissional. Em crise, ligue 188 (CVV) ou 192 (SAMU). Uso destinado a maiores de 18 anos.</p>
             </div>

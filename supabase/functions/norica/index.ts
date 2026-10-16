@@ -19,8 +19,14 @@ import {
   claraSystemPrompt,
   DAILY_LOG_PROMPT,
   LOG_INSIGHT_PROMPT,
+  type ChatMode,
   detectRisk,
+  MEMORY_PROMPT,
+  MODES,
   portoSystemPrompt,
+  PROMPT_VERSION,
+  RISK_PROMPT,
+  type RiskLevel,
   TASKS_PROMPT,
   TITLE_PROMPT,
 } from "../_shared/safety.ts";
@@ -151,9 +157,107 @@ type PreparedChat = {
   history: ChatMessage[];
   message: string;
   crisis: boolean;
+  risk: RiskLevel;
+  mode: ChatMode | null;
+  memoryEnabled: boolean;
+  memory: string;
   userMessageId: string | null;
   system: string;
 };
+
+/** Promessa com prazo: se a IA auxiliar demorar, segue sem ela (a resposta principal não pode esperar). */
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return Promise.race([promise.catch(() => fallback), new Promise<T>((r) => setTimeout(() => r(fallback), ms))]);
+}
+
+// Segunda checagem de risco, feita por um modelo rápido: pega frases indiretas
+// ("queria dormir e não acordar") que as palavras-chave não pegam.
+async function classifyRisk(history: ChatMessage[], message: string): Promise<RiskLevel> {
+  if (message.length < 8) return "nenhum";
+  const recent = history.slice(-4).map((m) => `${m.role === "user" ? "Pessoa" : "Nórica"}: ${m.content.slice(0, 400)}`).join("\n");
+  const raw = await groqChat(
+    [
+      { role: "system", content: RISK_PROMPT },
+      { role: "user", content: `${recent ? `Contexto:\n${recent}\n\n` : ""}ÚLTIMA mensagem da pessoa: ${message}` },
+    ],
+    { model: FAST_MODEL, temperature: 0, maxTokens: 20 },
+  );
+  const risco = parseJsonObject(raw)?.risco;
+  return risco === "alto" || risco === "atencao" ? risco : "nenhum";
+}
+
+const MOOD_WORD: Record<string, string> = { calmo: "calmo", ansioso: "ansioso", agitado: "agitado", sos: "em crise (S.O.S)" };
+
+// O que o app sabe dos últimos 7 dias, em poucas linhas, para a Nórica conhecer o momento da pessoa.
+async function buildContext(ctx: Ctx): Promise<string> {
+  const since = new Date(Date.now() - 7 * 86400_000);
+  const sinceDay = new Date(since.getTime() - 3 * 3600_000).toISOString().slice(0, 10);
+  const [{ data: moods }, { data: habits }, { data: days }] = await Promise.all([
+    ctx.db.from("mood_logs").select("mood, created_at").eq("user_id", ctx.userId).gte("created_at", since.toISOString())
+      .order("created_at", { ascending: true }),
+    ctx.db.from("habit_logs").select("day, progress").eq("user_id", ctx.userId).gte("day", sinceDay),
+    ctx.db.from("daily_logs").select("date, humor, assunto").eq("user_id", ctx.userId).gte("date", sinceDay)
+      .order("date", { ascending: false }).limit(5),
+  ]);
+  const lines: string[] = [];
+  if (moods?.length) {
+    const counts = new Map<string, number>();
+    for (const m of moods) counts.set(m.mood, (counts.get(m.mood) ?? 0) + 1);
+    const parts = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${MOOD_WORD[k] ?? k} ${n}x`);
+    const last = moods[moods.length - 1];
+    // Sequência de dias seguidos com o mesmo humor difícil (ex.: "ansioso 3 dias seguidos").
+    const byDay = new Map<string, string>();
+    for (const m of moods) byDay.set(new Date(new Date(m.created_at).getTime() - 3 * 3600_000).toISOString().slice(0, 10), m.mood);
+    const ordered = [...byDay.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1));
+    let streak = 0;
+    for (const [, mood] of ordered) { if (mood === ordered[0][1]) streak++; else break; }
+    lines.push(`- Humor marcado na Início nos últimos 7 dias: ${parts.join(", ")}. Último: ${MOOD_WORD[last.mood] ?? last.mood}${streak >= 2 && ordered[0][1] !== "calmo" ? ` (${streak} dias seguidos)` : ""}.`);
+  }
+  if (habits?.length) {
+    const active = habits.filter((h) => Number(h.progress) > 0).length;
+    lines.push(`- Cuidou de si nos Logs (hábitos marcados) em ${active} dos últimos 7 dias.`);
+  }
+  const topics = (days ?? []).map((d) => d.assunto).filter((a): a is string => !!a);
+  if (topics.length) lines.push(`- Assuntos das conversas recentes: ${[...new Set(topics)].slice(0, 3).join(", ")}.`);
+  return lines.join("\n");
+}
+
+async function loadMemory(ctx: Ctx): Promise<{ enabled: boolean; content: string }> {
+  const { data } = await ctx.db.from("user_memory").select("content, enabled").eq("user_id", ctx.userId).maybeSingle();
+  if (!data) return { enabled: true, content: "" };
+  return { enabled: data.enabled !== false, content: data.enabled === false ? "" : await decrypt(data.content) };
+}
+
+// Atualiza a memória entre conversas (em segundo plano, depois da resposta).
+async function updateMemory(ctx: Ctx, current: string, transcript: ChatMessage[]) {
+  const text = transcript.slice(-16).map((m) => `${m.role === "user" ? "Pessoa" : "Nórica"}: ${m.content.slice(0, 600)}`).join("\n");
+  const raw = await groqChat(
+    [
+      { role: "system", content: MEMORY_PROMPT },
+      { role: "user", content: `MEMÓRIA ATUAL:\n${current || "(vazio)"}\n\nCONVERSA NOVA:\n${text}` },
+    ],
+    { model: FAST_MODEL, temperature: 0.2, maxTokens: 400 },
+  );
+  const cleaned = raw.trim();
+  if (!cleaned) return;
+  const content = cleaned === "(vazio)" ? "" : cleaned
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith("- "))
+    .slice(0, 12)
+    .join("\n")
+    .slice(0, 900);
+  if (!content && cleaned !== "(vazio)") return; // resposta fora do formato: mantém a memória como estava
+  // Não sobrescreve se a pessoa desligou ou apagou a memória enquanto a IA trabalhava.
+  const { data: row } = await ctx.db.from("user_memory").select("enabled").eq("user_id", ctx.userId).maybeSingle();
+  if (row && row.enabled === false) return;
+  await ctx.db.from("user_memory").upsert({
+    user_id: ctx.userId,
+    content: await encrypt(content),
+    enabled: true,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: "user_id" });
+}
 
 const CRISIS_FALLBACK =
   "Estou aqui com você. O que você está sentindo é sério e você merece ajuda agora: **ligue 188 (CVV)**, é gratuito e funciona 24h. Se estiver em perigo imediato, **ligue 192**. Você está em segurança neste momento?";
@@ -164,16 +268,23 @@ async function prepareChat(ctx: Ctx, body: Record<string, unknown>): Promise<Pre
   const regenerate = body.regenerate === true; // depois de editar uma mensagem: responde de novo, sem salvar outra
   const mood = typeof body.mood === "string" && VALID_MOODS.includes(body.mood) ? body.mood : null;
   const persona = body.persona === "clara" ? "clara" : "norica";
+  const requestedMode = typeof body.mode === "string" && (MODES as readonly string[]).includes(body.mode) ? body.mode as ChatMode : null;
   let chatId = typeof body.chatId === "string" && body.chatId ? body.chatId : null;
   if (regenerate && !chatId) throw new HttpError(400, "Conversa não encontrada");
 
   let isNewChat = false;
+  let mode: ChatMode | null = requestedMode;
   if (chatId) {
-    await assertOwnChat(ctx, chatId);
+    const { data: chatRow, error: chatError } = await ctx.db.from("chats").select("id, mode").eq("id", chatId).eq("user_id", ctx.userId).maybeSingle();
+    if (chatError || !chatRow) throw new HttpError(404, "Conversa não encontrada");
+    if (requestedMode && requestedMode !== chatRow.mode) {
+      await ctx.db.from("chats").update({ mode: requestedMode }).eq("id", chatId);
+    }
+    mode = requestedMode ?? ((MODES as readonly string[]).includes(chatRow.mode) ? chatRow.mode as ChatMode : null);
   } else {
     const { data, error } = await ctx.db
       .from("chats")
-      .insert({ user_id: ctx.userId, title: await encrypt("Nova conversa") })
+      .insert({ user_id: ctx.userId, title: await encrypt("Nova conversa"), ...(mode ? { mode } : {}) })
       .select("id")
       .single();
     if (error || !data) throw new HttpError(500, "Não foi possível abrir a conversa");
@@ -209,14 +320,22 @@ async function prepareChat(ctx: Ctx, body: Record<string, unknown>): Promise<Pre
     message = cleanText(body.message);
   }
 
-  const crisis = detectRisk(message);
+  const keywordRisk = detectRisk(message);
+  // Tudo em paralelo: checagem de risco pela IA, nome, contexto dos últimos dias e memória.
+  const [aiRisk, name, context, memoryInfo] = await Promise.all([
+    keywordRisk ? Promise.resolve<RiskLevel>("alto") : withTimeout(classifyRisk(history, message), 2500, "nenhum" as RiskLevel),
+    personName(ctx),
+    withTimeout(buildContext(ctx), 2000, ""),
+    withTimeout(loadMemory(ctx), 2000, { enabled: true, content: "" }),
+  ]);
+  const risk: RiskLevel = keywordRisk ? "alto" : aiRisk;
+  const crisis = risk === "alto";
   await rateLimit(ctx, crisis);
   // Limite do plano Gratuito (desligado no lançamento). Mensagens com sinal de risco nunca são bloqueadas.
   if (!crisis) {
     const limitMessage = await consume(ctx.admin, ctx.userId, "porto_message");
     if (limitMessage) throw new HttpError(429, limitMessage);
   }
-  const name = await personName(ctx);
 
   if (!regenerate) {
     const { data: inserted, error: insertUserError } = await ctx.db
@@ -228,8 +347,21 @@ async function prepareChat(ctx: Ctx, body: Record<string, unknown>): Promise<Pre
     userMessageId = inserted?.id ?? null;
   }
 
-  const system = persona === "clara" ? claraSystemPrompt(mood, crisis, name) : portoSystemPrompt(mood, crisis, name);
-  return { chatId: chatId!, isNewChat, history, message, crisis, userMessageId, system };
+  const promptOptions = { mood, crisis, risk, name, mode, context, memory: memoryInfo.content };
+  const system = persona === "clara" ? claraSystemPrompt(promptOptions) : portoSystemPrompt(promptOptions);
+  return {
+    chatId: chatId!,
+    isNewChat,
+    history,
+    message,
+    crisis,
+    risk,
+    mode,
+    memoryEnabled: memoryInfo.enabled,
+    memory: memoryInfo.content,
+    userMessageId,
+    system,
+  };
 }
 
 // Parte 2: salva a resposta, dá título à conversa, atualiza o resumo do dia e sugere passos.
@@ -258,13 +390,29 @@ async function finishChat(ctx: Ctx, prep: PreparedChat, rawReply: string) {
     await ctx.db.from("chats").update({ title: await encrypt(title) }).eq("id", chatId);
   }
 
+  const transcript: ChatMessage[] = [...history, { role: "user", content: message }, { role: "assistant", content: reply }];
   // Na 3ª e na 6ª mensagem da pessoa, atualiza o resumo emocional do dia (em segundo plano).
   if (userTurns === 3 || userTurns === 6) {
-    runInBackground(updateDailyLog(ctx, [...history, { role: "user", content: message }, { role: "assistant", content: reply }]));
+    runInBackground(updateDailyLog(ctx, transcript));
+  }
+  // Memória entre conversas: atualizada na 3ª, 8ª e 15ª mensagem (se a pessoa não desligou).
+  if (prep.memoryEnabled && (userTurns === 3 || userTurns === 8 || userTurns === 15)) {
+    runInBackground(updateMemory(ctx, prep.memory, transcript));
   }
 
   const tasks = crisis ? [] : await extractTasks(reply);
-  return { chatId, reply, crisis, title, tasks, userMessageId, assistantMessageId: botRow?.id ?? null };
+  return {
+    chatId,
+    reply,
+    crisis,
+    risk: prep.risk,
+    mode: prep.mode,
+    promptVersion: PROMPT_VERSION,
+    title,
+    tasks,
+    userMessageId,
+    assistantMessageId: botRow?.id ?? null,
+  };
 }
 
 function modelMessages(prep: PreparedChat): ChatMessage[] {
@@ -303,7 +451,7 @@ async function chatStream(ctx: Ctx, body: Record<string, unknown>): Promise<Resp
           cancelled = true;
         }
       };
-      send({ type: "start", chatId: prep.chatId, userMessageId: prep.userMessageId, crisis: prep.crisis });
+      send({ type: "start", chatId: prep.chatId, userMessageId: prep.userMessageId, crisis: prep.crisis, risk: prep.risk, mode: prep.mode });
 
       let reply = "";
       try {
@@ -506,6 +654,90 @@ async function vaultDelete(ctx: Ctx, body: Record<string, unknown>) {
 // Exclusão de conta (LGPD + política do Google Play)
 // ---------------------------------------------------------------------
 
+// ---------------------------------------------------------------------
+// Memória da Nórica (a pessoa vê, desliga e apaga no Perfil)
+// ---------------------------------------------------------------------
+
+async function memoryGet(ctx: Ctx) {
+  const { data } = await ctx.db.from("user_memory").select("content, enabled, updated_at").eq("user_id", ctx.userId).maybeSingle();
+  const content = data ? await decrypt(data.content) : "";
+  return {
+    enabled: data ? data.enabled !== false : true,
+    items: content.split("\n").map((l) => l.replace(/^-\s*/, "").trim()).filter(Boolean),
+    updatedAt: data?.updated_at ?? null,
+  };
+}
+
+async function memorySet(ctx: Ctx, body: Record<string, unknown>) {
+  const enabled = body.enabled !== false;
+  const { data } = await ctx.db.from("user_memory").select("user_id").eq("user_id", ctx.userId).maybeSingle();
+  if (data) await ctx.db.from("user_memory").update({ enabled, updated_at: new Date().toISOString() }).eq("user_id", ctx.userId);
+  else await ctx.db.from("user_memory").insert({ user_id: ctx.userId, content: await encrypt(""), enabled });
+  return { ok: true, enabled };
+}
+
+async function memoryClear(ctx: Ctx) {
+  await ctx.db.from("user_memory").update({ content: await encrypt(""), updated_at: new Date().toISOString() }).eq("user_id", ctx.userId);
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------
+// Plano de segurança (criptografado)
+// ---------------------------------------------------------------------
+
+type SafetyPlan = {
+  sinais: string;
+  acalma: string;
+  distrair: string;
+  contatos: { nome: string; telefone: string }[];
+  profissionais: string;
+  motivos: string;
+};
+
+function cleanPlan(raw: unknown): SafetyPlan {
+  const p = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const text = (v: unknown) => (typeof v === "string" ? v.trim().slice(0, 1500) : "");
+  const contatos = Array.isArray(p.contatos)
+    ? p.contatos
+      .filter((c) => c && typeof c === "object")
+      .map((c) => ({
+        nome: text((c as Record<string, unknown>).nome).slice(0, 60),
+        telefone: text((c as Record<string, unknown>).telefone).replace(/[^\d+]/g, "").slice(0, 20),
+      }))
+      .filter((c) => c.nome || c.telefone)
+      .slice(0, 3)
+    : [];
+  return {
+    sinais: text(p.sinais),
+    acalma: text(p.acalma),
+    distrair: text(p.distrair),
+    contatos,
+    profissionais: text(p.profissionais),
+    motivos: text(p.motivos),
+  };
+}
+
+async function safetyPlanGet(ctx: Ctx) {
+  const { data } = await ctx.db.from("safety_plans").select("content, updated_at").eq("user_id", ctx.userId).maybeSingle();
+  if (!data) return { plan: null, updatedAt: null };
+  try {
+    return { plan: cleanPlan(JSON.parse(await decrypt(data.content))), updatedAt: data.updated_at };
+  } catch (_e) {
+    return { plan: null, updatedAt: null };
+  }
+}
+
+async function safetyPlanSave(ctx: Ctx, body: Record<string, unknown>) {
+  const plan = cleanPlan(body.plan);
+  const { error } = await ctx.db.from("safety_plans").upsert({
+    user_id: ctx.userId,
+    content: await encrypt(JSON.stringify(plan)),
+    updated_at: new Date().toISOString(),
+  }, { onConflict: "user_id" });
+  if (error) throw new HttpError(500, "Não foi possível salvar o plano agora");
+  return { ok: true, plan };
+}
+
 async function deleteAccount(ctx: Ctx) {
   const admin = ctx.admin;
   const uid = ctx.userId;
@@ -513,7 +745,7 @@ async function deleteAccount(ctx: Ctx) {
   const chatIds = (chats ?? []).map((c) => c.id);
   if (chatIds.length) await admin.from("messages").delete().in("chat_id", chatIds);
   await admin.from("chats").delete().eq("user_id", uid);
-  for (const table of ["mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "usage_events", "user_plans"]) {
+  for (const table of ["mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "usage_events", "user_plans", "user_memory", "safety_plans", "message_feedback", "app_errors"]) {
     await admin.from(table).delete().eq("user_id", uid);
   }
   await admin.from("profiles").delete().eq("id", uid);
@@ -595,7 +827,7 @@ async function health(ctx: Ctx) {
     checks.criptografia = { ok: false, detail: String((e as Error).message) };
   }
 
-  for (const table of ["chats", "messages", "mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "user_plans", "usage_events", "app_errors"]) {
+  for (const table of ["chats", "messages", "mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "user_plans", "usage_events", "app_errors", "user_memory", "safety_plans", "message_feedback"]) {
     const { error } = await ctx.admin.from(table).select("*", { count: "exact", head: true });
     checks[`tabela_${table}`] = error ? { ok: false, detail: error.message } : { ok: true };
   }
@@ -637,6 +869,11 @@ const actions: Record<string, (ctx: Ctx, body: Record<string, unknown>) => Promi
   plan,
   pro_interest: proInterest,
   verify_purchase: verifyPurchase,
+  memory_get: memoryGet,
+  memory_set: memorySet,
+  memory_clear: memoryClear,
+  safety_plan_get: safetyPlanGet,
+  safety_plan_save: safetyPlanSave,
   health,
 };
 

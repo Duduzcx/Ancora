@@ -6,10 +6,16 @@ import { cacheGet, cacheSet } from '@/lib/cache';
 import { queueHabitLog, queueMood, readHabitLog } from '@/lib/offline-sync';
 import { reportError } from '@/lib/error-report';
 
+export type ChatMode = 'desabafar' | 'organizar' | 'acalmar' | 'passo';
+export type RiskLevel = 'nenhum' | 'atencao' | 'alto';
+
 export type ChatResult = {
   chatId: string;
   reply: string;
   crisis: boolean;
+  risk?: RiskLevel;
+  mode?: ChatMode | null;
+  promptVersion?: string;
   title: string | null;
   tasks: string[];
   userMessageId: string | null;
@@ -18,6 +24,7 @@ export type ChatResult = {
 
 export type ChatOptions = {
   mood?: Mood | null;
+  mode?: ChatMode | null; // o que a pessoa precisa: desabafar, organizar, acalmar ou um passo
   persona?: 'norica' | 'clara';
   welcome?: string; // saudação mostrada no app, salva ao criar a conversa
   regenerate?: boolean; // responder de novo depois de editar uma mensagem
@@ -45,6 +52,15 @@ export type HealthReport = {
   checks: Record<string, { ok: boolean; detail?: string }>;
   modelos: { chat: string; rapido: string; transcricao: string };
   lancamento_pro_gratis: boolean;
+};
+
+export type SafetyPlan = {
+  sinais: string; // sinais de que uma crise está chegando
+  acalma: string; // o que eu faço sozinho(a) para me acalmar
+  distrair: string; // pessoas e lugares que me distraem
+  contatos: { nome: string; telefone: string }[]; // pessoas de confiança (até 3)
+  profissionais: string; // profissionais e serviços
+  motivos: string; // meus motivos para seguir
 };
 
 export const MOODS = ['calmo', 'ansioso', 'agitado', 'sos'] as const;
@@ -108,6 +124,13 @@ export const noricaApi = {
     call<{ active: boolean; proUntil: string | null; state: string }>('verify_purchase', { purchaseToken }),
   health: () => call<HealthReport>('health'),
 
+  memoryGet: () => call<{ enabled: boolean; items: string[]; updatedAt: string | null }>('memory_get'),
+  memorySet: (enabled: boolean) => call<{ ok: boolean; enabled: boolean }>('memory_set', { enabled }),
+  memoryClear: () => call<{ ok: boolean }>('memory_clear'),
+
+  safetyPlanGet: () => call<{ plan: SafetyPlan | null; updatedAt: string | null }>('safety_plan_get'),
+  safetyPlanSave: (plan: SafetyPlan) => call<{ ok: boolean; plan: SafetyPlan }>('safety_plan_save', { plan }),
+
   async transcribe(blob: Blob): Promise<string> {
     const supabase = createClient();
     const form = new FormData();
@@ -124,7 +147,7 @@ export const noricaApi = {
 // ---------------------------------------------------------------------
 
 export type ChatStreamEvent =
-  | { type: 'start'; chatId: string; userMessageId: string | null; crisis: boolean }
+  | { type: 'start'; chatId: string; userMessageId: string | null; crisis: boolean; risk?: RiskLevel; mode?: ChatMode | null }
   | { type: 'delta'; text: string }
   | ({ type: 'done' } & ChatResult)
   | { type: 'error'; error: string };
@@ -277,4 +300,23 @@ export async function addTasksToToday(texts: string[]): Promise<number> {
   if (!fresh.length) return 0;
   await saveDailyLog({ ...current, custom_tasks: [...current.custom_tasks, ...fresh] });
   return fresh.length;
+}
+
+
+// ---------------------------------------------------------------------
+// 👍/👎 nas respostas (não envia o texto da conversa)
+// ---------------------------------------------------------------------
+
+export async function sendFeedback(messageId: string, rating: 1 | -1, extra: { reason?: string | null; mode?: string | null; promptVersion?: string | null } = {}) {
+  const supabase = createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user) return;
+  await supabase.from('message_feedback').upsert({
+    message_id: messageId,
+    user_id: session.user.id,
+    rating,
+    reason: extra.reason ?? null,
+    mode: extra.mode ?? null,
+    prompt_version: extra.promptVersion ?? null,
+  }, { onConflict: 'message_id,user_id' });
 }

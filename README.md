@@ -78,6 +78,26 @@ A ação `chat_stream` da função `norica` devolve a resposta aos pedaços (NDJ
 O app lê com o fetch original do WebView (`window.CapacitorWebFetch`), porque o CapacitorHttp espera a resposta inteira.
 Se a função publicada ainda for a antiga, o app usa a ação `chat` (resposta inteira) automaticamente.
 
+## Como a Nórica responde (IA)
+
+Tudo em `supabase/functions/_shared/safety.ts` (versão em `PROMPT_VERSION`):
+- **4 modos** escolhidos nos botões do começo da conversa: desabafar, organizar, acalmar e um passo. Sem modo, ela pergunta uma vez o que a pessoa precisa.
+- **Contexto do app:** humor dos últimos 7 dias, Logs e assuntos recentes entram no prompt (`buildContext`).
+- **Memória entre conversas** (`user_memory`, criptografada): atualizada em segundo plano; a pessoa vê, desliga e apaga em Perfil → Memória da Nórica.
+- **Risco:** palavras-chave + checagem por IA (`RISK_PROMPT`, modelo rápido, até 2,5s). Risco alto mostra o painel de ajuda e agenda um "como você está?" para o dia seguinte.
+- **Plano de segurança** (`/plano-seguranca/`, `safety_plans` criptografada) com pessoas de confiança no botão de ajuda.
+- **👍/👎** em cada resposta (`message_feedback`, sem o texto). Para ver: `select * from feedback_resumo;`
+- **Ouvir:** leitura em voz pelo próprio celular (`@capacitor-community/text-to-speech`).
+
+### Bateria de conversas de teste
+
+30 situações (luto, prova, briga, crise indireta…) com nota de uma juíza automática:
+
+```powershell
+$env:GROQ_API_KEY="gsk_..."; npx tsx supabase/tests/avaliar-ia.mts
+```
+Rode antes e depois de mudar o prompt ou o modelo e compare as médias. O relatório completo fica em `supabase/tests/relatorios/`.
+
 ## Logs e humor sem internet
 
 `lib/offline-sync.ts`: o que a pessoa marca vai primeiro para uma fila no aparelho e é enviado ao Supabase

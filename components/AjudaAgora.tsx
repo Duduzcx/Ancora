@@ -3,9 +3,12 @@
 // Protocolo de crise: acesso rápido a ajuda humana (CVV 188 e SAMU 192).
 // Segue o visual do app: cards arredondados, tipografia black em caixa alta, verde Nórica.
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Phone, LifeBuoy, MessageCircle, X, HeartHandshake } from 'lucide-react';
+import { Phone, LifeBuoy, MessageCircle, X, HeartHandshake, ClipboardList, Send } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import type { SafetyPlan } from '@/lib/norica-api';
+import { cachedPlan, hasPlan, loadPlan, phoneDigits, trustedMessage } from '@/lib/safety-plan';
 
 const CVV_SITE = 'https://cvv.org.br/';
 
@@ -53,6 +56,59 @@ function HelpActions({ dark = false }: { dark?: boolean }) {
   );
 }
 
+function openExternal(url: string) {
+  window.location.href = url;
+}
+
+/** Pessoas de confiança do plano de segurança + atalho para o plano. */
+function TrustedContacts({ dark = true }: { dark?: boolean }) {
+  const router = useRouter();
+  const [plan, setPlan] = useState<SafetyPlan | null>(null);
+  useEffect(() => {
+    setPlan(cachedPlan());
+    loadPlan(setPlan).catch(() => {});
+  }, []);
+
+  const contacts = plan?.contatos?.filter((c) => c.telefone) ?? [];
+  const goToPlan = () => router.push('/plano-seguranca/');
+  const secondary = dark ? 'bg-white/10 border-white/20 text-white' : 'bg-slate-50 border-slate-200 text-slate-900';
+
+  return (
+    <div className="flex flex-col gap-3 w-full mt-3">
+      {contacts.map((c) => {
+        const digits = phoneDigits(c.telefone);
+        const firstName = c.nome.split(' ')[0];
+        return (
+          <div key={`${c.nome}-${c.telefone}`} className="flex gap-2">
+            <motion.button
+              whileTap={{ scale: 0.97 }}
+              onClick={() => openExternal(`https://wa.me/${digits}?text=${encodeURIComponent(trustedMessage(firstName))}`)}
+              className="flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl bg-sky-500 text-white font-black uppercase tracking-widest text-[10px]"
+            >
+              <Send size={16} /> Avisar {firstName || 'contato'}
+            </motion.button>
+            <motion.button
+              whileTap={{ scale: 0.97 }}
+              onClick={() => openExternal(`tel:+${digits}`)}
+              aria-label={`Ligar para ${c.nome}`}
+              className={`px-5 rounded-2xl border flex items-center justify-center ${secondary}`}
+            >
+              <Phone size={16} />
+            </motion.button>
+          </div>
+        );
+      })}
+      <motion.button
+        whileTap={{ scale: 0.97 }}
+        onClick={goToPlan}
+        className={`w-full flex items-center justify-center gap-3 py-4 rounded-2xl border font-black uppercase tracking-widest text-xs ${secondary}`}
+      >
+        <ClipboardList size={18} /> {hasPlan(plan) ? 'Meu plano de segurança' : 'Criar meu plano de segurança'}
+      </motion.button>
+    </div>
+  );
+}
+
 /** Painel de ajuda que sobe por cima da tela. */
 export function HelpSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   return (
@@ -71,7 +127,7 @@ export function HelpSheet({ open, onClose }: { open: boolean; onClose: () => voi
             animate={{ y: 0 }}
             exit={{ y: '100%' }}
             transition={{ type: 'spring', damping: 28, stiffness: 260 }}
-            className="fixed inset-x-0 bottom-0 z-[1001] bg-[#0b0f19] border-t border-white/10 rounded-t-[2.5rem] p-6 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] shadow-2xl max-w-lg mx-auto"
+            className="fixed inset-x-0 bottom-0 z-[1001] bg-[#0b0f19] border-t border-white/10 rounded-t-[2.5rem] p-6 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] shadow-2xl max-w-lg mx-auto max-h-[90dvh] overflow-y-auto"
           >
             <div className="flex items-start justify-between mb-5">
               <div className="flex items-center gap-3">
@@ -92,6 +148,7 @@ export function HelpSheet({ open, onClose }: { open: boolean; onClose: () => voi
               Se você estiver em perigo imediato, ligue para o SAMU.
             </p>
             <HelpActions dark />
+            <TrustedContacts />
             <p className="text-[10px] text-white/40 font-bold text-center mt-4">
               A Nórica é um apoio e não substitui atendimento profissional.
             </p>
@@ -132,8 +189,9 @@ export function CrisisCard() {
         Percebi que você pode estar passando por algo muito difícil. Falar com alguém agora pode ajudar.
       </p>
       <HelpActions dark />
+      <TrustedContacts />
     </motion.div>
   );
 }
 
-export { HelpActions };
+export { HelpActions, TrustedContacts };

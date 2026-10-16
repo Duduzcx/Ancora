@@ -112,3 +112,36 @@ export async function listenReminderTaps(navigate: (route: string) => void) {
   });
   return () => handle.remove();
 }
+
+// Depois de uma conversa difícil, um "como você está?" gentil no dia seguinte, às 10h.
+// Só agenda se a pessoa já permitiu notificações (nunca pede permissão no meio de uma crise).
+// O texto é discreto de propósito: aparece na tela bloqueada.
+const CHECKIN_ID = 7200;
+export async function scheduleCheckIn(): Promise<boolean> {
+  const ln = await plugin();
+  if (!ln) return false;
+  try {
+    const perm = await ln.checkPermissions();
+    if (perm.display !== 'granted') return false;
+    await ln.createChannel({ id: CHANNEL_ID, name: 'Lembrete diário', importance: 3, visibility: 1 }).catch(() => {});
+    const at = new Date();
+    at.setDate(at.getDate() + 1);
+    at.setHours(10, 0, 0, 0);
+    await ln.cancel({ notifications: [{ id: CHECKIN_ID }] }).catch(() => {});
+    await ln.schedule({
+      notifications: [{
+        id: CHECKIN_ID,
+        title: 'Como você está hoje? 💚',
+        body: 'Passando só para saber de você. O Porto está aberto quando quiser.',
+        channelId: CHANNEL_ID,
+        smallIcon: 'ic_stat_norica',
+        iconColor: '#34d399',
+        extra: { route: '/porto/' },
+        schedule: { at, allowWhileIdle: true },
+      }],
+    });
+    return true;
+  } catch (_e) {
+    return false;
+  }
+}
