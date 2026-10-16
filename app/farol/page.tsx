@@ -259,10 +259,6 @@ export default function FarolPage() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           
           <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.6 }}
             className={`lg:col-span-8 bg-white/5 backdrop-blur-3xl rounded-[4rem] p-10 md:p-16 border border-white/10 shadow-2xl relative overflow-hidden group ${status.glow}`}
           >
             <div className="relative z-10 space-y-10">
@@ -309,12 +305,7 @@ export default function FarolPage() {
 
           <div className="lg:col-span-4 space-y-8">
             <motion.div 
-              initial={{ opacity: 0, x: 20 }}
-              whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true, amount: 0.2 }}
-              transition={{ duration: 0.6, delay: 0.2 }}
-              style={{ willChange: 'transform, opacity' }}
-              className="bg-white/5 backdrop-blur-md rounded-[4rem] p-10 text-white shadow-2xl relative overflow-hidden border border-white/10"
+                  className="bg-white/5 backdrop-blur-md rounded-[4rem] p-10 text-white shadow-2xl relative overflow-hidden border border-white/10"
             >
 
               {/* Ícone Target Animado como Radar */}
@@ -322,8 +313,7 @@ export default function FarolPage() {
                 className="absolute top-8 right-8 text-emerald-500/30 pointer-events-none"
                 animate={{ scale: [1, 1.2, 1], opacity: [0.3, 0.6, 0.3] }}
                 transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
-                style={{ willChange: 'transform, opacity' }}
-              >
+                    >
                 <Target size={120} strokeWidth={1} />
               </motion.div>
               
@@ -355,10 +345,6 @@ export default function FarolPage() {
 
             {/* Gráfico de Marés */}
             <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true, amount: 0.2 }}
-              transition={{ duration: 0.6, delay: 0.3 }}
               className="bg-white/5 backdrop-blur-md rounded-[3rem] p-8 text-white shadow-2xl relative border border-white/10"
             >
               <div className="flex items-center gap-3 mb-6">
@@ -453,10 +439,6 @@ function HUDItem({ icon: Icon, label, value }: any) {
 function InsightCard({ icon: Icon, title, desc, index }: any) {
   return (
     <motion.div 
-      initial={{ opacity: 0, y: 20 }}
-      whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true, amount: 0.1 }}
-      transition={{ duration: 0.5, delay: 0.3 + (index * 0.1) }}
       style={{ willChange: 'transform, opacity' }}
       whileHover={{ y: -8, scale: 1.02 }}
       className="bg-white/5 backdrop-blur-xl p-8 rounded-[3rem] border border-white/10 shadow-xl space-y-4 hover:shadow-2xl transition-all"

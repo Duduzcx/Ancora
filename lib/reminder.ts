@@ -1,10 +1,11 @@
 "use client";
 
-// Lembrete diário ("Como está o seu mar hoje?").
-// Notificação local: agendada no próprio celular, funciona sem internet e sem servidor.
-// Uma mensagem diferente para cada dia da semana, no horário que a pessoa escolher.
+// Notificações da Nórica (lembrete diário, resumo de domingo, sequência, "sentimos sua falta").
+// Notificações locais: agendadas no próprio celular, funcionam sem internet e sem servidor.
+// As mensagens são personalizadas (nome, sequência, último humor) e reagendadas a cada abertura.
 
 import { Capacitor } from '@capacitor/core';
+import { reportError } from './error-report';
 
 export type ReminderSettings = {
   enabled: boolean; // lembrete diário
@@ -18,22 +19,11 @@ export type ReminderResult = 'ok' | 'denied' | 'unsupported' | 'error';
 
 const KEY = 'norica-reminder';
 const CHANNEL_ID = 'lembrete-diario';
-const BASE_ID = 7100; // ids 7101..7107 (um por dia da semana)
+const BASE_ID = 7100; // ids 7101..7114: próximos 14 lembretes diários
 export const DEFAULT_REMINDER: ReminderSettings = { enabled: false, hour: 20, minute: 0, weekly: true, streak: true, comeback: true };
 const WEEKLY_ID = 7301;
 const STREAK_ID = 7302;
 const COMEBACK_ID = 7303;
-
-// weekday: 1 = domingo … 7 = sábado
-const MESSAGES: { title: string; body: string }[] = [
-  { title: 'Domingo de maré mansa? 🌊', body: 'Tire um minuto para ver como está o seu mar hoje.' },
-  { title: 'Como está o seu mar hoje? ⚓', body: 'Um toque para registrar. A Nórica acompanha você na semana.' },
-  { title: 'Pausa de um minuto 🫧', body: 'Respire fundo e conte para a Nórica como foi o dia.' },
-  { title: 'Meio da semana, meio do caminho 🧭', body: 'Que tal marcar uma pérola nos seus Logs hoje?' },
-  { title: 'Seu porto seguro está aqui ⚓', body: 'Se o dia pesou, o Porto está aberto para conversar.' },
-  { title: 'Sexta chegou 🌅', body: 'Como você termina esta semana? Registre seu mar.' },
-  { title: 'Sábado sem pressa 🌿', body: 'Um momento só seu: como está o seu mar hoje?' },
-];
 
 export function getReminder(): ReminderSettings {
   try {
@@ -57,67 +47,181 @@ function save(settings: ReminderSettings) {
 export const formatTime = (s: Pick<ReminderSettings, 'hour' | 'minute'>) =>
   `${String(s.hour).padStart(2, '0')}:${String(s.minute).padStart(2, '0')}`;
 
+// ---------------------------------------------------------------------
+// Mensagens personalizadas (nome, sequência dos Logs, último humor, dia da semana)
+// Não revelam nada sensível: aparecem na tela bloqueada.
+// ---------------------------------------------------------------------
+
+type PersonalContext = { name: string; streak: number; lastMood: string | null; lastMoodAt: number };
+
+function personalContext(): PersonalContext {
+  const ctx: PersonalContext = { name: '', streak: 0, lastMood: null, lastMoodAt: 0 };
+  try {
+    ctx.name = localStorage.getItem('norica-first-name') || '';
+    ctx.streak = parseInt(localStorage.getItem('norica-streak') || '0', 10) || 0;
+    const last = JSON.parse(localStorage.getItem('norica-last-mood') || 'null');
+    if (last?.mood) { ctx.lastMood = last.mood; ctx.lastMoodAt = Number(last.at) || 0; }
+  } catch (_e) {}
+  return ctx;
+}
+
+const hi = (name: string, fallback = 'Oi') => (name ? `${fallback}, ${name}` : fallback);
+
+// weekday do JS: 0 = domingo … 6 = sábado
+const POOL: ((c: PersonalContext) => { title: string; body: string })[] = [
+  (c) => ({ title: `${hi(c.name, 'Domingo de maré mansa')}? 🌊`, body: 'Tire um minuto para ver como está o seu mar antes da semana começar.' }),
+  (c) => ({ title: `${hi(c.name)}, como está o seu mar hoje? ⚓`, body: 'Um toque para registrar. Começar a semana se ouvindo já é cuidado.' }),
+  (c) => ({ title: 'Pausa de um minuto 🫧', body: `${c.name ? `${c.name}, respira` : 'Respira'} fundo comigo e conta como foi o dia.` }),
+  (c) => ({ title: 'Meio da semana, meio do caminho 🧭', body: `${c.name ? `${c.name}, que` : 'Que'} tal marcar uma pérola nos seus Logs hoje?` }),
+  (c) => ({ title: 'Seu porto seguro está aqui ⚓', body: `Se o dia pesou${c.name ? `, ${c.name}` : ''}, o Porto está aberto para conversar.` }),
+  (c) => ({ title: `Sexta chegou${c.name ? `, ${c.name}` : ''} 🌅`, body: 'Como você termina esta semana? Um diário por voz de 1 minuto já vale.' }),
+  (c) => ({ title: 'Sábado sem pressa 🌿', body: 'Um momento só seu: como está o seu mar hoje?' }),
+];
+
+export function dailyMessage(date: Date, c: PersonalContext, dayIndex: number) {
+  const recentHardMood = c.lastMood && c.lastMood !== 'calmo' && Date.now() - c.lastMoodAt < 36 * 3600_000;
+  if (dayIndex === 0 && recentHardMood) {
+    return { title: `${hi(c.name)}, como você está hoje? 💙`, body: 'Passando para saber de você. Hoje pode ser mais leve — a Nórica está aqui.' };
+  }
+  if (dayIndex === 0 && c.streak >= 2) {
+    return { title: `🔥 ${c.streak} dias seguidos${c.name ? `, ${c.name}` : ''}!`, body: `Marque uma pérola hoje e chegue a ${c.streak + 1} dias cuidando de você.` };
+  }
+  return POOL[date.getDay()](c);
+}
+
+const DAILY_DAYS = 14; // agenda 2 semanas à frente; reagenda a cada abertura do app
+const NATIVE_TIMEOUT = 8000;
+
+/** Chamada nativa com prazo: se o celular não responder, o app não fica "carregando para sempre". */
+function withTimeout<T>(promise: Promise<T>, ms: number, stage: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`tempo esgotado: ${stage}`)), ms)),
+  ]);
+}
+
 async function plugin() {
   if (!Capacitor.isNativePlatform()) return null;
   const { LocalNotifications } = await import('@capacitor/local-notifications');
   return LocalNotifications;
 }
 
-async function cancelAll() {
+async function ensureChannel(ln: any) {
+  await withTimeout(
+    ln.createChannel({
+      id: CHANNEL_ID,
+      name: 'Lembretes da Nórica',
+      description: 'Lembrete diário, resumo da semana e avisos gentis',
+      importance: 3,
+      visibility: 0, // tela bloqueada: mostra só que há uma notificação da Nórica
+    }),
+    NATIVE_TIMEOUT,
+    'canal',
+  ).catch(() => {});
+}
+
+async function cancelIds(ids: number[]) {
   const ln = await plugin();
-  if (!ln) return;
-  await ln.cancel({ notifications: MESSAGES.map((_, i) => ({ id: BASE_ID + i + 1 })) }).catch(() => {});
+  if (!ln || !ids.length) return;
+  await withTimeout(ln.cancel({ notifications: ids.map((id) => ({ id })) }), NATIVE_TIMEOUT, 'cancelar').catch(() => {});
+}
+
+const dailyIds = () => Array.from({ length: DAILY_DAYS }, (_, i) => BASE_ID + i + 1);
+
+/** Agenda os próximos 14 lembretes diários, cada um com uma mensagem personalizada. */
+async function scheduleDaily(ln: any, hour: number, minute: number) {
+  await cancelIds(dailyIds());
+  const ctx = personalContext();
+  const now = new Date();
+  const notifications = [];
+  for (let i = 0, d = 0; notifications.length < DAILY_DAYS && d < DAILY_DAYS + 1; d++) {
+    const at = new Date(now);
+    at.setDate(now.getDate() + d);
+    at.setHours(hour, minute, 0, 0);
+    if (at.getTime() <= now.getTime() + 30_000) continue; // horário de hoje já passou
+    const msg = dailyMessage(at, ctx, i);
+    notifications.push({
+      id: BASE_ID + notifications.length + 1,
+      title: msg.title,
+      body: msg.body,
+      channelId: CHANNEL_ID,
+      smallIcon: 'ic_stat_norica',
+      iconColor: '#34d399',
+      extra: { route: '/' },
+      schedule: { at, allowWhileIdle: true },
+    });
+    i++;
+  }
+  await withTimeout(ln.schedule({ notifications }), NATIVE_TIMEOUT, 'agendar');
 }
 
 /** Liga (ou muda o horário do) lembrete. Pede a permissão de notificação se precisar. */
 export async function enableReminder(hour: number, minute: number): Promise<ReminderResult> {
-  const ln = await plugin();
+  const ln = await plugin().catch(() => null);
   if (!ln) {
     save({ ...getReminder(), enabled: false, hour, minute });
     return 'unsupported';
   }
+  let stage = 'permissão';
   try {
-    let perm = await ln.checkPermissions();
-    if (perm.display !== 'granted') perm = await ln.requestPermissions();
+    let perm = await withTimeout(ln.checkPermissions(), NATIVE_TIMEOUT, 'checar permissão');
+    if (perm.display !== 'granted') {
+      // A pessoa precisa responder a janela do Android: espera até 1 minuto.
+      perm = await withTimeout(ln.requestPermissions(), 60_000, 'pedir permissão');
+    }
     if (perm.display !== 'granted') {
       save({ ...getReminder(), enabled: false, hour, minute });
       return 'denied';
     }
-    await ln.createChannel({
-      id: CHANNEL_ID,
-      name: 'Lembrete diário',
-      description: 'Um convite por dia para registrar como está o seu mar',
-      importance: 3,
-      visibility: 1,
-    }).catch(() => {});
-    await cancelAll();
-    await ln.schedule({
-      notifications: MESSAGES.map((m, i) => ({
-        id: BASE_ID + i + 1,
-        title: m.title,
-        body: m.body,
+    stage = 'canal';
+    await ensureChannel(ln);
+    stage = 'agendar';
+    await scheduleDaily(ln, hour, minute);
+    save({ ...getReminder(), enabled: true, hour, minute });
+    refreshEngagementNotifications().catch(() => {}); // os outros avisos em segundo plano
+    return 'ok';
+  } catch (e) {
+    console.error('Lembrete:', e);
+    reportError(e, `lembrete:${stage}`);
+    return 'error';
+  }
+}
+
+/** Notificação de teste em 5 segundos (para conferir que está tudo certo). */
+export async function sendTestNotification(): Promise<ReminderResult> {
+  const ln = await plugin().catch(() => null);
+  if (!ln) return 'unsupported';
+  try {
+    let perm = await withTimeout(ln.checkPermissions(), NATIVE_TIMEOUT, 'checar permissão');
+    if (perm.display !== 'granted') perm = await withTimeout(ln.requestPermissions(), 60_000, 'pedir permissão');
+    if (perm.display !== 'granted') return 'denied';
+    await ensureChannel(ln);
+    const ctx = personalContext();
+    await withTimeout(ln.schedule({
+      notifications: [{
+        id: 7399,
+        title: `${hi(ctx.name)}! Teste da Nórica ⚓`,
+        body: 'Se você está vendo isto, os lembretes estão funcionando.',
         channelId: CHANNEL_ID,
         smallIcon: 'ic_stat_norica',
         iconColor: '#34d399',
         extra: { route: '/' },
-        schedule: { on: { weekday: i + 1, hour, minute }, allowWhileIdle: true },
-      })),
-    });
-    save({ ...getReminder(), enabled: true, hour, minute });
-    await refreshEngagementNotifications();
+        schedule: { at: new Date(Date.now() + 5000), allowWhileIdle: true },
+      }],
+    }), NATIVE_TIMEOUT, 'teste');
     return 'ok';
   } catch (e) {
-    console.error('Lembrete:', e);
+    reportError(e, 'lembrete:teste');
     return 'error';
   }
 }
 
 export async function disableReminder() {
-  await cancelAll();
+  await cancelIds(dailyIds());
   save({ ...getReminder(), enabled: false });
 }
 
-/** Ao tocar na notificação, abre a Início (onde ficam os cards "Como está seu mar?"). */
+/** Ao tocar na notificação, abre a tela indicada (Início, Porto, Logs ou o resumo no Farol). */
 export async function listenReminderTaps(navigate: (route: string) => void) {
   const ln = await plugin();
   if (!ln) return () => {};
@@ -128,22 +232,27 @@ export async function listenReminderTaps(navigate: (route: string) => void) {
   return () => handle.remove();
 }
 
+/** Guarda o primeiro nome e o último humor no aparelho para personalizar as mensagens. */
+export function rememberForNotifications(data: { name?: string | null; mood?: string | null }) {
+  try {
+    if (data.name) localStorage.setItem('norica-first-name', data.name);
+    if (data.mood) localStorage.setItem('norica-last-mood', JSON.stringify({ mood: data.mood, at: Date.now() }));
+  } catch (_e) {}
+}
+
 // Depois de uma conversa difícil, um "como você está?" gentil no dia seguinte, às 10h.
 // Só agenda se a pessoa já permitiu notificações (nunca pede permissão no meio de uma crise).
 // O texto é discreto de propósito: aparece na tela bloqueada.
 const CHECKIN_ID = 7200;
 export async function scheduleCheckIn(): Promise<boolean> {
-  const ln = await plugin();
+  const ln = await grantedPlugin();
   if (!ln) return false;
   try {
-    const perm = await ln.checkPermissions();
-    if (perm.display !== 'granted') return false;
-    await ln.createChannel({ id: CHANNEL_ID, name: 'Lembrete diário', importance: 3, visibility: 1 }).catch(() => {});
     const at = new Date();
     at.setDate(at.getDate() + 1);
     at.setHours(10, 0, 0, 0);
-    await ln.cancel({ notifications: [{ id: CHECKIN_ID }] }).catch(() => {});
-    await ln.schedule({
+    await cancelIds([CHECKIN_ID]);
+    await withTimeout(ln.schedule({
       notifications: [{
         id: CHECKIN_ID,
         title: 'Como você está hoje? 💚',
@@ -154,7 +263,7 @@ export async function scheduleCheckIn(): Promise<boolean> {
         extra: { route: '/porto/' },
         schedule: { at, allowWhileIdle: true },
       }],
-    });
+    }), NATIVE_TIMEOUT, 'check-in');
     return true;
   } catch (_e) {
     return false;
@@ -167,12 +276,12 @@ export async function scheduleCheckIn(): Promise<boolean> {
 // ---------------------------------------------------------------------
 
 async function grantedPlugin() {
-  const ln = await plugin();
+  const ln = await plugin().catch(() => null);
   if (!ln) return null;
   try {
-    const perm = await ln.checkPermissions();
+    const perm = await withTimeout(ln.checkPermissions(), NATIVE_TIMEOUT, 'checar permissão');
     if (perm.display !== 'granted') return null;
-    await ln.createChannel({ id: CHANNEL_ID, name: 'Lembrete diário', importance: 3, visibility: 1 }).catch(() => {});
+    await ensureChannel(ln);
     return ln;
   } catch (_e) {
     return null;
@@ -182,23 +291,32 @@ async function grantedPlugin() {
 async function scheduleOne(id: number, title: string, body: string, route: string, schedule: Record<string, unknown>) {
   const ln = await grantedPlugin();
   if (!ln) return false;
-  await ln.cancel({ notifications: [{ id }] }).catch(() => {});
-  await ln.schedule({
+  await cancelIds([id]);
+  await withTimeout(ln.schedule({
     notifications: [{ id, title, body, channelId: CHANNEL_ID, smallIcon: 'ic_stat_norica', iconColor: '#34d399', extra: { route }, schedule: schedule as any }],
-  });
+  }), NATIVE_TIMEOUT, 'agendar aviso').catch((e) => reportError(e, 'lembrete:aviso'));
   return true;
 }
 
-async function cancelOne(id: number) {
-  const ln = await plugin();
-  if (ln) await ln.cancel({ notifications: [{ id }] }).catch(() => {});
+const cancelOne = (id: number) => cancelIds([id]);
+
+/** Próximo domingo às 19h (ou hoje, se ainda não passou). */
+function nextSunday19(weeksAhead = 0) {
+  const at = new Date();
+  at.setDate(at.getDate() + ((7 - at.getDay()) % 7) + weeksAhead * 7);
+  at.setHours(19, 0, 0, 0);
+  if (at.getTime() <= Date.now()) at.setDate(at.getDate() + 7);
+  return at;
 }
 
 /** Domingo, 19h: "seu resumo da semana chegou" (abre o Farol direto no resumo). */
 export async function scheduleWeeklySummary() {
-  if (!getReminder().weekly) return cancelOne(WEEKLY_ID);
-  await scheduleOne(WEEKLY_ID, 'Seu resumo da semana chegou 🌊', 'A Nórica escreveu como foi a sua semana. Vem ver?', '/farol/?resumo=1',
-    { on: { weekday: 1, hour: 19, minute: 0 }, allowWhileIdle: true });
+  if (!getReminder().weekly) return cancelIds([WEEKLY_ID, WEEKLY_ID + 3]);
+  const name = personalContext().name;
+  await scheduleOne(WEEKLY_ID, `${name ? `${name}, seu` : 'Seu'} resumo da semana chegou 🌊`, 'A Nórica escreveu como foi a sua semana. Vem ver?', '/farol/?resumo=1',
+    { at: nextSunday19(0), allowWhileIdle: true });
+  await scheduleOne(WEEKLY_ID + 3, `${name ? `${name}, seu` : 'Seu'} resumo da semana chegou 🌊`, 'A Nórica escreveu como foi a sua semana. Vem ver?', '/farol/?resumo=1',
+    { at: nextSunday19(1), allowWhileIdle: true });
 }
 
 /** Sequência dos Logs: amanhã às 19h30 lembra de manter a ofensiva (só a partir de 2 dias seguidos). */
@@ -207,7 +325,8 @@ export async function scheduleStreak(streak: number) {
   const at = new Date();
   at.setDate(at.getDate() + 1);
   at.setHours(19, 30, 0, 0);
-  await scheduleOne(STREAK_ID, `🔥 ${streak} dias seguidos cuidando de você`, 'Marque uma pérola hoje nos Logs para manter sua sequência.', '/log/',
+  const name = personalContext().name;
+  await scheduleOne(STREAK_ID, `🔥 ${streak} dias seguidos${name ? `, ${name}` : ''}`, 'Marque uma pérola hoje nos Logs para manter sua sequência.', '/log/',
     { at, allowWhileIdle: true });
 }
 
@@ -217,7 +336,8 @@ export async function scheduleComeback() {
   const at = new Date();
   at.setDate(at.getDate() + 3);
   at.setHours(19, 0, 0, 0);
-  await scheduleOne(COMEBACK_ID, 'Como está o seu mar? 💙', 'Faz uns dias que a gente não conversa. Um minuto aqui já ajuda.', '/',
+  const name = personalContext().name;
+  await scheduleOne(COMEBACK_ID, `${name ? `${name}, como` : 'Como'} está o seu mar? 💙`, 'Faz uns dias que a gente não conversa. Um minuto aqui já ajuda.', '/',
     { at, allowWhileIdle: true });
 }
 
@@ -231,6 +351,12 @@ export async function setNotificationPref(key: 'weekly' | 'streak' | 'comeback',
 
 /** Ao abrir o app: mantém os avisos em dia (sem pedir permissão). */
 export async function refreshEngagementNotifications() {
+  // Lembrete diário: reagenda as próximas 2 semanas com mensagens atualizadas.
+  const r = getReminder();
+  if (r.enabled) {
+    const ln = await grantedPlugin();
+    if (ln) await scheduleDaily(ln, r.hour, r.minute).catch((e) => reportError(e, 'lembrete:diario'));
+  }
   await scheduleWeeklySummary().catch(() => {});
   await scheduleComeback().catch(() => {});
 }

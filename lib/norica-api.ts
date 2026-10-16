@@ -307,6 +307,8 @@ export function toMood(value: string | null | undefined): Mood | null {
 }
 
 export async function logMood(mood: Mood) {
+  // Último humor personaliza o lembrete de amanhã ("como você está hoje?").
+  try { localStorage.setItem('norica-last-mood', JSON.stringify({ mood, at: Date.now() })); } catch (_e) {}
   // Vai para a fila do aparelho e é enviado assim que houver internet.
   await queueMood(mood);
 }

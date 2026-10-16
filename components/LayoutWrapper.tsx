@@ -53,6 +53,13 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
   useEffect(() => {
     setIsMounted(true);
     countAppOpen();
+    // Modo leve para celulares mais simples (até 4 núcleos ou 4 GB): menos efeitos contínuos.
+    try {
+      const nav = navigator as any;
+      if ((nav.hardwareConcurrency && nav.hardwareConcurrency <= 4) || (nav.deviceMemory && nav.deviceMemory <= 4)) {
+        document.documentElement.dataset.lite = '1';
+      }
+    } catch (_e) {}
     log(`Montado! Pathname inicial: "${pathname}"`);
 
     const listeners: Promise<{ remove: () => void }>[] = [];
@@ -161,15 +168,10 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
     <div className="min-h-screen bg-transparent relative">
       {!loading && (
         <div className="min-h-[100dvh] w-full relative z-0 flex flex-col">
-          <motion.div
-            key={pathname}
-            initial={{ opacity: 0.6 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.12, ease: "easeOut" }}
-            className="flex-1 w-full"
-          >
+          {/* Troca de tela: entrada suave feita pelo navegador (CSS na placa de vídeo) */}
+          <div key={pathname} className="flex-1 w-full page-enter">
             {children}
-          </motion.div>
+          </div>
           <NavigationDock />
         </div>
       )}

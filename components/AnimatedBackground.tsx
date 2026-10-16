@@ -35,7 +35,7 @@ function buildIcons(count: number): IconInstance[] {
   }));
 }
 
-const ICONS = buildIcons(14);
+const ICONS = buildIcons(10);
 
 const AnimatedBackground = ({ subtle = false, noIcons = false }: AnimatedBackgroundProps) => {
   return (

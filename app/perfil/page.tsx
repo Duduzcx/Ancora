@@ -9,13 +9,14 @@ import {
   Anchor, LifeBuoy, Mail, Calendar, 
   LogOut, Settings, Fingerprint, AlertCircle, Loader2,
   ChevronRight, BadgeCheck, Shield, Key, Sparkles,
-  ShipWheel, Compass, Waves, Camera, Crown, Trash2, Bell, Brain, ClipboardList, Building2
+  ShipWheel, Compass, Waves, Camera, Crown, Trash2, Bell, Brain, ClipboardList, Building2, Volume2
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import AnimatedBackground from '@/components/AnimatedBackground';
 import { getAuthState, useAuth } from '@/lib/auth-store';
 import { cacheGet, cacheSet } from '@/lib/cache';
-import { DEFAULT_REMINDER, disableReminder, enableReminder, formatTime, getReminder, setNotificationPref, type ReminderSettings } from '@/lib/reminder';
+import { RATES, getVoicePrefs, listPortugueseVoices, openVoiceInstall, setVoicePrefs, speak, stopSpeaking, type VoiceOption } from '@/lib/speech';
+import { DEFAULT_REMINDER, disableReminder, enableReminder, formatTime, getReminder, sendTestNotification, setNotificationPref, type ReminderSettings } from '@/lib/reminder';
 
 // Foto do Google em alta resolução. A URL padrão vem com 96px ("=s96-c"),
 // que fica borrada no avatar grande em telas de celular.
@@ -260,7 +261,18 @@ export default function PerfilPage() {
     if (result === 'ok') setReminderMsg(`Pronto! Todo dia às ${reminderTime} a Nórica te chama. 🌊`);
     else if (result === 'denied') setReminderMsg('O celular bloqueou as notificações. Libere em Configurações → Apps → Nórica → Notificações.');
     else if (result === 'unsupported') setReminderMsg('O lembrete funciona no app instalado no celular.');
-    else setReminderMsg('Não foi possível agendar agora. Tente de novo.');
+    else setReminderMsg('O celular não respondeu ao agendar. Toque em "Enviar teste" e, se não chegar, confira em Configurações → Apps → Nórica → Notificações.');
+  };
+
+  const testReminder = async () => {
+    setReminderBusy(true);
+    setReminderMsg(null);
+    const r = await sendTestNotification();
+    setReminderBusy(false);
+    if (r === 'ok') setReminderMsg('Teste enviado! A notificação chega em 5 segundos (pode sair do app).');
+    else if (r === 'denied') setReminderMsg('As notificações estão bloqueadas. Libere em Configurações → Apps → Nórica → Notificações.');
+    else if (r === 'unsupported') setReminderMsg('O teste funciona no app instalado no celular.');
+    else setReminderMsg('O celular não conseguiu mostrar a notificação. Confira as permissões do app.');
   };
 
   // Memória da Nórica: a pessoa vê o que ela lembra, desliga ou apaga.
@@ -303,6 +315,26 @@ export default function PerfilPage() {
     } finally {
       setMemoryBusy(false);
     }
+  };
+
+  // Voz da Nórica (leitura das respostas)
+  const [isVoiceOpen, setIsVoiceOpen] = useState(false);
+  const [voices, setVoices] = useState<VoiceOption[] | null>(null);
+  const [voicePrefs, setVoicePrefsState] = useState(getVoicePrefs());
+  const SAMPLE = 'Oi! Eu sou a Nórica. Estou aqui para te ouvir, sem pressa. Como está o seu mar hoje?';
+  const openVoice = async () => {
+    setIsVoiceOpen(true);
+    setVoices(await listPortugueseVoices());
+  };
+  const chooseVoice = (v: VoiceOption) => {
+    setVoicePrefs({ id: v.id });
+    setVoicePrefsState(getVoicePrefs());
+    speak('amostra', SAMPLE, { voiceId: v.id });
+  };
+  const chooseRate = (rate: number) => {
+    setVoicePrefs({ rate });
+    setVoicePrefsState(getVoicePrefs());
+    speak('amostra', SAMPLE, { rate });
   };
 
   // Instituição parceira (B2B)
@@ -431,12 +463,7 @@ export default function PerfilPage() {
         
         {/* Avatar Card */}
         <motion.div 
-          initial={{ opacity: 0, y: 15 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.5 }}
           whileTap={{ scale: 0.98 }}
-          style={{ willChange: 'transform, opacity' }}
           className="bg-white/5 backdrop-blur-3xl border border-white/10 rounded-[4rem] p-10 shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] text-center space-y-6 relative overflow-hidden cursor-default"
         >
           <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/[0.03] rounded-bl-full -mr-8 -mt-8" />
@@ -478,11 +505,6 @@ export default function PerfilPage() {
 
         {/* Data Form */}
         <motion.div 
-          initial={{ opacity: 0, y: 15 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.5, delay: 0.1 }}
-          style={{ willChange: 'transform, opacity' }}
           className="bg-white/5 backdrop-blur-3xl border border-white/10 rounded-[3.5rem] p-8 shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] space-y-8 relative overflow-hidden"
         >
            <form onSubmit={handleUpdate} className="space-y-6 relative z-10">
@@ -605,12 +627,7 @@ export default function PerfilPage() {
 
         {/* Logout */}
         <motion.button 
-          initial={{ opacity: 0, y: 15 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.5, delay: 0.2 }}
           whileTap={{ scale: 0.96 }}
-          style={{ willChange: 'transform, opacity' }}
           onClick={handleLogout}
           className="w-full flex items-center justify-between p-7 bg-white/5 border border-white/10 rounded-[2.5rem] shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] hover:bg-rose-500/10 hover:border-rose-500/20 transition-all group"
         >
@@ -628,10 +645,6 @@ export default function PerfilPage() {
 
         {/* Plano */}
         <motion.button 
-          initial={{ opacity: 0, y: 15 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.5, delay: 0.22 }}
           whileTap={{ scale: 0.96 }}
           onClick={() => router.push('/planos/')}
           className="w-full flex items-center justify-between p-7 bg-white/5 border border-white/10 rounded-[2.5rem] shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] hover:bg-emerald-500/10 hover:border-emerald-500/20 transition-all group"
@@ -650,10 +663,6 @@ export default function PerfilPage() {
 
         {/* Lembrete diário */}
         <motion.button 
-          initial={{ opacity: 0, y: 15 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.5, delay: 0.24 }}
           whileTap={{ scale: 0.96 }}
           onClick={() => { setReminderMsg(null); setIsReminderOpen(true); }}
           className="w-full flex items-center justify-between p-7 bg-white/5 border border-white/10 rounded-[2.5rem] shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] hover:bg-sky-500/10 hover:border-sky-500/20 transition-all group"
@@ -672,12 +681,26 @@ export default function PerfilPage() {
           <ChevronRight size={20} className="text-white/40 group-hover:translate-x-1 transition-transform" />
         </motion.button>
 
+        {/* Voz da Nórica */}
+        <motion.button 
+          whileTap={{ scale: 0.96 }}
+          onClick={openVoice}
+          className="w-full flex items-center justify-between p-7 bg-white/5 border border-white/10 rounded-[2.5rem] shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] hover:bg-teal-500/10 hover:border-teal-500/20 transition-all group"
+        >
+          <div className="flex items-center gap-4">
+             <div className="w-12 h-12 bg-teal-500/10 text-teal-300 border border-teal-500/20 rounded-2xl flex items-center justify-center group-hover:rotate-12 transition-transform">
+                <Volume2 size={24} />
+             </div>
+             <div className="text-left">
+                <h3 className="text-sm font-black text-white uppercase tracking-tighter italic">Voz da Nórica</h3>
+                <p className="text-[9px] font-black text-teal-300 uppercase tracking-widest leading-none mt-1">Escolha a voz e a velocidade</p>
+             </div>
+          </div>
+          <ChevronRight size={20} className="text-white/40 group-hover:translate-x-1 transition-transform" />
+        </motion.button>
+
         {/* Memória da Nórica */}
         <motion.button 
-          initial={{ opacity: 0, y: 15 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.5, delay: 0.24 }}
           whileTap={{ scale: 0.96 }}
           onClick={openMemory}
           className="w-full flex items-center justify-between p-7 bg-white/5 border border-white/10 rounded-[2.5rem] shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] hover:bg-violet-500/10 hover:border-violet-500/20 transition-all group"
@@ -696,10 +719,6 @@ export default function PerfilPage() {
 
         {/* Plano de segurança */}
         <motion.button 
-          initial={{ opacity: 0, y: 15 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.5, delay: 0.24 }}
           whileTap={{ scale: 0.96 }}
           onClick={() => router.push('/plano-seguranca/')}
           className="w-full flex items-center justify-between p-7 bg-white/5 border border-white/10 rounded-[2.5rem] shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] hover:bg-rose-500/10 hover:border-rose-500/20 transition-all group"
@@ -718,10 +737,6 @@ export default function PerfilPage() {
 
         {/* Instituição parceira (escola, cursinho, empresa) */}
         <motion.button 
-          initial={{ opacity: 0, y: 15 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.5, delay: 0.24 }}
           whileTap={{ scale: 0.96 }}
           onClick={() => { setOrgError(null); setIsOrgOpen(true); }}
           className="w-full flex items-center justify-between p-7 bg-white/5 border border-white/10 rounded-[2.5rem] shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] hover:bg-amber-500/10 hover:border-amber-500/20 transition-all group"
@@ -742,10 +757,6 @@ export default function PerfilPage() {
 
         {/* Privacidade */}
         <motion.button 
-          initial={{ opacity: 0, y: 15 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.5, delay: 0.25 }}
           whileTap={{ scale: 0.96 }}
           onClick={() => router.push('/privacidade/')}
           className="w-full flex items-center justify-between p-7 bg-white/5 border border-white/10 rounded-[2.5rem] shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] hover:bg-teal-500/10 hover:border-teal-500/20 transition-all group"
@@ -764,10 +775,6 @@ export default function PerfilPage() {
 
         {/* Excluir conta (LGPD + Google Play) */}
         <motion.button 
-          initial={{ opacity: 0, y: 15 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }}
-          transition={{ duration: 0.5, delay: 0.3 }}
           whileTap={{ scale: 0.96 }}
           onClick={() => { setDeleteText(''); setDeleteError(null); setIsDeleteOpen(true); }}
           className="w-full flex items-center justify-between p-7 bg-white/5 border border-white/10 rounded-[2.5rem] shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] hover:bg-rose-500/10 hover:border-rose-500/20 transition-all group"
@@ -794,6 +801,74 @@ export default function PerfilPage() {
           Verificar sistema
         </button>
       </motion.div>
+      <AnimatePresence>
+        {isVoiceOpen && (
+          <>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => { stopSpeaking(); setIsVoiceOpen(false); }} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[1000]" />
+            <motion.div
+              initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 28, stiffness: 260 }}
+              className="fixed inset-x-0 bottom-0 z-[1001] bg-[#0b0f19] border-t border-white/10 rounded-t-[2.5rem] p-6 pb-[calc(env(safe-area-inset-bottom)+1.5rem)] shadow-2xl max-w-lg mx-auto max-h-[85dvh] overflow-y-auto"
+            >
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-12 h-12 rounded-2xl bg-teal-500/15 text-teal-300 flex items-center justify-center"><Volume2 size={22} /></div>
+                <div>
+                  <h3 className="text-sm font-black text-white uppercase tracking-tighter leading-none">Voz da Nórica</h3>
+                  <p className="text-[9px] font-black text-teal-300 uppercase tracking-widest mt-1">Toque para ouvir e escolher</p>
+                </div>
+              </div>
+              {!voices ? (
+                <div className="flex items-center gap-3 text-white/60 text-sm font-bold py-6 justify-center">
+                  <Loader2 size={18} className="animate-spin" /> Procurando vozes...
+                </div>
+              ) : voices.length === 0 ? (
+                <div className="space-y-3">
+                  <p className="text-sm text-white/60 font-semibold leading-relaxed">Seu celular não tem voz em português instalada.</p>
+                  <button onClick={openVoiceInstall} className="w-full py-4 rounded-2xl bg-teal-500 text-slate-950 font-black uppercase tracking-widest text-[10px]">Instalar vozes</button>
+                </div>
+              ) : (
+                <div className="space-y-2 mb-5">
+                  {voices.map((v) => {
+                    const active = voicePrefs.id ? voicePrefs.id === v.id : v === voices[0];
+                    return (
+                      <button
+                        key={v.id}
+                        onClick={() => chooseVoice(v)}
+                        className={`w-full flex items-center justify-between gap-3 p-4 rounded-2xl border text-left ${active ? 'bg-teal-500/15 border-teal-400/40' : 'bg-white/5 border-white/10'}`}
+                      >
+                        <span>
+                          <span className="block text-[12px] font-black text-white">{v.label}</span>
+                          <span className="block text-[10px] text-white/40 font-semibold mt-0.5">{v.natural ? 'Mais natural · usa internet' : 'Funciona sem internet'}</span>
+                        </span>
+                        <span className={`text-[9px] font-black uppercase tracking-widest ${active ? 'text-teal-300' : 'text-white/30'}`}>{active ? 'Escolhida' : 'Ouvir'}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <p className="text-[10px] font-black text-white/40 uppercase tracking-widest mb-3">Velocidade</p>
+              <div className="grid grid-cols-3 gap-2 mb-5">
+                {RATES.map((r) => (
+                  <button
+                    key={r.value}
+                    onClick={() => chooseRate(r.value)}
+                    className={`py-3 rounded-2xl border text-[11px] font-black ${voicePrefs.rate === r.value ? 'bg-teal-500/20 border-teal-400/40 text-teal-200' : 'bg-white/5 border-white/10 text-white/60'}`}
+                  >
+                    {r.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-white/45 font-semibold leading-relaxed mb-4">
+                Dica: para a voz mais natural, deixe o Google como mecanismo de voz do celular (Configurações → Gerenciamento geral → Saída de texto para voz → Mecanismo preferido: Google).
+              </p>
+              <button onClick={() => { stopSpeaking(); setIsVoiceOpen(false); }} className="w-full py-3 text-white/40 font-black uppercase tracking-widest text-[10px]">
+                Fechar
+              </button>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
       <AnimatePresence>
         {isOrgOpen && (
           <>
@@ -1012,6 +1087,13 @@ export default function PerfilPage() {
                     Desligar lembrete
                   </button>
                 )}
+                <button
+                  disabled={reminderBusy}
+                  onClick={testReminder}
+                  className="w-full py-3 rounded-2xl border border-dashed border-sky-500/30 text-sky-300 font-black uppercase tracking-widest text-[10px]"
+                >
+                  Enviar notificação de teste
+                </button>
                 <button onClick={() => setIsReminderOpen(false)} className="w-full py-3 text-white/40 font-black uppercase tracking-widest text-[10px]">
                   Fechar
                 </button>

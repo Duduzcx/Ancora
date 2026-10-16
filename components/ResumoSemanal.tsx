@@ -44,9 +44,6 @@ export default function ResumoSemanal() {
   return (
     <motion.div
       id="resumo-semanal"
-      initial={{ opacity: 0, y: 20 }}
-      whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true, amount: 0.2 }}
       className="bg-gradient-to-br from-emerald-950/60 to-white/5 backdrop-blur-md rounded-[3rem] p-8 text-white shadow-2xl border border-emerald-500/20 space-y-5"
     >
       <div className="flex items-center justify-between gap-3">

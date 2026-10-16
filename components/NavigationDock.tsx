@@ -98,7 +98,7 @@ export default function NavigationDock() {
         )}
       </AnimatePresence>
 
-      <nav className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-sm bg-[#021013]/80 backdrop-blur-xl border border-white/10 rounded-full px-4 py-2 shadow-[0_10px_40px_rgba(0,0,0,0.37)] flex justify-between items-center z-[999]">
+      <nav className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-sm bg-[#021013]/95 border border-white/10 rounded-full px-4 py-2 shadow-[0_10px_40px_rgba(0,0,0,0.37)] flex justify-between items-center z-[999]">
         <div className="w-full flex items-center justify-around h-12">
           {navItems.map((item) => {
             const isActive = item.href === 'hub' ? isHubOpen : (pathname === item.href || (item.href !== '/' && pathname?.startsWith(item.href)));

@@ -17,7 +17,7 @@ import LoginBackground from '@/components/LoginBackground';
 import NeblinaSOS from '@/components/NeblinaSOS';
 import { useAuth } from '@/lib/auth-store';
 import { cacheGet, cacheSet } from '@/lib/cache';
-import { dismissReminderInvite, enableReminder, shouldInviteReminder } from '@/lib/reminder';
+import { dismissReminderInvite, enableReminder, rememberForNotifications, shouldInviteReminder } from '@/lib/reminder';
 import { Bell, X } from 'lucide-react';
 
 // Luz que percorre a borda dos cards, um card de cada vez (Porto → Arena → Farol → Cofre → Logs).
@@ -50,15 +50,15 @@ const useSnakeStep = () => useSyncExternalStore(snakeClock.subscribe, snakeClock
 const SnakeBorder = ({ index, color }: { index: number; color: string }) => {
   const step = useSnakeStep();
   if (step !== index * 2) return null;
+  // Um feixe de luz (gradiente cônico) gira atrás de uma "máscara" da cor do card,
+  // e só a borda de 2px aparece. Gira por transform: roda na placa de vídeo, sem travar.
   return (
-    <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none z-20 flex">
-      <svg className="absolute inset-0 w-full h-full block overflow-visible" xmlns="http://www.w3.org/2000/svg">
-        <rect
-          x="0" y="0" width="100%" height="100%" rx="24" fill="none" stroke={color} strokeWidth="4"
-          pathLength={100}
-          className="snake-border"
-        />
-      </svg>
+    <div className="absolute inset-0 rounded-3xl overflow-hidden pointer-events-none z-0" aria-hidden="true">
+      <div
+        className="snake-spin"
+        style={{ background: `conic-gradient(from 0deg, transparent 0deg, transparent 250deg, ${color} 320deg, #ffffff 340deg, transparent 352deg)` }}
+      />
+      <div className="absolute inset-[2px] rounded-[22px] bg-[#131b2c]" />
     </div>
   );
 };
@@ -156,6 +156,13 @@ export default function Home() {
         cacheSet(user.id, 'profileName', n);
       });
   }, [user?.id]);
+
+  // Primeiro nome guardado no aparelho para personalizar as notificações.
+  useEffect(() => {
+    if (!user) return;
+    const n = firstName(user, profileName);
+    if (n && n !== 'Navegador') rememberForNotifications({ name: n });
+  }, [user?.id, profileName]);
 
   // Convite para o lembrete diário (uma vez, a partir da 2ª visita) e registro vindo do widget.
   const [showInvite, setShowInvite] = useState(false);
@@ -283,7 +290,7 @@ export default function Home() {
         <AnimatedBackground subtle />
         
         {/* Sombra Se Movendo Lentamente - Efeito Fundo do Mar */}
-        <div className="fixed inset-[-15%] pointer-events-none z-[-5] opacity-60 sea-shadow"
+        <div className="fixed inset-0 pointer-events-none z-[-5] opacity-60"
           style={{ backgroundImage: `radial-gradient(ellipse at 50% 50%, transparent 0%, rgba(2,10,16,0.6) 100%)` }}
         />
         
@@ -345,14 +352,7 @@ export default function Home() {
         </div>
 
         {/* Mood Section Wrapped in Card */}
-        <motion.div 
-          initial={{ opacity: 0, y: 10 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, amount: 0.2 }}
-          transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
-          style={{ willChange: 'transform, opacity' }}
-          className="mx-6 mt-12 mb-10 relative z-20"
-        >
+        <RevealOnScroll className="mx-6 mt-12 mb-10 relative z-20">
           <div className="bg-slate-900/60 border border-white/10 rounded-[3rem] p-6 shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] overflow-hidden relative group">
             {/* Shimmer Effect */}
             <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent pointer-events-none shimmer-pass" />
@@ -389,7 +389,7 @@ export default function Home() {
                   {h:'Agitado', i:Zap, d:'Tormenta', from: '#f43f5e', to: '#e11d48', bg: 'bg-rose-500/10', border: 'border-rose-500/20'}, 
                   {h:'S.O.S', i:LifeBuoy, d:'Resgate', from: '#3b82f6', to: '#2563eb', bg: 'bg-blue-500/10', border: 'border-blue-500/20'}
                 ].map((item, idx) => (
-                  <RevealOnScroll key={item.h} delay={idx * 0.15}>
+                  <RevealOnScroll key={item.h} delay={idx * 0.06}>
                     <motion.button 
                       style={{ willChange: 'transform' }}
                       whileHover={{ scale: 1.02, y: -2 }} 
@@ -428,7 +428,7 @@ export default function Home() {
               </div>
             </div>
           </div>
-        </motion.div>
+        </RevealOnScroll>
 
         {/* Convite: lembrete diário */}
         {showInvite && (
@@ -457,30 +457,21 @@ export default function Home() {
         )}
 
       {/* Divisor Visual */}
-        <motion.div 
-          initial={{ opacity: 0 }}
-          whileInView={{ opacity: 1 }}
-          viewport={{ once: true }}
-          className="px-10 py-20 flex items-center gap-4"
-        >
+        <RevealOnScroll className="px-10 py-20 flex items-center gap-4">
            <div className="h-[1px] flex-1 bg-white/10"></div>
            <span className="text-[10px] font-black text-emerald-400/80 uppercase tracking-[0.6em] italic">Sistema Nórica</span>
            <div className="h-[1px] flex-1 bg-white/10"></div>
-        </motion.div>
+        </RevealOnScroll>
 
         {/* Modules Section */}
-        <div className="cards-grid px-6 mt-4 space-y-6 max-w-md mx-auto perspective-[1200px] relative">
+        <div className="cards-grid px-6 mt-4 space-y-6 max-w-md mx-auto relative">
           
 
           {/* O Porto */}
-          <motion.div 
-            initial={{ opacity: 0, y: 30 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.8, delay: 0.15 }}
+          <RevealOnScroll
             style={{ '--card-index': 0 } as React.CSSProperties}
             onClick={(e) => handleNavigate(e, '/porto/')}
-            className="group p-6 rounded-3xl bg-[#131b2c] hover:bg-[#1a2333] border border-white/5 active:scale-[0.98] transition-all relative cursor-pointer shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] text-center"
+            className="group p-6 rounded-3xl bg-[#131b2c] hover:bg-[#1a2333] border border-white/5 active:scale-[0.98] transition-colors relative card-lite cursor-pointer shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] text-center"
           >            {/* SVG Snake Border */}
             <SnakeBorder index={0} color="#60A5FA" />
             {/* Gap Line to next card */}
@@ -498,17 +489,13 @@ export default function Home() {
                 Seu cais seguro para realizar sua reflexão diária e registrar seus insights emocionais. Um espaço de autoconhecimento e total privacidade.
               </p>
             </div>
-          </motion.div>
+          </RevealOnScroll>
 
           {/* A Arena */}
-          <motion.div 
-            initial={{ opacity: 0, y: 30 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.8, delay: 0.3 }}
+          <RevealOnScroll
             style={{ '--card-index': 1 } as React.CSSProperties}
             onClick={(e) => handleNavigate(e, '/arena/')}
-            className="group p-6 rounded-3xl bg-[#131b2c] hover:bg-[#1a2333] border border-white/5 active:scale-[0.98] transition-all relative cursor-pointer shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] text-center"
+            className="group p-6 rounded-3xl bg-[#131b2c] hover:bg-[#1a2333] border border-white/5 active:scale-[0.98] transition-colors relative card-lite cursor-pointer shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] text-center"
           >            {/* SVG Snake Border */}
             <SnakeBorder index={1} color="#FB7185" />
             {/* Gap Line to next card */}
@@ -528,17 +515,13 @@ export default function Home() {
                 O convés de treinamento para a vida. Pratique diálogos difíceis e simule conexões com especialistas em ambiente seguro.
               </p>
             </div>
-          </motion.div>
+          </RevealOnScroll>
 
           {/* O Farol */}
-          <motion.div 
-            initial={{ opacity: 0, y: 30 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.8, delay: 0.45 }}
+          <RevealOnScroll
             style={{ '--card-index': 2 } as React.CSSProperties}
             onClick={(e) => handleNavigate(e, '/farol/')}
-            className="group p-6 rounded-3xl bg-[#131b2c] hover:bg-[#1a2333] border border-white/5 active:scale-[0.98] transition-all relative cursor-pointer shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] text-center"
+            className="group p-6 rounded-3xl bg-[#131b2c] hover:bg-[#1a2333] border border-white/5 active:scale-[0.98] transition-colors relative card-lite cursor-pointer shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] text-center"
           >
             {/* SVG Snake Border */}
             <SnakeBorder index={2} color="#34D399" />
@@ -559,17 +542,13 @@ export default function Home() {
                 Encontre direção nos momentos de névoa. Orientação e luz para quando você não souber qual direção navegar.
               </p>
             </div>
-          </motion.div>
+          </RevealOnScroll>
 
           {/* O Cofre */}
-          <motion.div 
-            initial={{ opacity: 0, y: 30 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.8, delay: 0.6 }}
+          <RevealOnScroll
             style={{ '--card-index': 3 } as React.CSSProperties}
             onClick={(e) => handleNavigate(e, '/cofre/')}
-            className="group p-6 rounded-3xl bg-[#131b2c] hover:bg-[#1a2333] border border-white/5 active:scale-[0.98] transition-all relative cursor-pointer shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] text-center"
+            className="group p-6 rounded-3xl bg-[#131b2c] hover:bg-[#1a2333] border border-white/5 active:scale-[0.98] transition-colors relative card-lite cursor-pointer shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] text-center"
           >
             {/* SVG Snake Border */}
             <SnakeBorder index={3} color="#2DD4BF" />
@@ -590,17 +569,13 @@ export default function Home() {
                 Suas memórias mais preciosas sob tranca e chave. Um baú digital que só você pode acessar.
               </p>
             </div>
-          </motion.div>
+          </RevealOnScroll>
 
           {/* Logs */}
-          <motion.div 
-            initial={{ opacity: 0, y: 30 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.8, delay: 0.75 }}
+          <RevealOnScroll
             style={{ '--card-index': 4 } as React.CSSProperties}
             onClick={(e) => handleNavigate(e, '/log/')}
-            className="group p-6 rounded-3xl bg-[#131b2c] hover:bg-[#1a2333] border border-white/5 active:scale-[0.98] transition-all relative cursor-pointer shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] text-center"
+            className="group p-6 rounded-3xl bg-[#131b2c] hover:bg-[#1a2333] border border-white/5 active:scale-[0.98] transition-colors relative card-lite cursor-pointer shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] text-center"
           >
             {/* SVG Snake Border */}
             <SnakeBorder index={4} color="#38BDF8" />
@@ -621,17 +596,13 @@ export default function Home() {
                 O registro histórico do seu mapeamento de hábitos e reflexão diária. Acompanhe cada milha na sua jornada.
               </p>
             </div>
-          </motion.div>
+          </RevealOnScroll>
 
           {/* Respiração Section */}
-          <motion.div 
-            initial={{ opacity: 0, y: 30 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.8, delay: 0.9 }}
+          <RevealOnScroll
             style={{ '--card-index': 5 } as React.CSSProperties}
             onClick={(e) => handleNavigate(e, '/respiracao/')}
-            className="group p-6 rounded-3xl bg-[#131b2c] hover:bg-[#1a2333] border border-white/5 active:scale-[0.98] transition-all relative overflow-hidden cursor-pointer shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] text-center space-y-6"
+            className="group p-6 rounded-3xl bg-[#131b2c] hover:bg-[#1a2333] border border-white/5 active:scale-[0.98] transition-colors relative card-lite overflow-hidden cursor-pointer shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] text-center space-y-6"
           >            <div className="space-y-1 relative z-10">
               <p className="text-[10px] font-black text-sky-400 uppercase tracking-[0.4em]">RESPIRAÇÃO & FOCO</p>
             </div>
@@ -653,7 +624,7 @@ export default function Home() {
               </div>
               <p className="text-[11px] font-bold text-white/60 uppercase tracking-widest mt-10 opacity-80 italic">Sincronize sua respiração e ritmo vital</p>
             </div>
-          </motion.div>
+          </RevealOnScroll>
         </div>
       </motion.div>
       {/* Confirmação do humor marcado pelo widget */}

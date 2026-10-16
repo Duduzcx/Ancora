@@ -118,11 +118,13 @@ html, body {
   background-size: 200% auto;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
-  animation: wave 3s linear infinite;
+  /* Brilho curto a cada 6s (antes redesenhava o texto sem parar) */
+  animation: wave 6s ease-in-out infinite;
 }
 
 @keyframes wave {
-  to { background-position: 200% center; }
+  0% { background-position: 0% center; }
+  30%, 100% { background-position: 200% center; }
 }
 
 .text-sailor {
@@ -211,7 +213,7 @@ html, body {
   33% { transform: rotate(8deg) scale(1.1); }
   66% { transform: rotate(-8deg) scale(1.05); }
 }
-.bg-drift { animation: bg-drift 35s ease-in-out infinite; will-change: transform; }
+.bg-drift { /* camada grande: fica parada (girar 200% da tela custava muito na placa de vídeo) */ }
 
 @keyframes anchor-float {
   0%, 100% { transform: translateY(0) rotate(0deg); }
@@ -244,8 +246,11 @@ html, body {
 .shimmer-pass { animation: shimmer-pass 6s linear infinite; will-change: transform; }
 
 /* Palavra "mente" com brilho correndo */
-@keyframes text-shine { to { background-position: -200% center; } }
-.text-shine { animation: text-shine 2.5s linear infinite; }
+@keyframes text-shine {
+  0% { background-position: 0% center; }
+  35%, 100% { background-position: -200% center; }
+}
+.text-shine { animation: text-shine 5s ease-in-out infinite; }
 
 /* Pulso de respiração dos botões (antes animava box-shadow, que redesenha a cada quadro) */
 .breath-pulse, .breath-pulse-rose { position: relative; isolation: isolate; }
@@ -307,11 +312,68 @@ html, body {
 @keyframes log-sparkle { 0% { transform: scale(1) rotate(0deg); } 50% { transform: scale(1.2) rotate(180deg); } 100% { transform: scale(1) rotate(360deg); } }
 .log-sparkle { animation: log-sparkle 20s linear infinite; }
 
+/* ---------- Revelar ao rolar (IntersectionObserver + transição na GPU) ---------- */
+.reveal {
+  opacity: 0;
+  translate: 0 22px;
+  transition: opacity 0.55s cubic-bezier(0.22, 1, 0.36, 1), translate 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+  transition-delay: var(--reveal-delay, 0s);
+}
+.reveal.is-in { opacity: 1; translate: none; }
+
+/* ---------- Luz que gira na borda do card da vez (transform = GPU) ---------- */
+.snake-spin {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 160%;
+  aspect-ratio: 1 / 1;
+  translate: -50% -50%;
+  animation: snake-spin 3s cubic-bezier(0.45, 0, 0.55, 1) forwards;
+  will-change: transform, opacity;
+}
+@keyframes snake-spin {
+  0% { transform: rotate(-30deg); opacity: 0; }
+  12% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { transform: rotate(330deg); opacity: 0; }
+}
+
+/* ---------- Troca de tela: entrada suave (opacity + translate na GPU) ---------- */
+/* Sem "translate" no fim: elementos fixos da tela (cabeçalhos, painéis) continuam presos à tela. */
+@keyframes page-in {
+  from { opacity: 0; translate: 0 10px; }
+  to { opacity: 1; translate: none; }
+}
+.page-enter { animation: page-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) backwards; }
+
+/* Toque com resposta imediata em botões e cards */
+.press { transition: scale 0.12s ease-out; }
+.press:active { scale: 0.97; }
+
+/* ---------- Modo leve (celulares mais simples): menos efeitos contínuos ---------- */
+html[data-lite] .anchor-float,
+html[data-lite] .animate-bubble-rise,
+html[data-lite] .shimmer-pass,
+html[data-lite] .text-shine,
+html[data-lite] .text-water,
+html[data-lite] .breathe-scale,
+html[data-lite] .log-particle,
+html[data-lite] .log-bubble,
+html[data-lite] .log-fish,
+html[data-lite] .breath-pulse::after,
+html[data-lite] .breath-pulse-rose::after { animation: none !important; }
+html[data-lite] .backdrop-blur-3xl,
+html[data-lite] .backdrop-blur-2xl,
+html[data-lite] .backdrop-blur-xl,
+html[data-lite] .backdrop-blur-md { --tw-backdrop-blur: blur(8px); }
+
 /* Quem pediu menos movimento no celular (Acessibilidade) não recebe animações contínuas. */
 @media (prefers-reduced-motion: reduce) {
   .bg-drift, .anchor-float, .animate-bubble-rise, .sea-shadow, .shimmer-pass, .text-shine,
-  .breath-pulse::after, .breath-pulse-rose::after, .breathe-scale, .spin-10s,
-  .snake-border, .snake-gap, .snake-loop, .log-particle, .log-anchor, .log-sway, .log-bubble, .log-fish, .log-sparkle, .text-water, .ocean-bg {
+  .breath-pulse::after, .breath-pulse-rose::after, .breathe-scale, .spin-10s, .reveal,
+  .snake-border, .snake-gap, .snake-loop, .snake-spin, .page-enter, .log-particle, .log-anchor, .log-sway, .log-bubble, .log-fish, .log-sparkle, .text-water, .ocean-bg {
     animation: none !important;
   }
+  .reveal { transition: none !important; }
 }
