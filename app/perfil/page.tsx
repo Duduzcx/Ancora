@@ -6,13 +6,14 @@ import { createClient } from '@/lib/supabase-client';
 import pkg from '@/package.json';
 import PermitirNotificacoes from '@/components/PermitirNotificacoes';
 import { easyReading, setEasyReading } from '@/lib/leitura';
+import { lightMode, setLightMode } from '@/lib/leve';
 import { noricaApi, type HealthReport, type OrgInfo } from '@/lib/norica-api';
 import { 
   User, Save, CheckCircle2, ArrowLeft, ShieldCheck, 
   Anchor, LifeBuoy, Mail, Calendar, 
   LogOut, Settings, Fingerprint, AlertCircle, Loader2,
   ChevronRight, BadgeCheck, Shield, Key, Sparkles,
-  ShipWheel, Compass, Waves, Camera, Crown, Trash2, Bell, Brain, ClipboardList, Building2, Volume2, Type } from 'lucide-react';
+  ShipWheel, Compass, Waves, Camera, Crown, Trash2, Bell, Brain, ClipboardList, Building2, Volume2, Type, Gauge } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import AnimatedBackground from '@/components/AnimatedBackground';
 import { getAuthState, useAuth } from '@/lib/auth-store';
@@ -241,7 +242,8 @@ export default function PerfilPage() {
   const [reminderBusy, setReminderBusy] = useState(false);
   const [notifKey, setNotifKey] = useState(0);
   const [easy, setEasy] = useState(false);
-  useEffect(() => { setEasy(easyReading()); }, []);
+  const [light, setLight] = useState(false);
+  useEffect(() => { setEasy(easyReading()); setLight(lightMode()); }, []);
   useEffect(() => {
     const r = getReminder();
     setReminder(r);
@@ -397,7 +399,8 @@ export default function PerfilPage() {
   };
 
   const leaveOrg = async () => {
-    setOrgBusy(true);
+    if (!window.confirm(`Sair de ${org?.name ?? 'a instituição'}? Você pode entrar de novo depois com o código.`)) return;
+    setOrgBusy(true); setOrgError(null);
     try {
       await noricaApi.orgLeave();
       setOrg(null);
@@ -742,6 +745,27 @@ export default function PerfilPage() {
           </span>
         </motion.button>
 
+        {/* Modo leve */}
+        <button
+          onClick={() => { const v = !light; setLight(v); setLightMode(v); }}
+          aria-pressed={light}
+          data-testid="modo-leve"
+          className="w-full flex items-center justify-between p-7 bg-white/5 border border-white/10 rounded-[2.5rem] shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] active:scale-[0.98] transition-transform"
+        >
+          <div className="flex items-center gap-4">
+             <div className="w-12 h-12 bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 rounded-2xl flex items-center justify-center">
+                <Gauge size={24} />
+             </div>
+             <div className="text-left">
+                <h3 className="text-sm font-black text-white uppercase tracking-tighter italic">Modo leve</h3>
+                <p className="text-[9px] font-black text-emerald-300 uppercase tracking-widest leading-none mt-1">Fundo parado, app mais rápido</p>
+             </div>
+          </div>
+          <span className={`w-12 h-7 rounded-full p-1 shrink-0 transition-colors ${light ? 'bg-emerald-500' : 'bg-white/15'}`}>
+            <span className={`block w-5 h-5 rounded-full bg-white transition-transform ${light ? 'translate-x-5' : ''}`} />
+          </span>
+        </button>
+
         {/* Memória da Nórica */}
         <motion.button 
           whileTap={{ scale: 0.96 }}
@@ -975,11 +999,9 @@ export default function PerfilPage() {
                       Abrir painel da instituição
                     </button>
                   )}
-                  {org.role === 'member' && (
-                    <button onClick={leaveOrg} disabled={orgBusy} className="w-full py-4 rounded-2xl bg-white/5 border border-white/10 text-white/60 font-black uppercase tracking-widest text-[10px]">
-                      Sair da instituição
-                    </button>
-                  )}
+                  <button onClick={leaveOrg} disabled={orgBusy} className="w-full py-4 rounded-2xl bg-white/5 border border-white/10 text-white/60 font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-2" data-testid="sair-instituicao">
+                    <LogOut size={14} /> Sair da instituição
+                  </button>
                 </div>
               ) : (
                 <div className="space-y-4">

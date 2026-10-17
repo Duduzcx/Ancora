@@ -552,19 +552,19 @@ function Convite({ info: initial, org, demo, members, onRenamed }: { info: OrgDe
         {info.plan === 'ativo' && <span className="shrink-0 px-3 py-1.5 rounded-full bg-emerald-500/15 text-emerald-300 text-[10px] font-black uppercase tracking-widest">Plano ativo</span>}
       </div>
       <div className="p-4 rounded-2xl bg-black/30 border border-white/10 flex items-center gap-3">
-        <div className="flex-1">
+        <div className="flex-1 min-w-0">
           <p className="text-[9px] font-black text-white/40 uppercase tracking-widest">Código para {people}</p>
-          <p className="text-2xl font-black tracking-[0.2em] text-amber-200" data-testid="codigo-instituicao">{info.code}</p>
+          <p className="text-xl font-black tracking-[0.12em] text-amber-200 break-all leading-tight" data-testid="codigo-instituicao">{info.code}</p>
         </div>
-        <button onClick={() => copy(info.code ?? '', 'code')} className="p-3 rounded-xl bg-white/5 border border-white/10 text-white/70" aria-label="Copiar código">{copied === 'code' ? <Check size={16} /> : <Copy size={16} />}</button>
+        <button onClick={() => copy(info.code ?? '', 'code')} className="shrink-0 w-10 h-10 rounded-xl bg-white/5 border border-white/10 text-white/70 flex items-center justify-center" aria-label="Copiar código">{copied === 'code' ? <Check size={15} /> : <Copy size={15} />}</button>
       </div>
       {!demo && (
         <button onClick={() => shareText(invite, `Nórica na ${org}`)} className="w-full py-3.5 rounded-2xl bg-amber-400 text-slate-950 text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2"><Share2 size={14} /> Enviar convite pronto</button>
       )}
       {info.adminCode && (
         <div className="flex items-center gap-3 text-[12px] text-white/55 font-semibold">
-          <p className="flex-1">Código da <b className="text-white/80">equipe</b> (coordenação, RH): <b className="text-white/80 tracking-widest">{info.adminCode}</b> — quem entra com ele vê o painel.</p>
-          <button onClick={() => copy(info.adminCode ?? '', 'team')} className="p-2 rounded-lg bg-white/5 border border-white/10 text-white/60" aria-label="Copiar código da equipe">{copied === 'team' ? <Check size={14} /> : <Copy size={14} />}</button>
+          <p className="flex-1 min-w-0 break-words">Código da <b className="text-white/80">equipe</b> (coordenação, RH): <b className="text-white/80 tracking-wider break-all">{info.adminCode}</b> — quem entra com ele vê o painel.</p>
+          <button onClick={() => copy(info.adminCode ?? '', 'team')} className="shrink-0 w-9 h-9 rounded-lg bg-white/5 border border-white/10 text-white/60 flex items-center justify-center" aria-label="Copiar código da equipe">{copied === 'team' ? <Check size={14} /> : <Copy size={14} />}</button>
         </div>
       )}
       {!demo && (

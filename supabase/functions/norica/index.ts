@@ -1810,6 +1810,11 @@ async function orgLeave(ctx: Ctx) {
     if (!o?.demo && (count ?? 0) > 1) await ctx.admin.from("org_members").delete().eq("org_id", m.org_id).eq("user_id", ctx.userId);
   }
   await leaveDemos(ctx);
+  // Única pessoa da equipe de uma instituição real: sair deixaria o painel sem ninguém.
+  const still = await myMembership(ctx, "admin");
+  if (still && !still.demo) {
+    throw new HttpError(409, `Você é a única pessoa da equipe de ${still.name}. Para sair, passe o código da equipe para alguém da coordenação/RH ou apague a instituição no painel (Ajustes).`);
+  }
   return { ok: true };
 }
 

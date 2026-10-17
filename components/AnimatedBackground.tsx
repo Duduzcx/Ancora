@@ -53,7 +53,7 @@ export const OceanBackground = React.memo(function OceanBackground({ subtle = fa
     <div className="fixed inset-0 -z-20 overflow-hidden pointer-events-none ocean-bg">
       {/* Sombra Tecnológica e Malha Abstrata se mexendo (só transform, na placa de vídeo) */}
       <div
-        className="absolute inset-[-50%] opacity-40 bg-drift"
+        className="absolute inset-[-20%] opacity-40 bg-drift"
         style={{
           backgroundImage: `
             radial-gradient(circle at 20% 30%, rgba(16, 185, 129, 0.15) 0px, transparent 40%),

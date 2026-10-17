@@ -422,9 +422,7 @@ html, body {
 /* Com transição nativa de tela (View Transitions), a página inteira já entra com efeito:
    os títulos não esmaecem de novo (o "esmaecer duas vezes" parecia piscar). */
 .page-enter { animation: none; }
-@supports not (view-transition-name: none) {
-  .page-fallback { animation: page-in 0.22s ease-out backwards; }
-}
+.page-fallback { animation: page-in 0.18s ease-out backwards; }
 
 /* Card que aparece depois (carta chegou, amigo mandou mensagem): sobe sem esmaecer */
 @keyframes card-rise { from { transform: translateY(12px) scale(0.985); } to { transform: none; } }
@@ -500,46 +498,19 @@ html.leitura-facil .anchor-float, html.leitura-facil .animate-bubble-rise, html.
 
 
 /* =====================================================================
-   Troca de tela: "maré" (View Transitions nativas do Android/Chrome).
-   O navegador tira uma foto da tela antiga e anima as duas na placa de vídeo:
-   a antiga recua e some, a nova sobe da água. Fundo do mar e barra de baixo ficam parados.
+   Rolagem leve: enquanto a pessoa rola, os enfeites animados do fundo pausam
+   (âncoras, bolhas, brilhos). O celular usa a força toda para a rolagem.
    ===================================================================== */
-:root { view-transition-name: none; }
-::view-transition { pointer-events: none; }
-::view-transition-old(.mare-sai) { animation: mare-sai 170ms cubic-bezier(0.4, 0, 1, 1) both; }
-::view-transition-new(.mare-entra) { animation: mare-entra 380ms cubic-bezier(0.22, 1, 0.36, 1) 40ms both; }
-@keyframes mare-sai { to { opacity: 0; transform: translateY(-16px) scale(0.965); } }
-@keyframes mare-entra { from { opacity: 0.25; transform: translateY(34px) scale(1.02); } }
-::view-transition-group(dock) { z-index: 100; animation-duration: 260ms; }
-::view-transition-group(mare-onda) { z-index: 90; animation: none; }
-::view-transition-old(mare-onda) { display: none; }
-::view-transition-new(mare-onda) { animation: none; }
+html.rolando .anchor-float, html.rolando .animate-bubble-rise, html.rolando .bg-drift, html.rolando .sea-shadow,
+html.rolando .shimmer-pass, html.rolando .snake-spin, html.rolando .flame-flicker, html.rolando .twinkle,
+html.rolando .shine-window, html.rolando .shine-glyphs { animation-play-state: paused !important; }
 
-/* Faixa de luz da água que atravessa a tela de baixo para cima a cada troca */
-.mare-onda {
-  position: fixed;
-  left: 0; right: 0; top: 0;
-  height: 100dvh;
-  pointer-events: none;
-  z-index: 60;
-  view-transition-name: mare-onda;
-  overflow: hidden;
-}
-.mare-onda::before {
-  content: '';
-  position: absolute;
-  left: -10%; right: -10%;
-  height: 38%;
-  top: 100%;
-  background: radial-gradient(60% 50% at 50% 50%, rgba(45, 212, 191, 0.16), rgba(56, 189, 248, 0.06) 55%, transparent 75%);
-  animation: mare-luz 700ms cubic-bezier(0.33, 1, 0.68, 1) both;
-  will-change: transform, opacity;
-}
-@keyframes mare-luz {
-  0% { transform: translateY(0) scaleY(0.6); opacity: 0; }
-  25% { opacity: 1; }
-  100% { transform: translateY(-140dvh) scaleY(1.2); opacity: 0; }
-}
+/* Celular mais simples (poucos núcleos ou pouca memória): fundo parado e sem brilhos contínuos.
+   As cores, os cards e as animações de toque continuam iguais. */
+html.leve .anchor-float, html.leve .animate-bubble-rise, html.leve .bg-drift, html.leve .sea-shadow,
+html.leve .shimmer-pass, html.leve .twinkle { animation: none !important; }
+html.leve .animate-bubble-rise { display: none; }
+html.leve .snake-spin { will-change: auto; }
 
 /* =====================================================================
    Abertura do app
@@ -609,8 +580,7 @@ html.leitura-facil .anchor-float, html.leitura-facil .animate-bubble-rise, html.
 @keyframes abertura-frase { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
 @media (prefers-reduced-motion: reduce) {
-  ::view-transition-old(*), ::view-transition-new(*), ::view-transition-group(*) { animation-duration: 0s !important; animation-delay: 0s !important; }
-  .mare-onda::before, .abertura-bolha, .abertura-anel, .abertura-luz { animation: none !important; opacity: 0; }
+  .abertura-bolha, .abertura-anel, .abertura-luz { animation: none !important; opacity: 0; }
   .abertura-ancora, .abertura-nome span, .abertura-frase { animation: none !important; }
   .card-in { animation: none !important; }
 }

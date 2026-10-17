@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, ViewTransition } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase-client';
 import { usePathname, useRouter } from 'next/navigation';
 import { App } from '@capacitor/app';
@@ -15,6 +15,7 @@ import { flushOutbox, startOfflineSync } from '@/lib/offline-sync';
 import { reportError, reportSlow } from '@/lib/error-report';
 import { sampleFps } from '@/lib/perf-monitor';
 import { applyEasyReading } from '@/lib/leitura';
+import { applyLightMode, pauseDecorOnScroll } from '@/lib/leve';
 import { GlobalBackgroundContext, OceanBackground } from '@/components/AnimatedBackground';
 import { CHECKIN_ACTIONS, countAppOpen, listenReminderTaps, refreshEngagementNotifications } from '@/lib/reminder';
 
@@ -32,14 +33,10 @@ const isChunkError = (err: any, msg = '') =>
 
 export default function LayoutWrapper({ children }: { children: React.ReactNode }) {
   const [isMounted, setIsMounted] = useState(false);
-  // Conta as trocas de tela (a faixa de luz só aparece depois da primeira tela).
-  const navCount = useRef(0);
-  const lastPath = useRef<string | null>(null);
   // Login compartilhado: abre na hora com a sessão salva no aparelho.
   const { session, ready: authReady } = useAuth();
   const [loading, setLoading] = useState(true);
   const pathname = usePathname();
-  if (lastPath.current !== pathname) { if (lastPath.current !== null) navCount.current++; lastPath.current = pathname; }
   const router = useRouter();
   const pathnameRef = useRef(pathname);
   const openedRef = useRef(false);
@@ -68,6 +65,8 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
   useEffect(() => {
     setIsMounted(true);
     applyEasyReading();
+    applyLightMode();
+    pauseDecorOnScroll();
     countAppOpen();
     log(`Montado! Pathname inicial: "${pathname}"`);
 
@@ -175,8 +174,11 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
   useEffect(() => {
     if (!userId) return;
     const t = setTimeout(() => {
-      ['/porto/', '/farol/', '/perfil/', '/log/', '/arena/', '/cofre/', '/respiracao/', '/planos/', '/noite/', '/exercicios/', '/trilhas/', '/cartas/', '/terapia/', '/amigos/', '/calma/', '/mural/', '/datas/', '/movimento/', '/toque/', '/hoje/', '/meditacoes/', '/fase/']
-        .forEach((href) => { try { router.prefetch(href); } catch (_e) {} });
+      // Uma tela por vez, quando o celular está livre (antes eram 22 de uma vez, o que travava a abertura).
+      const routes = ['/porto/', '/perfil/', '/farol/', '/exercicios/', '/log/', '/hoje/', '/amigos/', '/respiracao/', '/meditacoes/', '/cofre/', '/planos/', '/noite/', '/trilhas/', '/calma/', '/cartas/', '/terapia/', '/mural/', '/datas/', '/movimento/', '/toque/', '/fase/', '/arena/'];
+      const idle = (cb: () => void) => ((window as any).requestIdleCallback ? (window as any).requestIdleCallback(cb, { timeout: 2500 }) : setTimeout(cb, 300));
+      const next = (i: number) => { if (i >= routes.length) return; idle(() => { try { router.prefetch(routes[i]); } catch (_e) {} setTimeout(() => next(i + 1), 250); }); };
+      setTimeout(() => next(0), 2500);
       warmUpServer(userId);
       startOfflineSync(); // envia Logs/humor marcados sem internet
       refreshEngagementNotifications().catch(() => {}); // resumo de domingo e "sentimos sua falta"
@@ -198,15 +200,11 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
           <div className="min-h-[100dvh] w-full relative z-0 flex flex-col">
             {/* Fundo do mar único e fixo: não é recriado ao trocar de tela */}
             {globalBg && <OceanBackground subtle={!LIVELY_BG.some((p) => pathname?.startsWith(p))} />}
-            {/* Troca de tela "maré": a tela antiga recua e a nova sobe da água (View Transitions, na placa de vídeo).
-                Em celulares sem suporte, entra só com um esmaecer rápido. */}
-            <ViewTransition key={pathname} enter="mare-entra" exit="mare-sai" default="none">
-              <div className="flex-1 w-full page-fallback">
-                {children}
-              </div>
-            </ViewTransition>
-            {/* Faixa de luz que atravessa a tela a cada troca (não aparece ao abrir o app) */}
-            {navCount.current > 0 && <div key={`onda-${pathname}`} className="mare-onda" aria-hidden="true" />}
+            {/* Troca de tela leve: a tela nova surge com um esmaecer curto (só opacidade, na placa de vídeo).
+                A transição com "foto" das telas (View Transitions) pesava demais nos celulares mais simples. */}
+            <div key={pathname} className="flex-1 w-full page-fallback">
+              {children}
+            </div>
             <NavigationDock />
           </div>
         </GlobalBackgroundContext.Provider>
