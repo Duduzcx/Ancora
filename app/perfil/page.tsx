@@ -34,24 +34,26 @@ function hiResAvatar(url: string | null | undefined, size = 512): string | null 
 
 type CachedProfile = { name: string; birth: string | null };
 
-// Componente para efeito de digitação lenta
+// Componente para efeito de digitação lenta. Digita só na primeira visita da sessão:
+// ao voltar ao Perfil (ou quando o nome chega do servidor) o nome já aparece pronto, sem "piscar".
+let nameTyped = false;
 const TypingName = ({ text }: { text: string }) => {
-  const [displayedText, setDisplayedText] = useState("");
-  
+  const [displayedText, setDisplayedText] = useState(() => (nameTyped ? text : ""));
+
   useEffect(() => {
+    if (nameTyped) { setDisplayedText(text); return; }
     let i = 0;
-    setDisplayedText("");
     const interval = setInterval(() => {
       setDisplayedText(text.slice(0, i + 1));
       i++;
-      if (i >= text.length) clearInterval(interval);
+      if (i >= text.length) { clearInterval(interval); nameTyped = true; }
     }, 70); // digitação suave, sem fazer a pessoa esperar
     return () => clearInterval(interval);
   }, [text]);
 
   return (
     <motion.span 
-      initial={{ opacity: 0 }} 
+      initial={false} 
       animate={{ opacity: 1 }} 
       className="inline-block"
     >

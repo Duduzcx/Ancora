@@ -198,7 +198,7 @@ export default function ArenaPage() {
   return (
     <main className="fixed inset-0 flex flex-col overflow-hidden bg-transparent z-10">
       <AnimatedBackground subtle />
-      <AnimatePresence mode="wait">
+      <AnimatePresence mode="wait" initial={false}>
         {!selected ? (
           <motion.div 
             key="grid"

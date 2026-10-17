@@ -190,7 +190,7 @@ export default function PlanoSegurancaPage() {
 function Section({ icon: Icon, title, hint, children }: { icon: any; title: string; hint: string; children: React.ReactNode }) {
   return (
     <motion.section
-      initial={{ opacity: 0, y: 10 }}
+      initial={false}
       animate={{ opacity: 1, y: 0 }}
       className="bg-white/5 border border-white/10 rounded-[2.5rem] p-6 space-y-4"
     >

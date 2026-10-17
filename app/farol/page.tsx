@@ -227,7 +227,7 @@ export default function FarolPage() {
       {/* Efeito de Radar e Neblina Dinâmica */}
       <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
         {status.isFoggy && (
-          <div className="absolute inset-0 bg-[#cbd5e1]/10 backdrop-blur-[2px] animate-pulse mix-blend-overlay" />
+          <div className="absolute inset-0 bg-[#cbd5e1]/[0.06]" />
         )}
         <div 
           className="absolute top-1/2 left-1/2 w-[200%] h-[200%] bg-gradient-to-tr from-emerald-500/5 via-transparent to-transparent opacity-20 animate-radar"

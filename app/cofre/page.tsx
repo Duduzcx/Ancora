@@ -117,7 +117,7 @@ export default function CofrePage() {
         ))}
       </div>
 
-      <AnimatePresence mode="wait">
+      <AnimatePresence mode="wait" initial={false}>
         {!hasStarted ? (
           <motion.div 
             key="intro"

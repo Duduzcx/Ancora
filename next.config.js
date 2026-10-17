@@ -5,6 +5,10 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  experimental: {
+    // Troca de tela com animação nativa (View Transitions)
+    viewTransition: true,
+  },
   typescript: {
     ignoreBuildErrors: true,
   },

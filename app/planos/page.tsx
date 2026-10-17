@@ -170,7 +170,7 @@ export default function PlanosPage() {
 
         {info?.launch && !isPaidPro && (
           <motion.div
-            initial={{ opacity: 0, y: 10 }}
+            initial={false}
             animate={{ opacity: 1, y: 0 }}
             className="bg-emerald-500/10 border border-emerald-500/20 rounded-[2.5rem] p-6 flex items-center gap-4 shadow-xl"
           >
@@ -186,7 +186,7 @@ export default function PlanosPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* PRO — primeiro no celular */}
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={false}
             animate={{ opacity: 1, y: 0 }}
             className="bg-gradient-to-br from-emerald-950/80 to-[#0b0f19] border border-emerald-500/30 rounded-[3rem] p-8 shadow-2xl space-y-6 relative overflow-hidden md:order-2"
           >
@@ -254,7 +254,7 @@ export default function PlanosPage() {
 
           {/* GRATUITO */}
           <motion.div
-            initial={{ opacity: 0, y: 20 }}
+            initial={false}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
             className="bg-white/5 border border-white/10 rounded-[3rem] p-8 shadow-xl space-y-6 md:order-1"

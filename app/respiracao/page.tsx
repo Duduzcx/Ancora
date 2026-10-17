@@ -86,7 +86,7 @@ export default function RespiracaoPage() {
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(4,47,46,0.5)_0%,transparent_70%)] pointer-events-none z-0" />
       
       <motion.div
-        initial={{ opacity: 0 }}
+        initial={false}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.5 }}
         className="w-full max-w-md flex flex-col justify-between items-center h-full flex-1 z-10"

@@ -1,13 +1,12 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, ViewTransition } from 'react';
 import { supabase } from '@/lib/supabase-client';
 import { usePathname, useRouter } from 'next/navigation';
-import { Anchor } from 'lucide-react';
 import { App } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
-import { motion, AnimatePresence } from 'framer-motion';
 import NavigationDock from '@/components/NavigationDock';
+import AberturaNorica from '@/components/AberturaNorica';
 import ConsentGate from '@/components/ConsentGate';
 import Onboarding from '@/components/Onboarding';
 import { useAuth } from '@/lib/auth-store';
@@ -33,10 +32,14 @@ const isChunkError = (err: any, msg = '') =>
 
 export default function LayoutWrapper({ children }: { children: React.ReactNode }) {
   const [isMounted, setIsMounted] = useState(false);
+  // Conta as trocas de tela (a faixa de luz só aparece depois da primeira tela).
+  const navCount = useRef(0);
+  const lastPath = useRef<string | null>(null);
   // Login compartilhado: abre na hora com a sessão salva no aparelho.
   const { session, ready: authReady } = useAuth();
   const [loading, setLoading] = useState(true);
   const pathname = usePathname();
+  if (lastPath.current !== pathname) { if (lastPath.current !== null) navCount.current++; lastPath.current = pathname; }
   const router = useRouter();
   const pathnameRef = useRef(pathname);
   const openedRef = useRef(false);
@@ -194,34 +197,21 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
           <div className="min-h-[100dvh] w-full relative z-0 flex flex-col">
             {/* Fundo do mar único e fixo: não é recriado ao trocar de tela */}
             {globalBg && <OceanBackground subtle={!LIVELY_BG.some((p) => pathname?.startsWith(p))} />}
-            {/* Troca de tela: só opacidade (não mexe na posição de nada fixo na tela) */}
-            <div key={pathname} className="flex-1 w-full page-enter">
-              {children}
-            </div>
+            {/* Troca de tela "maré": a tela antiga recua e a nova sobe da água (View Transitions, na placa de vídeo).
+                Em celulares sem suporte, entra só com um esmaecer rápido. */}
+            <ViewTransition key={pathname} enter="mare-entra" exit="mare-sai" default="none">
+              <div className="flex-1 w-full page-fallback">
+                {children}
+              </div>
+            </ViewTransition>
+            {/* Faixa de luz que atravessa a tela a cada troca (não aparece ao abrir o app) */}
+            {navCount.current > 0 && <div key={`onda-${pathname}`} className="mare-onda" aria-hidden="true" />}
             <NavigationDock />
           </div>
         </GlobalBackgroundContext.Provider>
       )}
-      {/* Tela de abertura: some por cima do conteúdo já desenhado (antes a tela esperava a animação terminar). */}
-      <AnimatePresence>
-        {loading && (
-          <motion.div
-            key="loader"
-            initial={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.25, ease: "easeOut" }}
-            className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-[#021013]"
-          >
-            <div className="relative mb-8">
-              <div className="w-24 h-24 bg-emerald-500/10 rounded-[2.5rem] flex items-center justify-center relative overflow-hidden border border-white/10">
-                <div className="absolute inset-0 bg-emerald-500/20 animate-pulse" />
-                <Anchor className="text-emerald-400 animate-bounce relative z-10" size={56} strokeWidth={2.5} />
-              </div>
-            </div>
-            <p className="text-[10px] font-black text-emerald-400 uppercase tracking-[0.5em] animate-pulse">Ancorando...</p>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Abertura animada (uma vez por abertura do app); some quando o app está pronto */}
+      <AberturaNorica ready={!loading} />
       {/* Consentimento LGPD para dados emocionais (uma vez por conta) */}
       {!isPublic && <ConsentGate userId={session?.user?.id ?? null} />}
       {/* Começo guiado (uma vez por conta, depois do consentimento) */}

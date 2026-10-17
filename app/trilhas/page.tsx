@@ -72,7 +72,7 @@ export default function TrilhasPage() {
               </div>
             </div>
 
-            <AnimatePresence mode="wait">
+            <AnimatePresence mode="wait" initial={false}>
               {info.finished ? (
                 <motion.div key="fim" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
                   <h2 className="text-2xl font-black tracking-tight">Você completou os 7 dias. 🎉</h2>

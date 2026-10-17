@@ -52,3 +52,7 @@ scratch/
 supabase/.temp/
 supabase/.branches/
 supabase/tests/relatorios/
+
+# Firebase: chave do servidor nunca vai para o git
+chave-firebase*.json
+*firebase-adminsdk*.json

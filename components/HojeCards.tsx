@@ -14,7 +14,7 @@ import { getAuthState } from '@/lib/auth-store';
 import { noricaApi, type FriendsState, type OrgCampaign, type OrgInfo } from '@/lib/norica-api';
 import { CAMPAIGN_TEMPLATES } from '@/lib/campanhas';
 
-const card = 'w-full p-6 rounded-3xl border text-left flex items-center gap-4 shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] active:scale-[0.98] transition-transform page-enter';
+const card = 'w-full p-6 rounded-3xl border text-left flex items-center gap-4 shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] active:scale-[0.98] transition-transform card-in';
 const DISMISS_KEY = 'norica-campanhas-vistas';
 
 export default function HojeCards() {
@@ -113,7 +113,7 @@ export default function HojeCards() {
 
       {letter && (
         <button onClick={() => router.push('/cartas/')} className={`${card} bg-gradient-to-br from-rose-950/60 to-[#0b0f19] border-rose-300/20`} data-testid="carta-card">
-          <div className="w-14 h-14 rounded-2xl bg-rose-400/15 text-rose-200 flex items-center justify-center shrink-0"><Mail size={26} className="animate-pulse" /></div>
+          <div className="w-14 h-14 rounded-2xl bg-rose-400/15 text-rose-200 flex items-center justify-center shrink-0"><Mail size={26} className="css-tilt" /></div>
           <div className="flex-1">
             <p className="text-[9px] font-black text-rose-300/80 uppercase tracking-[0.3em]">Carta para o futuro</p>
             <p className="text-base font-black text-white tracking-tight leading-snug">Uma carta sua chegou. Hoje é o dia de ler. 💌</p>

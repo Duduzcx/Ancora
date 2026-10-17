@@ -343,9 +343,8 @@ export default function LogPage() {
       </div>
 
       <motion.div
-        initial={{ opacity: 0 }}
+        initial={false}
         animate={{ opacity: 1 }}
-        transition={{ duration: 0.2, ease: "linear" }}
         className="flex-1 overflow-y-auto w-full custom-scrollbar overscroll-contain p-4 pt-[calc(env(safe-area-inset-top,64px)+3rem)] md:p-8 md:pt-32 lg:p-12 lg:pt-32 pb-24 relative z-10"
       >
         <div className="max-w-[1400px] mx-auto space-y-8">

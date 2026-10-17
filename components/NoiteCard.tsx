@@ -19,7 +19,7 @@ export default function NoiteCard() {
     <button
       onClick={() => router.push('/noite/')}
       data-testid="noite-card" data-night={night ? "1" : "0"}
-      className="w-full group p-6 rounded-3xl bg-gradient-to-br from-indigo-950/70 to-[#0b0f19] border border-indigo-400/15 active:scale-[0.98] transition-transform text-left flex items-center gap-4 shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] page-enter"
+      className="w-full group p-6 rounded-3xl bg-gradient-to-br from-indigo-950/70 to-[#0b0f19] border border-indigo-400/15 active:scale-[0.98] transition-transform text-left flex items-center gap-4 shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] card-in"
     >
       <div className="w-14 h-14 rounded-2xl bg-indigo-500/15 text-indigo-200 flex items-center justify-center shrink-0"><Moon size={26} /></div>
       <div className="flex-1">

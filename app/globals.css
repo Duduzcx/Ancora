@@ -422,10 +422,19 @@ html, body {
   from { opacity: 0.4; }
   to { opacity: 1; }
 }
-.page-enter { animation: page-in 0.22s ease-out backwards; }
+/* Com transição nativa de tela (View Transitions), a página inteira já entra com efeito:
+   os títulos não esmaecem de novo (o "esmaecer duas vezes" parecia piscar). */
+.page-enter { animation: none; }
+@supports not (view-transition-name: none) {
+  .page-fallback { animation: page-in 0.22s ease-out backwards; }
+}
+
+/* Card que aparece depois (carta chegou, amigo mandou mensagem): sobe sem esmaecer */
+@keyframes card-rise { from { transform: translateY(12px) scale(0.985); } to { transform: none; } }
+.card-in { animation: card-rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) backwards; }
 
 /* Cards entrando um após o outro (Perfil, Farol): CSS na GPU, sem JavaScript */
-.stagger-in > * { animation: page-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) backwards; }
+.stagger-in > * { animation: card-rise 0.55s cubic-bezier(0.22, 1, 0.36, 1) backwards; }
 .stagger-in > *:nth-child(2) { animation-delay: 0.04s; }
 .stagger-in > *:nth-child(3) { animation-delay: 0.08s; }
 .stagger-in > *:nth-child(4) { animation-delay: 0.12s; }
@@ -491,3 +500,120 @@ html.leitura-facil [class*="tracking-[0."], html.leitura-facil .tracking-widest 
 html.leitura-facil .italic { font-style: normal !important; }
 html.leitura-facil *:not(.animate-spin):not(.animate-spin *), html.leitura-facil *::before, html.leitura-facil *::after { animation-iteration-count: 1 !important; }
 html.leitura-facil .anchor-float, html.leitura-facil .animate-bubble-rise, html.leitura-facil .bg-drift, html.leitura-facil .sea-shadow, html.leitura-facil .shine-window { animation: none !important; }
+
+
+/* =====================================================================
+   Troca de tela: "maré" (View Transitions nativas do Android/Chrome).
+   O navegador tira uma foto da tela antiga e anima as duas na placa de vídeo:
+   a antiga recua e some, a nova sobe da água. Fundo do mar e barra de baixo ficam parados.
+   ===================================================================== */
+:root { view-transition-name: none; }
+::view-transition { pointer-events: none; }
+::view-transition-old(.mare-sai) { animation: mare-sai 170ms cubic-bezier(0.4, 0, 1, 1) both; }
+::view-transition-new(.mare-entra) { animation: mare-entra 400ms cubic-bezier(0.22, 1, 0.36, 1) 60ms both; }
+@keyframes mare-sai { to { opacity: 0; transform: translateY(-16px) scale(0.965); } }
+@keyframes mare-entra { from { opacity: 0; transform: translateY(34px) scale(1.02); } }
+::view-transition-group(dock) { z-index: 100; animation-duration: 260ms; }
+::view-transition-group(mare-onda) { z-index: 90; animation: none; }
+::view-transition-old(mare-onda) { display: none; }
+::view-transition-new(mare-onda) { animation: none; }
+
+/* Faixa de luz da água que atravessa a tela de baixo para cima a cada troca */
+.mare-onda {
+  position: fixed;
+  left: 0; right: 0; top: 0;
+  height: 100dvh;
+  pointer-events: none;
+  z-index: 60;
+  view-transition-name: mare-onda;
+  overflow: hidden;
+}
+.mare-onda::before {
+  content: '';
+  position: absolute;
+  left: -10%; right: -10%;
+  height: 38%;
+  top: 100%;
+  background: radial-gradient(60% 50% at 50% 50%, rgba(45, 212, 191, 0.16), rgba(56, 189, 248, 0.06) 55%, transparent 75%);
+  animation: mare-luz 700ms cubic-bezier(0.33, 1, 0.68, 1) both;
+  will-change: transform, opacity;
+}
+@keyframes mare-luz {
+  0% { transform: translateY(0) scaleY(0.6); opacity: 0; }
+  25% { opacity: 1; }
+  100% { transform: translateY(-140dvh) scaleY(1.2); opacity: 0; }
+}
+
+/* =====================================================================
+   Abertura do app
+   ===================================================================== */
+.abertura { position: fixed; inset: 0; z-index: 9999; overflow: hidden; }
+.abertura-agua {
+  position: absolute; inset: 0;
+  background: radial-gradient(120% 80% at 50% 38%, #06343a 0%, #031c22 45%, #021013 100%);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  transition: transform 800ms cubic-bezier(0.65, 0, 0.35, 1);
+  will-change: transform;
+}
+.abertura.is-leaving .abertura-agua { transform: translateY(calc(-100% - 130px)); }
+.abertura.is-leaving .abertura-centro, .abertura.is-leaving .abertura-nome, .abertura.is-leaving .abertura-frase {
+  transition: transform 800ms cubic-bezier(0.65, 0, 0.35, 1), opacity 400ms ease-out;
+  transform: translateY(-60px); opacity: 0;
+}
+.abertura-onda { position: absolute; left: 0; top: 100%; width: 100%; height: 130px; }
+.abertura-luz {
+  position: absolute; width: 140vw; height: 140vw; max-width: 900px; max-height: 900px;
+  left: 50%; top: 38%; translate: -50% -50%;
+  background: radial-gradient(circle, rgba(45, 212, 191, 0.22) 0%, rgba(45, 212, 191, 0.06) 35%, transparent 65%);
+  animation: abertura-luz 2.4s ease-out both;
+}
+@keyframes abertura-luz { from { opacity: 0; transform: scale(0.6); } to { opacity: 1; transform: scale(1); } }
+.abertura-bolha {
+  position: absolute; bottom: -12px; border-radius: 9999px;
+  background: rgba(165, 243, 252, 0.35); box-shadow: 0 0 6px rgba(165, 243, 252, 0.5);
+  animation: abertura-bolha 3s ease-in both infinite;
+}
+@keyframes abertura-bolha {
+  0% { transform: translateY(0) translateX(0); opacity: 0; }
+  15% { opacity: 1; }
+  50% { transform: translateY(-50vh) translateX(6px); }
+  100% { transform: translateY(-105vh) translateX(-4px); opacity: 0; }
+}
+.abertura-centro { position: relative; width: 112px; height: 112px; display: flex; align-items: center; justify-content: center; }
+.abertura-anel {
+  position: absolute; inset: 0; border-radius: 9999px;
+  border: 1.5px solid rgba(94, 234, 212, 0.45);
+  animation: abertura-anel 1.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes abertura-anel { 0% { transform: scale(0.6); opacity: 0; } 8% { opacity: 0.9; } 100% { transform: scale(2.6); opacity: 0; } }
+.abertura-ancora {
+  position: relative; width: 112px; height: 112px; border-radius: 2.25rem;
+  display: flex; align-items: center; justify-content: center;
+  color: #5eead4;
+  background: linear-gradient(160deg, rgba(20, 184, 166, 0.22), rgba(6, 78, 59, 0.25));
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 0 60px rgba(45, 212, 191, 0.25), inset 0 0 24px rgba(45, 212, 191, 0.15);
+  animation: abertura-desce 900ms cubic-bezier(0.34, 1.56, 0.64, 1) 100ms both, abertura-balanca 3.2s ease-in-out 1s infinite;
+}
+@keyframes abertura-desce { from { transform: translateY(-90px) scale(0.7) rotate(-12deg); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes abertura-balanca { 0%, 100% { transform: rotate(0deg) translateY(0); } 50% { transform: rotate(-4deg) translateY(4px); } }
+.abertura-nome {
+  margin-top: 2rem; display: flex;
+  font-size: 3rem; font-weight: 900; letter-spacing: -0.04em; line-height: 1; color: #fff;
+  text-shadow: 0 0 30px rgba(45, 212, 191, 0.35);
+}
+.abertura-nome span { display: inline-block; animation: abertura-letra 700ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+@keyframes abertura-letra { from { transform: translateY(26px); opacity: 0; } to { transform: none; opacity: 1; } }
+.abertura-frase {
+  margin-top: 0.9rem; font-size: 11px; font-weight: 900; letter-spacing: 0.4em; text-transform: uppercase;
+  color: rgba(94, 234, 212, 0.75);
+  animation: abertura-frase 900ms ease-out 1.25s both;
+}
+@keyframes abertura-frase { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(*), ::view-transition-new(*), ::view-transition-group(*) { animation-duration: 0s !important; animation-delay: 0s !important; }
+  .mare-onda::before, .abertura-bolha, .abertura-anel, .abertura-luz { animation: none !important; opacity: 0; }
+  .abertura-ancora, .abertura-nome span, .abertura-frase { animation: none !important; }
+  .card-in { animation: none !important; }
+}

@@ -545,7 +545,7 @@ function PortoContent() {
       <div className="absolute top-6 left-20 right-20 z-40 flex justify-center items-center pointer-events-none">
         <motion.div 
           key={chatTitle}
-          initial={{ opacity: 0, y: -10 }}
+          initial={false}
           animate={{ opacity: 1, y: 0 }}
           className="bg-white/5 backdrop-blur-md border border-white/10 px-4 py-2.5 rounded-full shadow-sm max-w-full pointer-events-auto cursor-default"
         >
