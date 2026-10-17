@@ -79,7 +79,7 @@ export default function RespiracaoPage() {
   const ease = 'cubic-bezier(0.42, 0, 0.58, 1)';
 
   return (
-    <main className="min-h-[100dvh] bg-[#021013] relative flex flex-col items-center justify-between overflow-x-hidden py-12 px-6 select-none font-sans">
+    <main data-leve="" className="min-h-[100dvh] bg-[#021013] relative flex flex-col items-center justify-between overflow-x-hidden py-12 px-6 select-none font-sans">
       <AnimatedBackground subtle={true} />
       
       {/* Background radial soft ambient glow */}

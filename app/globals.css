@@ -376,7 +376,10 @@ html, body {
 
 /* ---------- Revelar ao rolar (IntersectionObserver + transição na GPU) ---------- */
 .reveal {
-  /* Sem esmaecer: os cards só deslizam um pouco ao entrar (o "sumir e aparecer" parecia piscar). */
+  /* Sem esmaecer: os cards só deslizam um pouco ao entrar (o "sumir e aparecer" parecia piscar).
+     A camada fica fixa na placa de vídeo do começo ao fim: criar e desfazer a camada no fim da
+     animação fazia o card ser redesenhado e "piscar" ao rolar a Início. */
+  will-change: translate;
   translate: 0 18px;
   transition: translate 0.5s cubic-bezier(0.22, 1, 0.36, 1);
   transition-delay: var(--reveal-delay, 0s);
@@ -407,7 +410,8 @@ html, body {
   translate: -50% -50%;
   opacity: 0;
 }
-.snake-ring.is-on .snake-spin { will-change: transform, opacity; animation: snake-spin 3s cubic-bezier(0.45, 0, 0.55, 1) forwards; }
+.snake-spin { will-change: transform, opacity; }
+.snake-ring.is-on .snake-spin { animation: snake-spin 3s cubic-bezier(0.45, 0, 0.55, 1) forwards; }
 @keyframes snake-spin {
   0% { transform: rotate(-30deg); opacity: 0; }
   12% { opacity: 1; }
@@ -617,3 +621,15 @@ html.leitura-facil .anchor-float, html.leitura-facil .animate-bubble-rise, html.
   .abertura-ancora, .abertura-nome span, .abertura-frase { animation: none !important; }
   .card-in { animation: none !important; }
 }
+
+/* =====================================================================
+   Telas leves (Início, Perfil, Logs, Farol, Respiração): os cards que rolam junto com a tela
+   não desfocam o fundo (o celular recalculava o desfoque a cada quadro da rolagem, sobre o mar
+   animado). Um fundo um pouco mais denso mantém o mesmo visual. Janelas fixas continuam com desfoque.
+   ===================================================================== */
+[data-leve] [class*="backdrop-blur"]:not(.fixed):not(.sticky) {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+[data-leve] .bg-white\/5[class*="backdrop-blur"]:not(.fixed) { background-color: rgb(255 255 255 / 0.075); }
+[data-leve] .bg-white\/10[class*="backdrop-blur"]:not(.fixed) { background-color: rgb(255 255 255 / 0.13); }

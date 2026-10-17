@@ -334,7 +334,7 @@ export default function LogPage() {
   if (!isMounted) return null;
 
   return (
-    <main className="flex flex-col h-[100dvh] overflow-hidden bg-transparent relative transition-all overscroll-none touch-pan-y">
+    <main data-leve="" className="flex flex-col h-[100dvh] overflow-hidden bg-transparent relative overscroll-none touch-pan-y">
       <AnimatedBackground subtle />
       
       {/* Background Watermark */}

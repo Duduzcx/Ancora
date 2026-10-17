@@ -437,7 +437,7 @@ export default function PerfilPage() {
   if (!isMounted) return null;
 
   return (
-    <main className="min-h-screen relative transition-all overflow-x-hidden pb-40 selection:bg-emerald-500/10 bg-transparent">
+    <main data-leve="" className="min-h-screen relative overflow-x-hidden pb-40 selection:bg-emerald-500/10 bg-transparent">
       <AnimatedBackground subtle />
       
       <AnimatePresence>

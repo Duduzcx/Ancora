@@ -312,7 +312,7 @@ export default function Home() {
 
   if (user) {
     return (
-      <main className="min-h-screen relative transition-all overflow-x-hidden pb-32 selection:bg-emerald-500/10 scroll-smooth">
+      <main data-leve="" className="min-h-screen relative overflow-x-hidden pb-32 selection:bg-emerald-500/10">
         <AnimatedBackground subtle />
         
         {/* Sombra Se Movendo Lentamente - Efeito Fundo do Mar */}
@@ -368,7 +368,7 @@ export default function Home() {
         </div>
 
         {/* Mood Section Wrapped in Card */}
-        <RevealOnScroll className="mx-6 mt-12 mb-10 relative z-20">
+        <RevealOnScroll className="mx-6 mt-12 mb-4 relative z-20">
           <div className="bg-slate-900/60 border border-white/10 rounded-[3rem] p-6 shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] overflow-hidden relative group">
             {/* Shimmer Effect */}
             <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent pointer-events-none shimmer-pass" />
@@ -473,14 +473,14 @@ export default function Home() {
         )}
 
       {/* Divisor Visual */}
-        <RevealOnScroll className="px-10 py-20 flex items-center gap-4">
+        <RevealOnScroll className="px-10 py-6 flex items-center gap-4">
            <div className="h-[1px] flex-1 bg-white/10"></div>
            <span className="text-[10px] font-black text-emerald-400/80 uppercase tracking-[0.6em] italic">Nórica</span>
            <div className="h-[1px] flex-1 bg-white/10"></div>
         </RevealOnScroll>
 
         {/* Modules Section */}
-        <div className="cards-grid px-6 mt-4 space-y-6 max-w-md mx-auto relative">
+        <div className="cards-grid px-6 mt-0 space-y-6 max-w-md mx-auto relative">
           
 
           <HojeCards />

@@ -220,7 +220,7 @@ export default function FarolPage() {
   const daysMissing = Math.max(0, 2 - displayLogs.length);
 
   return (
-    <div className="relative w-full h-[100dvh] overflow-y-auto flex flex-col bg-transparent font-sans">
+    <div data-leve="" className="relative w-full h-[100dvh] overflow-y-auto overscroll-contain flex flex-col bg-transparent font-sans">
       <AnimatedBackground subtle={false} />
       <div className="flex-1 flex flex-col p-4 pt-8 space-y-6 max-w-7xl w-full mx-auto relative z-10">
 

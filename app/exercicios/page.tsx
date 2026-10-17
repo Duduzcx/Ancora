@@ -65,11 +65,10 @@ export default function ExerciciosPage() {
                 <p className="text-white/55 font-bold text-sm leading-relaxed">Pequenas práticas para os momentos em que você precisa de um caminho.</p>
               </div>
               {CARDS.map((c) => (
-                <motion.button
+                <button
                   key={c.id}
-                  whileTap={{ scale: 0.97 }}
                   onClick={() => setActive(c.id)}
-                  className="w-full text-left p-6 bg-white/5 border border-white/10 rounded-[2.5rem] flex items-center gap-4"
+                  className="w-full text-left p-6 bg-white/5 border border-white/10 rounded-[2.5rem] flex items-center gap-4 active:scale-[0.97] transition-transform duration-150"
                 >
                   <div className={`w-14 h-14 rounded-2xl border flex items-center justify-center shrink-0 ${c.color}`}>
                     <c.icon size={24} />
@@ -80,7 +79,7 @@ export default function ExerciciosPage() {
                     <p className="text-[9px] font-black text-emerald-400 uppercase tracking-widest mt-2">{c.time}</p>
                   </div>
                   <ChevronRight size={18} className="text-white/30" />
-                </motion.button>
+                </button>
               ))}
               {[
                 { section: 'Para agora', items: [
@@ -104,11 +103,10 @@ export default function ExerciciosPage() {
                 <div key={group.section} className="space-y-3 pt-2">
                   <p className="text-[10px] font-black text-white/40 uppercase tracking-widest px-2">{group.section}</p>
                   {group.items.map((c) => (
-                    <motion.button
+                    <button
                       key={c.href}
-                      whileTap={{ scale: 0.97 }}
                       onClick={() => router.push(c.href)}
-                      className="w-full text-left p-6 bg-white/5 border border-white/10 rounded-[2.5rem] flex items-center gap-4"
+                      className="w-full text-left p-6 bg-white/5 border border-white/10 rounded-[2.5rem] flex items-center gap-4 active:scale-[0.97] transition-transform duration-150"
                     >
                       <div className={`w-14 h-14 rounded-2xl border flex items-center justify-center shrink-0 ${c.color}`}>
                         <c.icon size={24} />
@@ -119,7 +117,7 @@ export default function ExerciciosPage() {
                         <p className="text-[9px] font-black text-emerald-400 uppercase tracking-widest mt-2">{c.time}</p>
                       </div>
                       <ChevronRight size={18} className="text-white/30" />
-                    </motion.button>
+                    </button>
                   ))}
                 </div>
               ))}
