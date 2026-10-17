@@ -144,3 +144,68 @@ Rode antes e depois de mudar o prompt ou o modelo e compare as médias. O relat�
 - **Chat entre amigos** (`/amigos/chat/?pair=`): só entre duplas do foguinho; texto criptografado (`care_messages`), áudio de apoio de até 30 s no bucket privado `care-audio` (links temporários) que o amigo pode salvar na caixa de calma; risco detectado mostra o CVV 188 para quem escreveu e dicas de acolhimento para o amigo; respostas prontas; apagar conversa; bloquear/denunciar em um toque (`care_blocks`, `care_reports` com trecho criptografado).
 - **Foguinho de grupo** (3 a 6 pessoas, `care_groups`/`care_group_members`): a chama acende quando 60% marcam o dia. **Desafios leves em dupla** (`care_challenges`, 7 dias, conferidos pelos hábitos dos Logs). **Amigo sumido** (3+ dias sem marcar → "tá tudo bem?"). **Conquistas do mês** compartilhadas só se cada um ligar (nunca o humor).
 - **Push em tempo real (Firebase, opcional):** coloque `android/app/google-services.json` e `supabase secrets set FCM_SERVICE_ACCOUNT="$(cat chave-firebase.json)"`. Sem os dois, nada muda (o app não pede o token). Tokens em `push_tokens`; avisos na tela bloqueada nunca mostram o conteúdo.
+- **1.7.0 — instituições pelo app:** qualquer pessoa da direção/RH cria a instituição em Perfil → Instituição Parceira → Criar (`/instituicao/`), com 30 dias de teste (`organizations.plan/trial_until`). Recebe o código para alunos/funcionários e o **código da equipe** (`admin_code`, entra como quem vê o painel). Painel: convite pronto, novo código, renomear, apagar, **calendário de campanhas com um toque** (Janeiro Branco, volta às aulas, provas, sono, Setembro Amarelo, Dia da Saúde Mental, Outubro Rosa, Novembro Azul, fim de ano) e relatório mensal em PDF.
+- **Página de vendas** `/empresas/` (pública): demonstração do painel e formulário "agendar conversa" (ação `lead_create`, a única sem login; limite de 5 por hora por IP). Veja os contatos com `select * from leads order by created_at desc;`.
+- **Hoje em 1 minuto** (`/hoje/`), **Modo fase difícil** (`/fase/`, só no aparelho; a IA recebe `phase`), **Meditações guiadas** (`/meditacoes/`, textos em `supabase/functions/_shared/meditacoes.ts`; voz natural gerada uma vez por trecho no bucket `meditacoes`) e **widget "Foguinho"** na tela inicial (`FlameWidget.java`).
+- **Pausa de movimento** (`/movimento/`), lembretes opcionais de água, sol e movimento; sons de lareira, floresta e café; **leitura fácil** no Perfil; trilhas novas (quem cuida, pais de primeira viagem, LGBTQIA+) — **revisar o texto das trilhas com o(a) psicólogo(a) responsável antes de divulgar**.
+- Pendente: vídeos em Libras (precisam de intérprete).
+- Migration: `20261017120000_norica_amigos.sql`.
+
+## Logs e humor sem internet
+
+`lib/offline-sync.ts`: o que a pessoa marca vai primeiro para uma fila no aparelho e é enviado ao Supabase
+ao abrir o app, ao voltar para ele e quando a internet volta. Os Logs mostram "Salvo no aparelho" enquanto houver pendência.
+
+## Lembrete diário
+
+Notificação local (`@capacitor/local-notifications`), configurada em **Perfil → Lembrete Diário**.
+Uma mensagem por dia da semana, no horário escolhido. Ícone: `android/app/src/main/res/drawable/ic_stat_norica.xml`.
+
+## Erros e lentidão
+
+O app registra sozinho erros inesperados e lentidão (abertura > 4s, primeira palavra do Porto > 8s) na tabela `app_errors`
+(migration `20261016120000_norica_erros.sql`). Ninguém do app consegue ler a tabela. Para ver:
+
+```sql
+select * from app_errors_resumo;   -- últimos 30 dias, agrupado
+```
+
+## Verificar se tudo funciona
+
+No app: **Perfil → Verificar sistema** (rodapé). Testa banco, criptografia e os dois modelos de IA.
+
+## Planos e assinatura Pro (R$ 15,00/mês)
+
+- **Gratuito:** 30 mensagens/dia no Porto, 2 retornos/dia na Arena, Farol de 7 dias. S.O.S, Ajuda, Respiração, Logs e Cofre sem limite.
+- **Pro:** Porto e Arena sem limite diário (uso justo), Farol de 30 dias. Em breve: relatório mensal em PDF e novos cenários.
+- **Modo lançamento:** enquanto o secret `NORICA_LAUNCH_ALL_PRO` não for `false`, todos usam o Pro de graça e o botão mostra "Me avise quando abrir".
+
+### Ligar a cobrança pela Google Play
+
+1. **Play Console → Monetizar → Produtos → Assinaturas → Criar assinatura**
+   - ID do produto: `norica_pro_mensal`
+   - Plano básico: mensal, renovação automática, preço **R$ 15,00**. Ative o plano básico.
+2. **Google Cloud** (mesmo projeto ligado ao Play Console): ative a *Google Play Android Developer API* e crie uma **conta de serviço** com chave JSON.
+3. **Play Console → Usuários e permissões → Convidar** o e-mail da conta de serviço, com permissão de *Ver dados financeiros* e *Gerenciar pedidos e assinaturas* para o app.
+4. **Secrets**:
+   ```bash
+   supabase secrets set GOOGLE_SERVICE_ACCOUNT_JSON="$(cat conta-de-servico.json)"
+   supabase functions deploy norica
+   ```
+5. Publique a nova versão (o plugin de compras adiciona a permissão de cobrança): `npm install && npm run build:mobile`.
+6. Teste com uma conta em **Play Console → Configuração → Teste de licença** (compras de teste não são cobradas).
+7. Quando estiver tudo certo, ligue a cobrança: `supabase secrets set NORICA_LAUNCH_ALL_PRO=false`.
+
+Como funciona: a pessoa assina na Google Play → o app envia o token da compra → a função `norica` confere com o Google (inclusive se a compra é da mesma conta) e só então libera o Pro → o app confirma a compra. Renovações e cancelamentos são conferidos com o Google quando o período pago termina.
+
+Para dar Pro manualmente (parceiro, piloto), veja o comentário no fim de `supabase/migrations/20261015170000_norica_planos.sql`.
+
+## Manter o Supabase ativo
+
+O workflow `.github/workflows/supabase-keepalive.yml` faz uma consulta a cada 2 dias.
+Crie o secret `SUPABASE_ANON_KEY` em *Settings → Secrets and variables → Actions* e rode uma vez manualmente em *Actions*.
+
+## Segurança
+
+- Nunca versione keystores (`*.jks`, `*.keystore`, `aab/`) nem `.env` — já estão no `.gitignore`.
+- O keystore `aab/zcx` ficou no histórico público do repositório. Se for a chave de upload da Play Store, peça o reset da chave de upload no Play Console.

@@ -44,6 +44,10 @@ const SECTIONS: Section[] = [
           <li><strong>Chat entre amigos:</strong> as mensagens de texto ficam criptografadas e os áudios de apoio (até 30 segundos) ficam numa área privada, acessada só por links temporários. Qualquer um dos dois pode apagar a conversa inteira. Se uma mensagem indicar risco, quem escreveu vê na hora o contato do CVV (188).</li>
           <li><strong>Bloqueios e denúncias:</strong> ao denunciar alguém, a pessoa é bloqueada e guardamos o motivo e as últimas mensagens da conversa (criptografadas) só para nossa equipe analisar.</li>
           <li><strong>Notificações em tempo real:</strong> um código do seu aparelho (token do Firebase) para avisar de mensagens e carinhos dos amigos. O aviso na tela de bloqueio diz só quem mandou, nunca o conteúdo.</li>
+          <li><strong>Hoje em 1 minuto e modo fase difícil:</strong> o minuto do dia vira um registro normal de humor, hábito e diário. O modo fase difícil (e o motivo escolhido) fica só no seu celular; a Nórica recebe apenas o tipo da fase para responder com mais cuidado.</li>
+          <li><strong>Meditações guiadas:</strong> os áudios são os mesmos para todo mundo e não guardam nada sobre você.</li>
+          <li><strong>Instituições criadas no app:</strong> nome e tipo da instituição, quem criou e os códigos de convite. O painel continua mostrando só números somados de grupos com 5 pessoas ou mais.</li>
+          <li><strong>Página para escolas e empresas:</strong> quando alguém pede contato, guardamos nome, instituição, tamanho, WhatsApp/e-mail e a mensagem, só para responder a esse pedido.</li>
           <li><strong>Plano de segurança:</strong> o que você escrever, incluindo nomes e telefones das suas pessoas de confiança. Só são usados quando você mesmo(a) toca para avisá-las.</li>
           <li><strong>Avaliações e registros técnicos:</strong> nota e motivo quando você toca em 👍/👎 (não o texto da conversa), além de erros e lentidão (tela, versão do app e modelo do celular).</li>
         </ul>

@@ -6,6 +6,7 @@
 
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { reportError } from './error-report';
+import { getPhase } from './fase';
 
 export type ReminderSettings = {
   enabled: boolean; // lembrete diário
@@ -82,7 +83,15 @@ const POOL: ((c: PersonalContext) => { title: string; body: string })[] = [
   (c) => ({ title: 'Sábado sem pressa 🌿', body: 'Um momento só seu: como está o seu mar hoje?' }),
 ];
 
+const PHASE_POOL = [
+  'Passando só para lembrar: um dia de cada vez já é muito.',
+  'Hoje não precisa render. Se der, beba uma água e respire fundo.',
+  'Você não está sozinho nessa fase. A Nórica está aqui quando quiser.',
+  'Seja gentil com você hoje. O resto pode esperar.',
+];
 export function dailyMessage(date: Date, c: PersonalContext, dayIndex: number) {
+  // Modo fase difícil: lembretes mais leves, sem sequência nem metas.
+  if (getPhase()) return { title: `${hi(c.name)}, como você está? 💙`, body: PHASE_POOL[(date.getDate() + dayIndex) % PHASE_POOL.length] };
   const recentHardMood = c.lastMood && c.lastMood !== 'calmo' && Date.now() - c.lastMoodAt < 36 * 3600_000;
   if (dayIndex === 0 && recentHardMood) {
     return { title: `${hi(c.name)}, como você está hoje? 💙`, body: 'Passando para saber de você. Hoje pode ser mais leve — a Nórica está aqui.' };
@@ -348,7 +357,8 @@ export async function scheduleWeeklySummary() {
 
 /** Sequência dos Logs: amanhã às 19h30 lembra de manter a ofensiva (só a partir de 2 dias seguidos). */
 export async function scheduleStreak(streak: number) {
-  if (!getReminder().streak || streak < 2) return cancelOne(STREAK_ID);
+  // Fase difícil: nada de cobrar sequência.
+  if (!getReminder().streak || streak < 2 || getPhase()) return cancelOne(STREAK_ID);
   const at = new Date();
   at.setDate(at.getDate() + 1);
   at.setHours(19, 30, 0, 0);
@@ -359,7 +369,7 @@ export async function scheduleStreak(streak: number) {
 
 /** Cada vez que o app abre, empurra para daqui a 3 dias um "sentimos sua falta". */
 export async function scheduleComeback() {
-  if (!getReminder().comeback) return cancelOne(COMEBACK_ID);
+  if (!getReminder().comeback || getPhase()) return cancelOne(COMEBACK_ID);
   const at = new Date();
   at.setDate(at.getDate() + 3);
   at.setHours(19, 0, 0, 0);
@@ -467,12 +477,19 @@ export async function notificationStatus(): Promise<'granted' | 'denied' | 'prom
 // Permitir notificações direto no app
 // ---------------------------------------------------------------------
 
-type NoricaNotifyPlugin = { status(): Promise<{ enabled: boolean; sdk: number }>; openSettings(): Promise<void>; firebase?(): Promise<{ ready: boolean }> };
+type NoricaNotifyPlugin = { status(): Promise<{ enabled: boolean; sdk: number }>; openSettings(): Promise<void>; firebase?(): Promise<{ ready: boolean }>; setFlameWidget?(o: { count: string; title: string; sub: string; lit: boolean }): Promise<void> };
 let nativeNotify: NoricaNotifyPlugin | null = null;
 function notifyPlugin(): NoricaNotifyPlugin | null {
   if (!Capacitor.isNativePlatform() || !Capacitor.isPluginAvailable('NoricaNotify')) return null;
   if (!nativeNotify) nativeNotify = registerPlugin<NoricaNotifyPlugin>('NoricaNotify');
   return nativeNotify;
+}
+
+/** Atualiza o widget "Foguinho" da tela inicial (só no celular). */
+export async function setFlameWidget(o: { count: string; title: string; sub: string; lit: boolean }) {
+  const p = notifyPlugin();
+  if (!p?.setFlameWidget) return;
+  try { await withTimeout(p.setFlameWidget(o), NATIVE_TIMEOUT, 'widget foguinho'); } catch (_e) {}
 }
 
 /** true quando o app foi montado com o Firebase (google-services.json). Sem ele, o push fica desligado. */

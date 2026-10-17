@@ -7,9 +7,10 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Building2, Loader2, ShieldCheck, Users, TrendingUp, TrendingDown, Minus, Lock, AlertTriangle, Lightbulb, Plus, X, Download, Layers, Sparkles, Megaphone, FileText } from 'lucide-react';
-import { noricaApi, type CampaignKind, type OrgCampaign, type OrgDashboard, type OrgSector } from '@/lib/norica-api';
-import { CAMPAIGN_TEMPLATES } from '@/lib/campanhas';
+import { ArrowLeft, Building2, Loader2, Copy, Share2, RefreshCw, Settings, CalendarDays, Check, Trash2, ShieldCheck, Users, TrendingUp, TrendingDown, Minus, Lock, AlertTriangle, Lightbulb, Plus, X, Download, Layers, Sparkles, Megaphone, FileText } from 'lucide-react';
+import { noricaApi, type CampaignKind, type OrgCampaign, type OrgDashboard, type OrgDetails, type OrgSector } from '@/lib/norica-api';
+import { CAMPAIGN_TEMPLATES, nextWindow } from '@/lib/campanhas';
+import { shareText } from '@/lib/share-text';
 import { buildOrgReportPdf } from '@/lib/relatorio-instituicao';
 import { shareFile } from '@/lib/share-file';
 import { MOOD_COLOR } from '@/lib/farol';
@@ -76,6 +77,8 @@ export default function PainelPage() {
                 </p>
               </div>
             )}
+            {data.info && <Convite info={data.info} org={data.org} demo={!!data.demo} members={data.members} onRenamed={load} />}
+
             <div className="grid grid-cols-2 gap-3">
               <Tile label="Participantes" value={String(data.members)} hint="com o código da instituição" icon={Users} />
               <Tile label="Ativos na semana" value={cur ? String(cur.active) : '—'} hint={prev ? `semana anterior: ${prev.active}` : 'últimos 7 dias'} icon={TrendingUp} />
@@ -427,6 +430,20 @@ function Campanhas({ data }: { data: OrgDashboard }) {
     try { setList((await noricaApi.orgCampaignDelete(id)).campaigns); } catch (_e) {}
   };
   const today = plusDays(0);
+  const orgKind = data.info?.kind ?? 'empresa';
+  const ready = (Object.keys(CAMPAIGN_TEMPLATES) as CampaignKind[])
+    .map((k) => ({ k, t: CAMPAIGN_TEMPLATES[k], w: nextWindow(CAMPAIGN_TEMPLATES[k]) }))
+    .filter((x) => x.w && (!x.t.for || x.t.for.includes(orgKind)))
+    .sort((a, b) => a.w!.start.localeCompare(b.w!.start));
+  const scheduled = (k: CampaignKind, w: { start: string; end: string }) => list.some((c) => c.kind === k && c.ends_on >= w.start && c.starts_on <= w.end);
+  const [activating, setActivating] = useState<string | null>(null);
+  const activate = async (k: CampaignKind, w: { start: string; end: string }) => {
+    setActivating(k); setErr(null);
+    try {
+      const t = CAMPAIGN_TEMPLATES[k];
+      setList((await noricaApi.orgCampaignCreate({ kind: k, title: t.title, message: t.message, startsOn: w.start, endsOn: w.end })).campaigns);
+    } catch (e: any) { setErr(e?.message || 'Não foi possível ativar.'); } finally { setActivating(null); }
+  };
 
   return (
     <section className="bg-white/5 border border-white/10 rounded-[2.5rem] p-6 space-y-4" data-testid="campanhas">
@@ -459,8 +476,27 @@ function Campanhas({ data }: { data: OrgDashboard }) {
         </div>
       )}
 
+      <div className="space-y-2" data-testid="calendario-campanhas">
+        <p className="flex items-center gap-1.5 text-[10px] font-black text-white/40 uppercase tracking-widest"><CalendarDays size={12} /> Calendário pronto · ative com um toque</p>
+        <div className="flex gap-2 overflow-x-auto no-scrollbar -mx-6 px-6 pb-1">
+          {ready.map(({ k, t, w }) => {
+            const on = scheduled(k, w!);
+            return (
+              <div key={k} className="shrink-0 w-44 p-3 rounded-2xl bg-black/25 border border-white/5 space-y-2">
+                <p className="text-lg leading-none">{t.emoji}</p>
+                <p className="text-[12px] font-black text-white leading-tight">{t.label}</p>
+                <p className="text-[10px] font-bold text-white/40">{br(w!.start)} a {br(w!.end)}</p>
+                <button onClick={() => activate(k, w!)} disabled={on || activating === k} className={`w-full py-2 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-1 ${on ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-400 text-slate-950'}`} data-testid={`ativar-${k}`}>
+                  {activating === k ? <Loader2 size={11} className="animate-spin" /> : on ? <><Check size={11} /> Agendada</> : 'Ativar'}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       {list.length === 0 ? (
-        !open && <p className="text-sm text-white/45 font-semibold">Nenhuma campanha. Experimente "Semana de provas" ou "Setembro Amarelo".</p>
+        !open && <p className="text-sm text-white/45 font-semibold">Nenhuma campanha ainda. Ative uma do calendário ou crie a sua em "Nova".</p>
       ) : (
         <ul className="space-y-2">
           {list.map((c) => {
@@ -477,6 +513,77 @@ function Campanhas({ data }: { data: OrgDashboard }) {
             );
           })}
         </ul>
+      )}
+    </section>
+  );
+}
+
+
+function Convite({ info: initial, org, demo, members, onRenamed }: { info: OrgDetails; org: string; demo: boolean; members: number; onRenamed: () => void }) {
+  const router = useRouter();
+  const [info, setInfo] = useState(initial);
+  const [copied, setCopied] = useState<string | null>(null);
+  const [settings, setSettings] = useState(false);
+  const [name, setName] = useState(org);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => setInfo(initial), [initial]);
+  const people = info.kind === 'escola' ? 'alunos' : info.kind === 'empresa' ? 'funcionários' : 'participantes';
+  const invite = `${org} agora tem a Nórica, um app de apoio emocional 💚\n\n1. Baixe: https://play.google.com/store/apps/details?id=com.zcx.ancora\n2. Em Perfil → Instituição Parceira, digite o código: ${info.code}\n\nA instituição vê só números somados do grupo, nunca o que você escreve ou sente.`;
+  const copy = async (text: string, k: string) => { try { await navigator.clipboard.writeText(text); setCopied(k); setTimeout(() => setCopied(null), 2000); } catch (_e) {} };
+  const trial = info.plan === 'teste' && info.trialUntil ? Math.max(0, Math.round((Date.parse(`${info.trialUntil}T12:00:00`) - Date.parse(`${new Date().toLocaleDateString('en-CA')}T12:00:00`)) / 86400_000)) : null;
+  const newCode = async (team: boolean) => {
+    if (!window.confirm(team ? 'Gerar um novo código da equipe? O antigo para de funcionar.' : `Gerar um novo código para ${people}? Quem já entrou continua; o código antigo para de funcionar.`)) return;
+    setBusy(true); try { setInfo((await noricaApi.orgNewCode(team)).info); } catch (_e) {} finally { setBusy(false); }
+  };
+  const rename = async () => { setBusy(true); try { await noricaApi.orgRename(name.trim()); onRenamed(); setSettings(false); } catch (_e) {} finally { setBusy(false); } };
+  const remove = async () => {
+    if (!window.confirm(`Apagar ${org}? O painel, os setores e as campanhas somem. Os dados pessoais de cada um continuam só com cada um.`)) return;
+    setBusy(true); try { await noricaApi.orgDelete(); router.replace('/perfil/'); } catch (_e) { setBusy(false); }
+  };
+
+  return (
+    <section className="p-6 rounded-[2.5rem] bg-gradient-to-br from-amber-950/40 to-white/[0.03] border border-amber-300/20 space-y-4" data-testid="convite-instituicao">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-black text-white uppercase tracking-tighter">Convide o grupo</h2>
+          <p className="text-[11px] text-white/50 font-semibold mt-1">{members} {members === 1 ? 'pessoa entrou' : 'pessoas entraram'} com o código.{members < 5 && ' Os números aparecem a partir de 5 pessoas ativas.'}</p>
+        </div>
+        {trial !== null && !demo && <span className="shrink-0 px-3 py-1.5 rounded-full bg-emerald-500/15 text-emerald-300 text-[10px] font-black uppercase tracking-widest" data-testid="teste-gratis">Teste · {trial} {trial === 1 ? 'dia' : 'dias'}</span>}
+        {info.plan === 'ativo' && <span className="shrink-0 px-3 py-1.5 rounded-full bg-emerald-500/15 text-emerald-300 text-[10px] font-black uppercase tracking-widest">Plano ativo</span>}
+      </div>
+      <div className="p-4 rounded-2xl bg-black/30 border border-white/10 flex items-center gap-3">
+        <div className="flex-1">
+          <p className="text-[9px] font-black text-white/40 uppercase tracking-widest">Código para {people}</p>
+          <p className="text-2xl font-black tracking-[0.2em] text-amber-200" data-testid="codigo-instituicao">{info.code}</p>
+        </div>
+        <button onClick={() => copy(info.code ?? '', 'code')} className="p-3 rounded-xl bg-white/5 border border-white/10 text-white/70" aria-label="Copiar código">{copied === 'code' ? <Check size={16} /> : <Copy size={16} />}</button>
+      </div>
+      {!demo && (
+        <button onClick={() => shareText(invite, `Nórica na ${org}`)} className="w-full py-3.5 rounded-2xl bg-amber-400 text-slate-950 text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2"><Share2 size={14} /> Enviar convite pronto</button>
+      )}
+      {info.adminCode && (
+        <div className="flex items-center gap-3 text-[12px] text-white/55 font-semibold">
+          <p className="flex-1">Código da <b className="text-white/80">equipe</b> (coordenação, RH): <b className="text-white/80 tracking-widest">{info.adminCode}</b> — quem entra com ele vê o painel.</p>
+          <button onClick={() => copy(info.adminCode ?? '', 'team')} className="p-2 rounded-lg bg-white/5 border border-white/10 text-white/60" aria-label="Copiar código da equipe">{copied === 'team' ? <Check size={14} /> : <Copy size={14} />}</button>
+        </div>
+      )}
+      {!demo && (
+        <>
+          <button onClick={() => setSettings((v) => !v)} className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-white/40"><Settings size={12} /> Ajustes</button>
+          {settings && (
+            <div className="space-y-3 p-4 rounded-2xl bg-black/25 border border-white/5">
+              <div className="flex gap-2">
+                <input value={name} onChange={(e) => setName(e.target.value)} maxLength={80} className="flex-1 min-w-0 bg-black/30 border border-white/10 rounded-xl px-3 py-2.5 text-sm outline-none" aria-label="Nome da instituição" />
+                <button onClick={rename} disabled={busy || name.trim().length < 3} className="px-3 rounded-xl bg-white/10 text-[10px] font-black uppercase disabled:opacity-40">Salvar</button>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={() => newCode(false)} disabled={busy} className="py-2.5 rounded-xl bg-white/5 border border-white/10 text-[10px] font-black uppercase flex items-center justify-center gap-1.5"><RefreshCw size={11} /> Novo código</button>
+                <button onClick={() => newCode(true)} disabled={busy} className="py-2.5 rounded-xl bg-white/5 border border-white/10 text-[10px] font-black uppercase flex items-center justify-center gap-1.5"><RefreshCw size={11} /> Novo da equipe</button>
+              </div>
+              {info.owner && <button onClick={remove} disabled={busy} className="w-full py-2.5 rounded-xl text-rose-300/80 text-[10px] font-black uppercase flex items-center justify-center gap-1.5"><Trash2 size={11} /> Apagar instituição</button>}
+            </div>
+          )}
+        </>
       )}
     </section>
   );

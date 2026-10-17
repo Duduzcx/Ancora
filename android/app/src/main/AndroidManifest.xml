@@ -37,6 +37,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:scheme="com.zcx.norica" android:host="humor" />
                 <data android:scheme="com.zcx.norica" android:host="habito" />
+                <data android:scheme="com.zcx.norica" android:host="amigos" />
             </intent-filter>
         </activity>
         <receiver
@@ -49,6 +50,17 @@
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/mood_widget_info" />
+        </receiver>
+        <receiver
+            android:name=".FlameWidget"
+            android:exported="false"
+            android:label="@string/flame_widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/flame_widget_info" />
         </receiver>
         <provider
             android:name="androidx.core.content.FileProvider"

@@ -7,7 +7,8 @@
 import React, { useEffect, useState } from 'react';
 import { Anchor } from 'lucide-react';
 
-const MIN_MS = 1900;    // tempo mínimo da animação de entrada
+const MIN_MS = 1500;    // tempo mínimo da animação de entrada
+const SETTLE_MS = 350;  // espera a Início terminar de montar antes da cortina subir (sem travar)
 const EXIT_MS = 800;    // a cortina subindo
 const KEY = 'norica-abertura';
 const WORD = 'Nórica';
@@ -30,14 +31,22 @@ export default function AberturaNorica({ ready }: { ready: boolean }) {
     if (!show) return;
     try { sessionStorage.setItem(KEY, '1'); } catch (_e) {}
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    const t = setTimeout(() => setMinDone(true), reduce ? 500 : MIN_MS);
+    const t = setTimeout(() => setMinDone(true), reduce ? 400 : MIN_MS);
     return () => clearTimeout(t);
   }, [show]);
 
+  // A Início monta por baixo assim que o app fica pronto; a cortina só sobe depois que
+  // ela terminou de montar (a animação não divide o celular com o trabalho de montar a tela).
+  const [settled, setSettled] = useState(false);
   useEffect(() => {
-    if (!show || leaving || !(minDone && ready)) return;
-    setLeaving(true);
-  }, [minDone, ready, show, leaving]);
+    if (!ready) return;
+    const t = setTimeout(() => setSettled(true), SETTLE_MS);
+    return () => clearTimeout(t);
+  }, [ready]);
+  useEffect(() => {
+    if (!show || leaving || !(minDone && settled)) return;
+    requestAnimationFrame(() => requestAnimationFrame(() => setLeaving(true)));
+  }, [minDone, settled, show, leaving]);
 
   useEffect(() => {
     if (!leaving) return;

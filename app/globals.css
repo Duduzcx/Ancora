@@ -375,16 +375,9 @@ html, body {
 .log-sparkle { animation: log-sparkle 20s linear infinite; }
 
 /* ---------- Revelar ao rolar (IntersectionObserver + transição na GPU) ---------- */
-.reveal {
-  /* Sem esmaecer: os cards só deslizam um pouco ao entrar (o "sumir e aparecer" parecia piscar).
-     A camada fica fixa na placa de vídeo do começo ao fim: criar e desfazer a camada no fim da
-     animação fazia o card ser redesenhado e "piscar" ao rolar a Início. */
-  will-change: translate;
-  translate: 0 18px;
-  transition: translate 0.5s cubic-bezier(0.22, 1, 0.36, 1);
-  transition-delay: var(--reveal-delay, 0s);
-}
-.reveal.is-in { translate: none; }
+/* Revelar ao rolar desligado: no celular, cada card que deslizava ao aparecer piscava na
+   primeira rolagem da Início. Os cards já ficam no lugar, prontos (mais leve e sem pisca). */
+.reveal { translate: none; }
 
 /* ---------- Luz que gira na borda do card da vez (transform = GPU) ---------- */
 /* Anel sempre montado; a máscara deixa aparecer só a borda de 2px (o meio fica transparente). */
@@ -514,9 +507,9 @@ html.leitura-facil .anchor-float, html.leitura-facil .animate-bubble-rise, html.
 :root { view-transition-name: none; }
 ::view-transition { pointer-events: none; }
 ::view-transition-old(.mare-sai) { animation: mare-sai 170ms cubic-bezier(0.4, 0, 1, 1) both; }
-::view-transition-new(.mare-entra) { animation: mare-entra 400ms cubic-bezier(0.22, 1, 0.36, 1) 60ms both; }
+::view-transition-new(.mare-entra) { animation: mare-entra 380ms cubic-bezier(0.22, 1, 0.36, 1) 40ms both; }
 @keyframes mare-sai { to { opacity: 0; transform: translateY(-16px) scale(0.965); } }
-@keyframes mare-entra { from { opacity: 0; transform: translateY(34px) scale(1.02); } }
+@keyframes mare-entra { from { opacity: 0.25; transform: translateY(34px) scale(1.02); } }
 ::view-transition-group(dock) { z-index: 100; animation-duration: 260ms; }
 ::view-transition-group(mare-onda) { z-index: 90; animation: none; }
 ::view-transition-old(mare-onda) { display: none; }
@@ -631,5 +624,9 @@ html.leitura-facil .anchor-float, html.leitura-facil .animate-bubble-rise, html.
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
 }
-[data-leve] .bg-white\/5[class*="backdrop-blur"]:not(.fixed) { background-color: rgb(255 255 255 / 0.075); }
-[data-leve] .bg-white\/10[class*="backdrop-blur"]:not(.fixed) { background-color: rgb(255 255 255 / 0.13); }
+/* "Vidro fosco" sem desfoque: a cor média do mar + o branco de antes, quase opaca,
+   para as âncoras e bolhas do fundo não aparecerem através do card. */
+[data-leve] .bg-white\/5[class*="backdrop-blur"]:not(.fixed) { background-color: rgb(22 58 66 / 0.78); }
+[data-leve] .bg-white\/10[class*="backdrop-blur"]:not(.fixed) { background-color: rgb(28 56 64 / 0.82); }
+[data-leve] [class*="bg-emerald-500\/5"][class*="backdrop-blur"]:not(.fixed) { background-color: rgb(10 48 46 / 0.82); }
+[data-leve] [class*="bg-[#021418]"][class*="backdrop-blur"]:not(.fixed) { background-color: rgb(4 26 32 / 0.9); }

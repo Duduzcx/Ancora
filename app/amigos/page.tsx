@@ -14,6 +14,7 @@ import { firstName } from '@/lib/user-name';
 import { shareText, STORE_URL } from '@/lib/share-text';
 import PenseiEmVoce from '@/components/PenseiEmVoce';
 import GruposFoguinho from '@/components/GruposFoguinho';
+import { updateFlameWidget } from '@/lib/flame-widget';
 
 const NUDGE_TEXT = { apoio: 'te mandou apoio 💛', pensei: 'pensou em você 🌊', parabens: 'comemorou com você 🎉', sumido: 'perguntou se está tudo bem com você 💙' } as const;
 const CHALLENGE_OPTIONS: { kind: ChallengeKind; label: string }[] = [
@@ -46,7 +47,7 @@ export default function AmigosPage() {
   const [sent, setSent] = useState<string | null>(null);
   const [picking, setPicking] = useState<string | null>(null);
 
-  const apply = (s: FriendsState) => { if (!Array.isArray(s?.friends)) return; setState(s); cacheSet(uid, 'friends', s); };
+  const apply = (s: FriendsState) => { if (!Array.isArray(s?.friends)) return; setState(s); cacheSet(uid, 'friends', s); updateFlameWidget(s); };
   useEffect(() => {
     noricaApi.friendsList().then((s) => {
       apply(s);

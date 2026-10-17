@@ -1,6 +1,7 @@
 // @ts-nocheck
 "use client";
 
+import { getPhase } from '@/lib/fase';
 import React, { useState, useEffect, useRef, Suspense } from 'react';
 import { todaySensitiveNote } from '@/lib/datas';
 import { useSearchParams, useRouter } from 'next/navigation';
@@ -236,6 +237,7 @@ function PortoContent() {
       mood,
       feeling: searchParams.get('sentimento'),
       todayNote: todaySensitiveNote(),
+      phase: getPhase()?.kind ?? null,
       mode: chatModeRef.current as any,
       persona: (isClara ? 'clara' : 'norica') as 'clara' | 'norica',
       welcome: welcomeMsg?.content,

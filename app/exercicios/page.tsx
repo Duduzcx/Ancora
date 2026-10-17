@@ -7,8 +7,7 @@ import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import {
-  ArrowLeft, Eye, Hand, Ear, Flower2, Coffee, Sparkles, MessagesSquare, Loader2, CheckCircle2, Sword, Heart, LifeBuoy, ChevronRight, Moon, Waves, Route, Mail, CalendarClock, CalendarHeart, Trophy, Flame, PersonStanding,
-} from 'lucide-react';
+  ArrowLeft, Eye, Hand, Ear, Flower2, Coffee, Sparkles, MessagesSquare, Loader2, CheckCircle2, Sword, Heart, LifeBuoy, ChevronRight, Moon, Waves, Route, Mail, CalendarClock, CalendarHeart, Trophy, Flame, PersonStanding, Timer, Headphones, HeartHandshake } from 'lucide-react';
 import { noricaApi, type JournalEntry } from '@/lib/norica-api';
 import { HelpSheet } from '@/components/AjudaAgora';
 
@@ -83,6 +82,8 @@ export default function ExerciciosPage() {
               ))}
               {[
                 { section: 'Para agora', items: [
+                  { href: '/hoje/', title: 'Hoje em 1 minuto', desc: 'Seu mar, um cuidado e uma frase no diário, numa tela só.', time: '1 min', icon: Timer, color: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/20' },
+                  { href: '/meditacoes/', title: 'Meditações guiadas', desc: 'Com a voz da Nórica e o som do mar: ansiedade, sono, corpo e gentileza.', time: '3–6 min', icon: Headphones, color: 'text-teal-300 bg-teal-500/10 border-teal-500/20' },
                   { href: '/calma/', title: 'Caixa de calma', desc: 'Frases, fotos, músicas e áudios de quem você ama. Abre primeiro no S.O.S.', time: 'sempre à mão', icon: Heart, color: 'text-amber-200 bg-amber-400/10 border-amber-300/20' },
                   { href: '/toque/', title: 'Acalmar só com toques', desc: 'Para quando não dá vontade de escrever: respirar segurando o círculo ou estourar bolhas.', time: '1–3 min', icon: Hand, color: 'text-teal-300 bg-teal-500/10 border-teal-500/20' },
                   { href: '/noite/', title: 'Modo noite', desc: 'Para quando o sono não vem: respiração lenta, esvaziar a mente e sons com timer.', time: '5–30 min', icon: Moon, color: 'text-indigo-300 bg-indigo-500/10 border-indigo-500/20' },
@@ -95,6 +96,9 @@ export default function ExerciciosPage() {
                   { href: '/terapia/', title: 'Agenda da terapia', desc: 'Lembrete da consulta e a lista do que você quer levar para a sessão.', time: '2 min', icon: CalendarClock, color: 'text-sky-300 bg-sky-500/10 border-sky-500/20' },
                   { href: '/datas/', title: 'Datas que pesam', desc: 'Marque dias difíceis e a Nórica fica mais atenta e gentil neles.', time: '1 min', icon: CalendarHeart, color: 'text-sky-300 bg-sky-500/10 border-sky-500/20' },
                   { href: '/mural/', title: 'Mural de vitórias', desc: 'Tudo o que você já conquistou, para reler nos dias de dúvida.', time: 'quando quiser', icon: Trophy, color: 'text-amber-300 bg-amber-400/10 border-amber-300/20' },
+                ] },
+                { section: 'Quando a vida pesa', items: [
+                  { href: '/fase/', title: 'Modo fase difícil', desc: 'Luto, término, demissão: a Nórica fica mais gentil por algumas semanas.', time: '2–8 semanas', icon: HeartHandshake, color: 'text-sky-300 bg-sky-500/10 border-sky-500/20' },
                 ] },
                 { section: 'Com outras pessoas', items: [
                   { href: '/amigos/', title: 'Foguinho com amigos 🔥', desc: 'Vocês marcam o dia e a chama cresce. Mande apoio e um "pensei em você".', time: 'todo dia', icon: Flame, color: 'text-orange-300 bg-orange-500/10 border-orange-500/20' },

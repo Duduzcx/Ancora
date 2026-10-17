@@ -14,4 +14,8 @@
     <string name="widget_agua">💧 Bebi água</string>
     <string name="widget_respirei">🌬️ Respirei</string>
     <string name="widget_sai">🚶 Saí de casa</string>
+    <string name="flame_widget_label">Foguinho com amigos</string>
+    <string name="flame_widget_description">A chama de cuidado com seus amigos, na tela inicial.</string>
+    <string name="flame_widget_empty">Foguinho com amigos</string>
+    <string name="flame_widget_hint">Toque para acender com alguém 🔥</string>
 </resources>

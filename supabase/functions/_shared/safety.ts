@@ -107,8 +107,19 @@ export type PortoPromptOptions = {
   memory?: string | null; // o que a Nórica lembra de conversas anteriores
   feeling?: string | null; // o nome que a pessoa deu ao que sente agora
   todayNote?: string | null; // a pessoa marcou que hoje é uma data que pesa
+  phase?: string | null; // modo fase difícil (luto, término, demissão...)
   now?: Date; // hora local (Brasília) para o tom certo de manhã, à tarde ou de madrugada
   recentOpenings?: string[]; // como as últimas respostas começaram (para não repetir)
+};
+
+const PHASE_GUIDE: Record<string, string> = {
+  luto: "A pessoa ligou o modo fase difícil: está vivendo um luto. Acolha antes de tudo, sem pressa e sem frases prontas como \"ele está num lugar melhor\". Não proponha metas, hábitos ou produtividade a menos que ela peça. Valide a saudade, a raiva e o cansaço como partes do luto. Pergunte com delicadeza se ela tem com quem contar.",
+  termino: "A pessoa ligou o modo fase difícil: está passando por um término. Acolha sem julgar ninguém e sem incentivar contato impulsivo com a outra pessoa. Foque em cuidado básico (sono, comida, gente próxima) e em um passo pequeno por vez.",
+  demissao: "A pessoa ligou o modo fase difícil: perdeu o trabalho ou está com o trabalho em risco. Acolha a insegurança sem minimizar. Separe o que ela controla do que não controla e sugira passos pequenos e concretos, sem cobrança.",
+  doenca: "A pessoa ligou o modo fase difícil: ela ou alguém próximo está doente. Acolha o medo e o cansaço. Nunca opine sobre tratamento ou remédios; incentive a conversar com a equipe de saúde.",
+  mudanca: "A pessoa ligou o modo fase difícil: está numa grande mudança (casa, cidade, escola, rotina). Normalize a estranheza e a saudade, e ajude a criar pequenas âncoras de rotina.",
+  cansaco: "A pessoa ligou o modo fase difícil: está esgotada. Seja breve e leve, peça pouco dela, valorize descanso e limites. Nada de listas longas.",
+  outro: "A pessoa ligou o modo fase difícil: está atravessando um período pesado. Seja especialmente gentil e paciente, peça pouco dela e não proponha metas a menos que ela peça.",
 };
 
 // Jeitos de ajudar que funcionam (inspirados em TCC, ACT, autocompaixão e ativação comportamental),
@@ -164,6 +175,7 @@ ${o.context}`);
 ${o.memory}`);
   }
   if (o.feeling) blocks.push(`A pessoa deu nome ao que sente agora: "${o.feeling}". Use essa palavra dela, com cuidado.`);
+  if (o.phase) blocks.push(PHASE_GUIDE[o.phase] ?? PHASE_GUIDE.outro);
   if (o.todayNote) blocks.push(`A pessoa marcou que hoje é uma data que pesa para ela: "${o.todayNote}". Seja especialmente gentil; não force o assunto, mas acolha se ela trouxer.`);
   if (o.now) blocks.push(timeContext(o.now));
   if (o.recentOpenings?.length) {

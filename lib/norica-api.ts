@@ -30,6 +30,7 @@ export type ChatOptions = {
   regenerate?: boolean; // responder de novo depois de editar uma mensagem
   feeling?: string | null; // nome que a pessoa deu ao que sente (roda das emoções)
   todayNote?: string | null; // hoje é uma data que pesa para a pessoa (ela mesma marcou)
+  phase?: string | null; // modo fase difícil ligado pela pessoa (luto, término...)
   signal?: AbortSignal;
 };
 
@@ -72,12 +73,14 @@ export type WeeklySummary = {
   summary: string | null;
   stats: { moods: Record<string, number>; daysWithLogs: number; conversations: number; journalEntries: number };
 };
-export type JournalKind = 'voz' | 'gratidao' | 'conversa' | 'aterramento' | 'noite' | 'terapia';
+export type JournalKind = 'voz' | 'gratidao' | 'conversa' | 'aterramento' | 'noite' | 'terapia' | 'hoje';
 export type JournalEntry = { id: string; kind: JournalKind; mood: string | null; created_at: string; summary: string; content: string; title?: string };
 export type OrgSector = { id: string; name: string };
-export type CampaignKind = 'setembro' | 'provas' | 'pausa' | 'sono' | 'livre';
+export type CampaignKind = 'setembro' | 'provas' | 'pausa' | 'sono' | 'livre' | 'janeiro' | 'voltaaulas' | 'saudemental' | 'fimdeano' | 'outubrorosa' | 'novembroazul' | 'ansiedade';
+export type OrgKind = 'escola' | 'empresa' | 'outro';
+export type OrgDetails = { code: string | null; adminCode: string | null; kind: OrgKind; plan: 'teste' | 'ativo' | 'pausado'; trialUntil: string | null; owner: boolean; team: number };
 export type OrgCampaign = { id: string; kind: CampaignKind; title: string; message: string; starts_on: string; ends_on: string };
-export type OrgInfo = { name: string; role: 'member' | 'admin'; sectorId?: string | null; sectorLabel?: string; sectors?: OrgSector[]; campaigns?: OrgCampaign[] } | null;
+export type OrgInfo = { name: string; role: 'member' | 'admin'; kind?: OrgKind; sectorId?: string | null; sectorLabel?: string; sectors?: OrgSector[]; campaigns?: OrgCampaign[] } | null;
 export type Patterns =
   | { enough: false; daysMarked: number; needed: number }
   | {
@@ -138,6 +141,7 @@ export type OrgDashboard = {
   weeks: { label: string; active: number | null; hardPeoplePct: number | null }[];
   demo?: boolean;
   campaigns?: OrgCampaign[];
+  info?: OrgDetails;
 };
 
 export const MOODS = ['calmo', 'ansioso', 'agitado', 'sos'] as const;
@@ -257,6 +261,12 @@ export const noricaApi = {
   groupsLeave: (groupId: string) => call<{ groups: CareGroup[] }>('groups_leave', { groupId }),
   pushRegister: (token: string) => call<{ ok: boolean; server: boolean }>('push_register', { token }),
   pushUnregister: (token: string) => call<{ ok: boolean }>('push_unregister', { token }),
+  orgCreate: (name: string, kind: OrgKind) => call<{ org: OrgInfo }>('org_create', { name, kind }),
+  orgRename: (name: string) => call<{ ok: boolean; name: string }>('org_rename', { name }),
+  orgNewCode: (team: boolean) => call<{ info: OrgDetails }>('org_new_code', { team }),
+  orgDelete: () => call<{ ok: boolean }>('org_delete'),
+  leadCreate: (lead: { name: string; orgName: string; kind: OrgKind; size?: string; phone?: string; email?: string; message?: string; site?: string }) => call<{ ok: boolean }>('lead_create', lead),
+  meditationAudio: (id: string, part: number, voice: string) => call<{ url: string | null }>('meditation_audio', { id, part, voice }),
   ttsInfo: () => call<{ available: boolean; voices: { id: string; label: string }[] }>('tts_info'),
   tts: (text: string, voice: string) => call<{ audio: string; mime: string }>('tts', { text, voice }),
 

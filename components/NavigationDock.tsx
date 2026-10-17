@@ -58,6 +58,7 @@ export default function NavigationDock() {
     !user || 
     pathname?.startsWith('/porto') || 
     pathname?.startsWith('/amigos/chat') ||
+    pathname?.startsWith('/empresas') ||
     pathname?.startsWith('/arena') || 
     pathname?.startsWith('/cofre') ||
     !isVisible;

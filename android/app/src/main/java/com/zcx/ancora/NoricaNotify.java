@@ -40,6 +40,19 @@ public class NoricaNotify extends Plugin {
         call.resolve(ret);
     }
 
+    /** Atualiza o widget "Foguinho" na tela inicial. */
+    @PluginMethod
+    public void setFlameWidget(PluginCall call) {
+        FlameWidget.save(
+            getContext(),
+            call.getString("count", "0"),
+            call.getString("title", ""),
+            call.getString("sub", ""),
+            Boolean.TRUE.equals(call.getBoolean("lit", false))
+        );
+        call.resolve();
+    }
+
     @PluginMethod
     public void openSettings(PluginCall call) {
         try {

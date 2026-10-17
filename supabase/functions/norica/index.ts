@@ -15,6 +15,7 @@ import { consume, getPlan, launchMode, PLAN_LIMITS, usageToday } from "../_share
 import { checkSubscription, PRO_PRODUCT_ID } from "../_shared/google-play.ts";
 import { synthesize, TTS_VOICES, ttsConfigured } from "../_shared/tts.ts";
 import { pushConfigured, pushSoon } from "../_shared/push.ts";
+import { meditacaoById } from "../_shared/meditacoes.ts";
 import {
   arenaFeedbackPrompt,
   arenaSystemPrompt,
@@ -275,6 +276,7 @@ async function prepareChat(ctx: Ctx, body: Record<string, unknown>): Promise<Pre
   const mood = typeof body.mood === "string" && VALID_MOODS.includes(body.mood) ? body.mood : null;
   const feeling = typeof body.feeling === "string" ? body.feeling.replace(/[^\p{L}\p{N} \-]/gu, "").trim().slice(0, 40) || null : null;
   const todayNote = typeof body.todayNote === "string" ? body.todayNote.replace(/[\r\n]+/g, " ").trim().slice(0, 120) || null : null;
+  const phase = typeof body.phase === "string" && PHASES.includes(body.phase) ? body.phase : null;
   const persona = body.persona === "clara" ? "clara" : "norica";
   const requestedMode = typeof body.mode === "string" && (MODES as readonly string[]).includes(body.mode) ? body.mode as ChatMode : null;
   let chatId = typeof body.chatId === "string" && body.chatId ? body.chatId : null;
@@ -359,7 +361,7 @@ async function prepareChat(ctx: Ctx, body: Record<string, unknown>): Promise<Pre
   const recentOpenings = history.filter((m) => m.role === "assistant").slice(-3)
     .map((m) => m.content.replace(/\s+/g, " ").trim().split(" ").slice(0, 5).join(" "))
     .filter((x) => x.length > 3);
-  const promptOptions = { mood, feeling, todayNote, crisis, risk, name, mode, context, memory: memoryInfo.content, now: brtNow(), recentOpenings };
+  const promptOptions = { mood, feeling, todayNote, phase, crisis, risk, name, mode, context, memory: memoryInfo.content, now: brtNow(), recentOpenings };
   const system = persona === "clara" ? claraSystemPrompt(promptOptions) : portoSystemPrompt(promptOptions);
   return {
     chatId: chatId!,
@@ -771,7 +773,9 @@ async function weeklySummary(ctx: Ctx, body: Record<string, unknown>) {
 // Diário (voz, gratidão, preparação de conversa, aterramento)
 // ---------------------------------------------------------------------
 
-const JOURNAL_KINDS = ["voz", "gratidao", "conversa", "aterramento", "noite", "terapia"];
+/** Modo fase difícil: a pessoa avisa que está atravessando algo pesado (a Nórica fica mais gentil). */
+const PHASES = ["luto", "termino", "demissao", "doenca", "mudanca", "cansaco", "outro"];
+const JOURNAL_KINDS = ["voz", "gratidao", "conversa", "aterramento", "noite", "terapia", "hoje"];
 
 async function journalEntryOut(row: { id: string; kind: string; content: string; summary: string | null; mood: string | null; created_at: string }) {
   const summary = row.summary ? await decrypt(row.summary) : "";
@@ -1494,7 +1498,7 @@ async function monthlyReport(ctx: Ctx, body: Record<string, unknown>) {
 
 const MIN_GROUP = 5; // abaixo disso, nenhum número é mostrado (evita identificar alguém)
 
-type Membership = { orgId: string; name: string; role: string; sectorId: string | null; sectorLabel: string };
+type Membership = { orgId: string; name: string; role: string; sectorId: string | null; sectorLabel: string; kind?: string; demo?: boolean };
 
 async function myMembership(ctx: Ctx, role?: "admin"): Promise<Membership | null> {
   let query = ctx.admin.from("org_members").select("org_id, role, sector_id").eq("user_id", ctx.userId);
@@ -1502,9 +1506,9 @@ async function myMembership(ctx: Ctx, role?: "admin"): Promise<Membership | null
   const { data: rows } = await query.order("role", { ascending: true }).limit(1);
   const m = rows?.[0];
   if (!m) return null;
-  const { data: org } = await ctx.admin.from("organizations").select("id, name, sector_label").eq("id", m.org_id).maybeSingle();
+  const { data: org } = await ctx.admin.from("organizations").select("id, name, sector_label, kind, demo").eq("id", m.org_id).maybeSingle();
   return org
-    ? { orgId: org.id as string, name: org.name as string, role: m.role as string, sectorId: (m.sector_id as string) ?? null, sectorLabel: (org.sector_label as string) || "Setor" }
+    ? { orgId: org.id as string, name: org.name as string, role: m.role as string, sectorId: (m.sector_id as string) ?? null, sectorLabel: (org.sector_label as string) || "Setor", kind: (org.kind as string) || "empresa", demo: !!org.demo }
     : null;
 }
 
@@ -1516,14 +1520,14 @@ async function sectorsOf(ctx: Ctx, orgId: string) {
 async function orgOut(ctx: Ctx, m: Membership | null) {
   if (!m) return { org: null };
   const [sectors, campaigns] = await Promise.all([sectorsOf(ctx, m.orgId), activeCampaigns(ctx, m.orgId)]);
-  return { org: { name: m.name, role: m.role, sectorId: m.sectorId, sectorLabel: m.sectorLabel, sectors, campaigns } };
+  return { org: { name: m.name, role: m.role, kind: m.kind ?? "empresa", sectorId: m.sectorId, sectorLabel: m.sectorLabel, sectors, campaigns } };
 }
 
 // ---------------------------------------------------------------------
 // Campanhas da instituição (aparecem na Início de quem faz parte dela)
 // ---------------------------------------------------------------------
 
-const CAMPAIGN_KINDS = ["setembro", "provas", "pausa", "sono", "livre"];
+const CAMPAIGN_KINDS = ["setembro", "provas", "pausa", "sono", "livre", "janeiro", "voltaaulas", "saudemental", "fimdeano", "outubrorosa", "novembroazul", "ansiedade"];
 
 async function activeCampaigns(ctx: Ctx, orgId: string) {
   const today = brtDay();
@@ -1615,6 +1619,143 @@ async function letterDelete(ctx: Ctx, body: Record<string, unknown>) {
   return { ok: true };
 }
 
+// ---------------------------------------------------------------------
+// Instituição criada pelo próprio app (escola, cursinho ou empresa)
+// ---------------------------------------------------------------------
+
+const TRIAL_DAYS = 30;
+const ORG_CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+function randomCode(prefix: string, n: number) {
+  let c = prefix;
+  for (let i = 0; i < n; i++) c += ORG_CODE_CHARS[Math.floor(Math.random() * ORG_CODE_CHARS.length)];
+  return c.slice(0, 12);
+}
+
+/** Código fácil de passar: começo do nome + números/letras (ex.: COLEGIO4K7). */
+async function newOrgCode(ctx: Ctx, name: string, team = false) {
+  const base = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, team ? 4 : 7) || "NORICA";
+  for (let i = 0; i < 8; i++) {
+    const code = randomCode(team ? `EQ${base}` : base, team ? 4 : 3);
+    const col = team ? "admin_code" : "code";
+    const { data } = await ctx.admin.from("organizations").select("id").eq(col, code).maybeSingle();
+    if (!data) return code;
+  }
+  throw new HttpError(500, "Não foi possível gerar o código agora");
+}
+
+async function orgCreate(ctx: Ctx, body: Record<string, unknown>) {
+  const name = cleanText(body.name, 80);
+  if (name.length < 3) throw new HttpError(400, "Escreva o nome da instituição");
+  const kind = ["escola", "empresa", "outro"].includes(String(body.kind)) ? String(body.kind) : "empresa";
+  const { count } = await ctx.admin.from("organizations").select("id", { count: "exact", head: true }).eq("created_by", ctx.userId);
+  if ((count ?? 0) >= 3) throw new HttpError(409, "Você já criou 3 instituições. Fale com a gente para criar mais.");
+  const code = await newOrgCode(ctx, name);
+  const adminCode = await newOrgCode(ctx, name, true);
+  const { data: org, error } = await ctx.admin.from("organizations").insert({
+    name, code, admin_code: adminCode, kind, created_by: ctx.userId, plan: "teste",
+    trial_until: addDays(brtDay(), TRIAL_DAYS), sector_label: kind === "escola" ? "Turma" : "Setor",
+  }).select("id").single();
+  if (error || !org) throw new HttpError(500, "Não foi possível criar a instituição");
+  await leaveDemos(ctx);
+  await ctx.admin.from("org_members").upsert({ org_id: org.id, user_id: ctx.userId, role: "admin" }, { onConflict: "org_id,user_id" });
+  return orgOut(ctx, await myMembership(ctx, "admin"));
+}
+
+async function orgDetails(ctx: Ctx, me: Membership) {
+  const { data: o } = await ctx.admin.from("organizations").select("code, admin_code, kind, plan, trial_until, created_by, demo").eq("id", me.orgId).maybeSingle();
+  const { data: ms } = await ctx.admin.from("org_members").select("role").eq("org_id", me.orgId);
+  return {
+    code: o?.code ?? null,
+    adminCode: o?.demo ? null : o?.admin_code ?? null,
+    kind: o?.kind ?? "empresa",
+    plan: o?.plan ?? "teste",
+    trialUntil: o?.trial_until ?? null,
+    owner: o?.created_by === ctx.userId,
+    team: (ms ?? []).filter((m) => m.role === "admin").length,
+  };
+}
+
+async function orgRename(ctx: Ctx, body: Record<string, unknown>) {
+  const me = await myMembership(ctx, "admin");
+  if (!me || me.demo) throw new HttpError(403, "Só a equipe da instituição pode mudar isso");
+  const name = cleanText(body.name, 80);
+  if (name.length < 3) throw new HttpError(400, "Nome muito curto");
+  await ctx.admin.from("organizations").update({ name }).eq("id", me.orgId);
+  return { ok: true, name };
+}
+
+async function orgNewCode(ctx: Ctx, body: Record<string, unknown>) {
+  const me = await myMembership(ctx, "admin");
+  if (!me || me.demo) throw new HttpError(403, "Só a equipe da instituição pode mudar isso");
+  const team = body.team === true;
+  const code = await newOrgCode(ctx, me.name, team);
+  await ctx.admin.from("organizations").update(team ? { admin_code: code } : { code }).eq("id", me.orgId);
+  return { info: await orgDetails(ctx, me) };
+}
+
+async function orgDelete(ctx: Ctx) {
+  const me = await myMembership(ctx, "admin");
+  if (!me || me.demo) throw new HttpError(403, "Só quem criou a instituição pode apagá-la");
+  const { data: o } = await ctx.admin.from("organizations").select("created_by").eq("id", me.orgId).maybeSingle();
+  if (o?.created_by !== ctx.userId) throw new HttpError(403, "Só quem criou a instituição pode apagá-la");
+  await ctx.admin.from("organizations").delete().eq("id", me.orgId);
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------
+// Página "Para escolas e empresas": contato para agendar conversa (sem login)
+// ---------------------------------------------------------------------
+
+async function leadCreate(admin: SupabaseClient, body: Record<string, unknown>, ip: string) {
+  const txt = (v: unknown, max: number) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, max) : "");
+  const name = txt(body.name, 80);
+  const orgName = txt(body.orgName, 120);
+  const kind = ["escola", "empresa", "outro"].includes(String(body.kind)) ? String(body.kind) : "outro";
+  const phone = txt(body.phone, 30).replace(/[^0-9+()\s-]/g, "");
+  const email = txt(body.email, 120).toLowerCase();
+  if (name.length < 2 || orgName.length < 2) throw new HttpError(400, "Preencha seu nome e o da instituição");
+  if (!phone && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new HttpError(400, "Deixe um WhatsApp ou e-mail para a gente falar com você");
+  if (typeof body.site === "string" && body.site) return { ok: true }; // robô (campo escondido preenchido)
+  const ipHash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`norica:${ip}`))))
+    .slice(0, 8).map((b) => b.toString(16).padStart(2, "0")).join("");
+  const { count } = await admin.from("leads").select("id", { count: "exact", head: true })
+    .eq("ip_hash", ipHash).gte("created_at", new Date(Date.now() - 3600_000).toISOString());
+  if ((count ?? 0) >= 5) throw new HttpError(429, "Recebemos seus pedidos. Logo entramos em contato!");
+  const { error } = await admin.from("leads").insert({
+    name, org_name: orgName, kind, size: txt(body.size, 40) || null, phone: phone || null,
+    email: email || null, message: txt(body.message, 600) || null, ip_hash: ipHash,
+  });
+  if (error) throw new HttpError(500, "Não foi possível enviar agora");
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------
+// Meditações guiadas: voz natural gerada uma vez por trecho e reaproveitada
+// ---------------------------------------------------------------------
+
+async function meditationAudio(ctx: Ctx, body: Record<string, unknown>) {
+  const med = meditacaoById(String(body.id ?? ""));
+  const idx = Number(body.part);
+  if (!med || !Number.isInteger(idx) || idx < 0 || idx >= med.parts.length) throw new HttpError(404, "Meditação não encontrada");
+  const voice = TTS_VOICES[String(body.voice)] ? String(body.voice) : "serena";
+  const path = `${voice}/${med.id}-${idx}.wav`;
+  const bucket = ctx.admin.storage.from("meditacoes");
+  const signed = async () => (await bucket.createSignedUrl(path, 3600)).data?.signedUrl ?? null;
+  const { data: found } = await bucket.list(voice, { search: `${med.id}-${idx}.wav`, limit: 1 });
+  if (found?.some((f) => f.name === `${med.id}-${idx}.wav`)) return { url: await signed() };
+  if (!ttsConfigured()) throw new HttpError(503, "Voz natural indisponível");
+  try {
+    const out = await synthesize(med.parts[idx].t, voice);
+    const bytes = Uint8Array.from(atob(out.audio), (c) => c.charCodeAt(0));
+    await bucket.upload(path, bytes, { contentType: out.mime, upsert: true });
+    return { url: await signed() };
+  } catch (e) {
+    console.error(e);
+    throw new HttpError(502, "A voz natural não respondeu agora");
+  }
+}
+
 async function orgStatus(ctx: Ctx) {
   return orgOut(ctx, await myMembership(ctx));
 }
@@ -1622,14 +1763,20 @@ async function orgStatus(ctx: Ctx) {
 async function orgJoin(ctx: Ctx, body: Record<string, unknown>) {
   const code = String(body.code ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
   if (code.length < 4) throw new HttpError(400, "Digite o código que a instituição passou para você");
-  const { data: org } = await ctx.admin.from("organizations").select("id, name, demo").eq("code", code).maybeSingle();
+  let { data: org } = await ctx.admin.from("organizations").select("id, name, demo").eq("code", code).maybeSingle();
+  let asTeam = false;
+  if (!org) {
+    // Código da equipe (coordenação, RH): entra direto como quem vê o painel.
+    const r = await ctx.admin.from("organizations").select("id, name, demo").eq("admin_code", code).maybeSingle();
+    org = r.data; asTeam = !!org;
+  }
   if (!org) throw new HttpError(404, "Código não encontrado. Confira com a sua instituição.");
   await ctx.admin.from("org_members").delete().eq("user_id", ctx.userId).neq("org_id", org.id).eq("role", "member");
   await leaveDemos(ctx, org.id as string);
   // Demonstração: quem entra vê o painel como a equipe (com números fictícios).
   const { error } = await ctx.admin.from("org_members").upsert(
-    { org_id: org.id, user_id: ctx.userId, ...(org.demo ? { role: "admin" } : {}) },
-    { onConflict: "org_id,user_id", ignoreDuplicates: !org.demo },
+    { org_id: org.id, user_id: ctx.userId, ...(org.demo || asTeam ? { role: "admin" } : {}) },
+    { onConflict: "org_id,user_id", ignoreDuplicates: !(org.demo || asTeam) },
   );
   if (error) throw new HttpError(500, "Não foi possível entrar agora");
   return orgOut(ctx, await myMembership(ctx));
@@ -1655,6 +1802,13 @@ async function leaveDemos(ctx: Ctx, exceptOrgId?: string) {
 
 async function orgLeave(ctx: Ctx) {
   await ctx.admin.from("org_members").delete().eq("user_id", ctx.userId).eq("role", "member");
+  // Equipe pode sair se outra pessoa da equipe continuar cuidando do painel.
+  const { data: mine } = await ctx.admin.from("org_members").select("org_id").eq("user_id", ctx.userId).eq("role", "admin");
+  for (const m of mine ?? []) {
+    const { count } = await ctx.admin.from("org_members").select("user_id", { count: "exact", head: true }).eq("org_id", m.org_id).eq("role", "admin");
+    const { data: o } = await ctx.admin.from("organizations").select("demo").eq("id", m.org_id).maybeSingle();
+    if (!o?.demo && (count ?? 0) > 1) await ctx.admin.from("org_members").delete().eq("org_id", m.org_id).eq("user_id", ctx.userId);
+  }
   await leaveDemos(ctx);
   return { ok: true };
 }
@@ -1832,7 +1986,7 @@ async function orgDashboard(ctx: Ctx) {
   const me = await myMembership(ctx, "admin");
   if (!me) throw new HttpError(403, "Painel disponível só para a equipe da instituição");
   const { data: orgRow } = await ctx.admin.from("organizations").select("demo").eq("id", me.orgId).maybeSingle();
-  if (orgRow?.demo) return { ...demoDashboard(me, await sectorsOf(ctx, me.orgId)), campaigns: await campaignsOf(ctx, me.orgId) };
+  if (orgRow?.demo) return { ...demoDashboard(me, await sectorsOf(ctx, me.orgId)), campaigns: await campaignsOf(ctx, me.orgId), info: await orgDetails(ctx, me) };
   const { data: members } = await ctx.admin.from("org_members").select("user_id, role, sector_id").eq("org_id", me.orgId);
   const people = (members ?? []).filter((m) => m.role === "member");
   const ids = people.map((m) => m.user_id as string);
@@ -1924,6 +2078,7 @@ async function orgDashboard(ctx: Ctx) {
 
   return {
     org: me.name,
+    info: await orgDetails(ctx, me),
     campaigns: await campaignsOf(ctx, me.orgId),
     sectorLabel: me.sectorLabel,
     members: ids.length,
@@ -2120,7 +2275,7 @@ async function health(ctx: Ctx) {
     checks.criptografia = { ok: false, detail: String((e as Error).message) };
   }
 
-  for (const table of ["chats", "messages", "mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "user_plans", "usage_events", "app_errors", "user_memory", "safety_plans", "message_feedback", "weekly_summaries", "journal_entries", "organizations", "org_members", "org_sectors", "monthly_reports", "future_letters", "org_campaigns", "care_pairs", "care_invites", "care_nudges", "care_messages", "care_groups", "care_group_members", "care_challenges", "push_tokens"]) {
+  for (const table of ["chats", "messages", "mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "user_plans", "usage_events", "app_errors", "user_memory", "safety_plans", "message_feedback", "weekly_summaries", "journal_entries", "organizations", "org_members", "org_sectors", "monthly_reports", "future_letters", "org_campaigns", "care_pairs", "care_invites", "care_nudges", "care_messages", "care_groups", "care_group_members", "care_challenges", "push_tokens", "leads"]) {
     const { error } = await ctx.admin.from(table).select("*", { count: "exact", head: true });
     checks[`tabela_${table}`] = error ? { ok: false, detail: error.message } : { ok: true };
   }
@@ -2183,6 +2338,11 @@ const actions: Record<string, (ctx: Ctx, body: Record<string, unknown>) => Promi
   org_set_label: orgSetLabel,
   org_campaign_create: orgCampaignCreate,
   org_campaign_delete: orgCampaignDelete,
+  org_create: orgCreate,
+  org_rename: orgRename,
+  org_new_code: orgNewCode,
+  org_delete: orgDelete,
+  meditation_audio: meditationAudio,
   letter_save: letterSave,
   letter_list: letterList,
   letter_open: letterOpen,
@@ -2220,6 +2380,13 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "Método não permitido" }, 405);
 
   try {
+    const body = await req.json().catch(() => ({}));
+    // Única ação sem login: o formulário da página "Para escolas e empresas".
+    if (body.action === "lead_create") {
+      const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
+      const ip = (req.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || "?";
+      return json(await leadCreate(admin, body, ip));
+    }
     const authHeader = req.headers.get("Authorization") ?? "";
     const token = authHeader.replace(/^Bearer\s+/i, "");
     if (!token) throw new HttpError(401, "Faça login para continuar");
@@ -2231,7 +2398,6 @@ Deno.serve(async (req) => {
     const { data: { user }, error } = await db.auth.getUser(token);
     if (error || !user) throw new HttpError(401, "Sessão expirada. Entre de novo.");
 
-    const body = await req.json().catch(() => ({}));
     const handler = actions[String(body.action ?? "")];
     if (!handler && body.action !== "chat_stream") throw new HttpError(400, "Ação desconhecida");
 

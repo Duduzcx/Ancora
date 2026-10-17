@@ -51,6 +51,7 @@ export async function buildOrgReportPdf(d: OrgDashboard): Promise<Blob> {
 
   section('Visão geral');
   para(`Participantes: ${d.members}  ·  Ativos na semana: ${d.current?.active ?? 'menos de ' + d.minGroup}`);
+  if (d.current && d.members) para(`Adesão: ${Math.round((100 * d.current.active) / d.members)}% dos participantes usaram a Nórica nesta semana.`);
   if (d.current) {
     para(`Tiveram algum dia difícil: ${d.current.hardPeoplePct}%${d.previous ? ` (semana anterior: ${d.previous.hardPeoplePct}%)` : ''}  ·  Cuidaram de si nos Logs: ${d.current.logsPct}%`);
     y += 2;

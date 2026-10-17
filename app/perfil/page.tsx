@@ -995,6 +995,15 @@ export default function PerfilPage() {
                   <button onClick={joinOrg} disabled={orgBusy || orgCode.trim().length < 4} className="w-full py-4 rounded-2xl bg-amber-400 text-slate-950 font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-2 disabled:opacity-40">
                     {orgBusy && <Loader2 size={14} className="animate-spin" />} Entrar
                   </button>
+                  <div className="pt-4 mt-2 border-t border-white/5 space-y-2">
+                    <p className="text-[10px] font-black text-white/40 uppercase tracking-widest">É da direção, coordenação ou RH?</p>
+                    <button onClick={() => { setIsOrgOpen(false); router.push('/instituicao/'); }} className="w-full py-4 rounded-2xl bg-white/5 border border-amber-300/30 text-amber-200 font-black uppercase tracking-widest text-[10px]" data-testid="criar-instituicao">
+                      Criar minha instituição · 30 dias grátis
+                    </button>
+                    <button onClick={() => { setIsOrgOpen(false); router.push('/empresas/'); }} className="w-full py-3 text-white/45 font-black uppercase tracking-widest text-[10px] underline underline-offset-4">
+                      Conhecer a Nórica para escolas e empresas
+                    </button>
+                  </div>
                 </div>
               )}
               {orgError && <p className="text-rose-400 text-xs font-bold mt-4">{orgError}</p>}

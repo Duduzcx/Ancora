@@ -18,8 +18,8 @@ import { applyEasyReading } from '@/lib/leitura';
 import { GlobalBackgroundContext, OceanBackground } from '@/components/AnimatedBackground';
 import { CHECKIN_ACTIONS, countAppOpen, listenReminderTaps, refreshEngagementNotifications } from '@/lib/reminder';
 
-const LIVELY_BG = ['/porto', '/farol']; // telas com o fundo mais vivo (as demais usam o suave)
-const publicPages = ['/auth', '/auth/signup', '/auth/forgot-password', '/privacidade', '/excluir-conta'];
+const LIVELY_BG = ['/porto']; // tela com o fundo mais vivo (as demais usam o suave; no Farol o fundo mudava ao entrar)
+const publicPages = ['/auth', '/auth/signup', '/auth/forgot-password', '/privacidade', '/excluir-conta', '/empresas'];
 
 const log = (msg: string) => console.log(`[AUTH_DEBUG] ${new Date().toLocaleTimeString()}: ${msg}`);
 
@@ -47,6 +47,7 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
 
   // Widget "Como está o seu mar?" (com.zcx.norica://humor/<humor>): a Início registra e confirma.
   const openFromWidget = (url: string): boolean => {
+    if (/:\/\/amigos\//.test(url)) { router.push('/amigos/'); return true; }
     const h = url.match(/:\/\/habito\/(\d+)/);
     if (h) {
       try { window.dispatchEvent(new CustomEvent('norica-widget-habit', { detail: h[1] })); } catch (_e) {}
@@ -174,7 +175,7 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
   useEffect(() => {
     if (!userId) return;
     const t = setTimeout(() => {
-      ['/porto/', '/farol/', '/perfil/', '/log/', '/arena/', '/cofre/', '/respiracao/', '/planos/', '/noite/', '/exercicios/', '/trilhas/', '/cartas/', '/terapia/', '/amigos/', '/calma/', '/mural/', '/datas/', '/movimento/', '/toque/']
+      ['/porto/', '/farol/', '/perfil/', '/log/', '/arena/', '/cofre/', '/respiracao/', '/planos/', '/noite/', '/exercicios/', '/trilhas/', '/cartas/', '/terapia/', '/amigos/', '/calma/', '/mural/', '/datas/', '/movimento/', '/toque/', '/hoje/', '/meditacoes/', '/fase/']
         .forEach((href) => { try { router.prefetch(href); } catch (_e) {} });
       warmUpServer(userId);
       startOfflineSync(); // envia Logs/humor marcados sem internet
