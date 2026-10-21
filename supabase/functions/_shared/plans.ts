@@ -32,7 +32,7 @@ function startOfTodayBR(): string {
 export async function getPlan(admin: SupabaseClient, userId: string) {
   const { data } = await admin
     .from("user_plans")
-    .select("plan, pro_until, pro_interest_at, purchase_token")
+    .select("plan, pro_until, pro_interest_at, purchase_token, store")
     .eq("user_id", userId)
     .maybeSingle();
 
@@ -63,6 +63,7 @@ export async function getPlan(admin: SupabaseClient, userId: string) {
     launch: launchMode(),
     proInterest: !!data?.pro_interest_at,
     proUntil: isPro ? proUntil : null,
+    store: isPro ? (data?.store ?? null) : null, // 'google_play', 'promo' (código) ou 'manual'
     billing: billingConfigured(),
   };
 }

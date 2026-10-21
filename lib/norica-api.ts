@@ -46,6 +46,7 @@ export type PlanInfo = {
   launch: boolean;
   proInterest: boolean;
   proUntil: string | null; // fim do período pago da assinatura
+  store?: 'google_play' | 'promo' | 'manual' | null; // de onde veio o Pro
   billing: boolean; // cobrança pela Google Play configurada no servidor
   limits: Record<PlanName, { porto_message: number; arena_feedback: number }>;
   usage: { porto_message: number; arena_feedback: number };
@@ -201,6 +202,7 @@ export const noricaApi = {
 
   plan: () => call<PlanInfo>('plan'),
   proInterest: () => call<{ ok: boolean }>('pro_interest'),
+  promoRedeem: (code: string) => call<{ ok: boolean; proUntil: string | null; days: number }>('promo_redeem', { code }),
   verifyPurchase: (purchaseToken: string) =>
     call<{ active: boolean; proUntil: string | null; state: string }>('verify_purchase', { purchaseToken }),
   health: () => call<HealthReport>('health'),

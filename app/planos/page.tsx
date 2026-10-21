@@ -8,7 +8,7 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Check, Sparkles, LifeBuoy, Loader2, Crown, Anchor, RefreshCcw, ExternalLink } from 'lucide-react';
+import { ArrowLeft, Check, Sparkles, LifeBuoy, Loader2, Crown, Anchor, RefreshCcw, ExternalLink, Ticket } from 'lucide-react';
 import { noricaApi, type PlanInfo, cachedPlan, refreshPlan } from '@/lib/norica-api';
 import { getAuthState } from '@/lib/auth-store';
 import {
@@ -66,9 +66,11 @@ export default function PlanosPage() {
   const [info, setInfo] = useState<PlanInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [price, setPrice] = useState(PRO_PRICE_FALLBACK);
-  const [busy, setBusy] = useState<'buy' | 'restore' | null>(null);
+  const [busy, setBusy] = useState<'buy' | 'restore' | 'code' | null>(null);
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [joined, setJoined] = useState(false);
+  const [codeOpen, setCodeOpen] = useState(false);
+  const [code, setCode] = useState('');
 
   const loadPlan = async () => {
     // Mostra o último plano conhecido na hora e confere com o servidor.
@@ -92,7 +94,7 @@ export default function PlanosPage() {
 
   useEffect(() => {
     loadPlan();
-    initBilling().then(() => proPriceLabel().then(setPrice));
+    initBilling().then((ok) => { if (ok) proPriceLabel().then(setPrice); });
     const off = onBillingEvent(event => {
       setBusy(null);
       if (event.type === 'activated') {
@@ -106,6 +108,7 @@ export default function PlanosPage() {
   }, []);
 
   const isPaidPro = info?.plan === 'pro';
+  const viaStore = isPaidPro && (info?.store ?? 'google_play') === 'google_play';
   const canSubscribe = !!info && !isPaidPro && !info.launch && info.billing;
 
   const handleSubscribe = async () => {
@@ -124,6 +127,24 @@ export default function PlanosPage() {
     const error = await restorePro();
     setBusy(null);
     if (error) setMessage({ kind: 'error', text: error });
+  };
+
+  const handleCode = async () => {
+    const c = code.trim();
+    if (!c) return;
+    setMessage(null);
+    setBusy('code');
+    try {
+      const r = await noricaApi.promoRedeem(c);
+      const until = r.proUntil ? new Date(r.proUntil).toLocaleDateString('pt-BR') : null;
+      setMessage({ kind: 'ok', text: `Código aceito! Você é Pro${until ? ` até ${until}` : ''}. 💚` });
+      setCode(''); setCodeOpen(false);
+      loadPlan();
+    } catch (e: any) {
+      setMessage({ kind: 'error', text: e?.message || 'Não foi possível usar o código agora.' });
+    } finally {
+      setBusy(null);
+    }
   };
 
   const handleInterest = async () => {
@@ -209,9 +230,9 @@ export default function PlanosPage() {
                   <div className="w-full py-4 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-black uppercase tracking-widest text-[10px] text-center">
                     Você é Pro{info?.proUntil ? ` até ${new Date(info.proUntil).toLocaleDateString('pt-BR')}` : ''} ✓
                   </div>
-                  <button onClick={openManage} className="w-full py-3 rounded-2xl border border-white/15 text-white/70 font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-2">
+                  {viaStore && <button onClick={openManage} className="w-full py-3 rounded-2xl border border-white/15 text-white/70 font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-2">
                     <ExternalLink size={12} /> Gerenciar assinatura na Google Play
-                  </button>
+                  </button>}
                 </>
               ) : canSubscribe ? (
                 <motion.button
@@ -244,6 +265,28 @@ export default function PlanosPage() {
                   Já assinei — restaurar compra
                 </button>
               )}
+
+              {message && (
+                <p role="status" data-testid="planos-msg" className={`text-center text-[11px] font-black leading-relaxed ${message.kind === 'ok' ? 'text-emerald-300' : 'text-rose-300'}`}>
+                  {message.text}
+                </p>
+              )}
+
+              {!viaStore && (codeOpen ? (
+                <div className="flex gap-2" data-testid="codigo-pro">
+                  <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} onKeyDown={(e) => e.key === 'Enter' && handleCode()}
+                    placeholder="Digite seu código" maxLength={32} autoCapitalize="characters" autoCorrect="off" spellCheck={false}
+                    className="flex-1 min-w-0 bg-black/30 border border-white/15 rounded-2xl px-4 py-3 text-sm font-black tracking-widest text-white outline-none focus:border-emerald-400/50 placeholder:text-white/30 placeholder:tracking-normal placeholder:font-bold" />
+                  <button onClick={handleCode} disabled={!code.trim() || busy !== null}
+                    className="shrink-0 px-4 rounded-2xl bg-white/10 border border-white/15 text-white font-black uppercase tracking-widest text-[10px] disabled:opacity-40 flex items-center gap-1.5">
+                    {busy === 'code' && <Loader2 size={12} className="animate-spin" />} Usar
+                  </button>
+                </div>
+              ) : (
+                <button onClick={() => { setCodeOpen(true); setMessage(null); }} className="w-full py-2 text-white/50 hover:text-white font-black uppercase tracking-widest text-[9px] flex items-center justify-center gap-2">
+                  <Ticket size={12} /> Tenho um código de Pro
+                </button>
+              ))}
             </div>
 
             <p className="relative text-[10px] text-white/40 font-bold leading-relaxed">
@@ -275,12 +318,6 @@ export default function PlanosPage() {
             )}
           </motion.div>
         </div>
-
-        {message && (
-          <p className={`text-center text-[11px] font-black uppercase tracking-widest ${message.kind === 'ok' ? 'text-emerald-400' : 'text-rose-400'}`}>
-            {message.text}
-          </p>
-        )}
 
         {info && (
           <div className="bg-white/5 border border-white/10 rounded-[2.5rem] p-6 shadow-sm">

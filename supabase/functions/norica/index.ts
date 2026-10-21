@@ -2192,7 +2192,7 @@ async function deleteAccount(ctx: Ctx) {
   const chatIds = (chats ?? []).map((c) => c.id);
   if (chatIds.length) await admin.from("messages").delete().in("chat_id", chatIds);
   await admin.from("chats").delete().eq("user_id", uid);
-  for (const table of ["mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "usage_events", "user_plans", "user_memory", "safety_plans", "message_feedback", "app_errors", "weekly_summaries", "journal_entries", "org_members", "monthly_reports", "future_letters", "care_invites"]) {
+  for (const table of ["mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "usage_events", "user_plans", "user_memory", "safety_plans", "message_feedback", "app_errors", "weekly_summaries", "journal_entries", "org_members", "monthly_reports", "future_letters", "care_invites", "promo_redemptions"]) {
     await admin.from(table).delete().eq("user_id", uid);
   }
   await admin.from("care_nudges").delete().or(`from_user.eq.${uid},to_user.eq.${uid}`);
@@ -2227,6 +2227,40 @@ async function proInterest(ctx: Ctx) {
     .upsert({ user_id: ctx.userId, pro_interest_at: new Date().toISOString(), updated_at: new Date().toISOString() }, { onConflict: "user_id" });
   if (error) throw new HttpError(500, "Não foi possível registrar agora");
   return { ok: true };
+}
+
+// Código de Pro (amigos que testam o app, parceiros): a pessoa digita e vira Pro por alguns dias.
+const PROMO_TRIES_PER_DAY = 10;
+const PROMO_ERRORS: Record<string, [number, string]> = {
+  invalid: [404, "Código não encontrado ou expirado. Confira e tente de novo."],
+  used: [409, "Você já usou este código."],
+  full: [409, "Este código já foi usado por todas as pessoas que podia."],
+  paid: [409, "Você já tem o Pro pela assinatura da Google Play."],
+  already: [409, "Você já tem o Pro liberado."],
+};
+
+async function promoRedeem(ctx: Ctx, body: Record<string, unknown>) {
+  const code = typeof body.code === "string" ? body.code.toUpperCase().replace(/\s+/g, "") : "";
+  if (!/^[A-Z0-9-]{4,32}$/.test(code)) throw new HttpError(400, "Código inválido. Confira e tente de novo.");
+
+  // Limite de tentativas por dia (evita chutar códigos).
+  const since = new Date(Date.now() - 86400_000).toISOString();
+  const { count } = await ctx.admin.from("usage_events").select("id", { count: "exact", head: true })
+    .eq("user_id", ctx.userId).eq("kind", "promo_try").gte("created_at", since);
+  if ((count ?? 0) >= PROMO_TRIES_PER_DAY) throw new HttpError(429, "Muitas tentativas. Tente de novo amanhã.");
+  await ctx.admin.from("usage_events").insert({ user_id: ctx.userId, kind: "promo_try" });
+
+  const { data, error } = await ctx.admin.rpc("redeem_promo", { p_code: code, p_user: ctx.userId });
+  if (error) {
+    console.error("redeem_promo:", error);
+    throw new HttpError(500, "Não foi possível usar o código agora. Tente de novo em instantes.");
+  }
+  const r = data as { ok: boolean; reason?: string; proUntil?: string; days?: number };
+  if (!r?.ok) {
+    const [status, message] = PROMO_ERRORS[r?.reason ?? "invalid"] ?? PROMO_ERRORS.invalid;
+    throw new HttpError(status, message);
+  }
+  return { ok: true, proUntil: r.proUntil ?? null, days: r.days ?? 0 };
 }
 
 // Assinatura Pro pela Google Play: o app manda o token da compra, o servidor confere com o Google.
@@ -2280,7 +2314,7 @@ async function health(ctx: Ctx) {
     checks.criptografia = { ok: false, detail: String((e as Error).message) };
   }
 
-  for (const table of ["chats", "messages", "mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "user_plans", "usage_events", "app_errors", "user_memory", "safety_plans", "message_feedback", "weekly_summaries", "journal_entries", "organizations", "org_members", "org_sectors", "monthly_reports", "future_letters", "org_campaigns", "care_pairs", "care_invites", "care_nudges", "care_messages", "care_groups", "care_group_members", "care_challenges", "push_tokens", "leads"]) {
+  for (const table of ["chats", "messages", "mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "user_plans", "usage_events", "app_errors", "user_memory", "safety_plans", "message_feedback", "weekly_summaries", "journal_entries", "organizations", "org_members", "org_sectors", "monthly_reports", "future_letters", "org_campaigns", "care_pairs", "care_invites", "care_nudges", "care_messages", "care_groups", "care_group_members", "care_challenges", "push_tokens", "leads", "promo_codes", "promo_redemptions"]) {
     const { error } = await ctx.admin.from(table).select("*", { count: "exact", head: true });
     checks[`tabela_${table}`] = error ? { ok: false, detail: error.message } : { ok: true };
   }
@@ -2322,6 +2356,7 @@ const actions: Record<string, (ctx: Ctx, body: Record<string, unknown>) => Promi
   plan,
   pro_interest: proInterest,
   verify_purchase: verifyPurchase,
+  promo_redeem: promoRedeem,
   memory_get: memoryGet,
   memory_set: memorySet,
   memory_clear: memoryClear,

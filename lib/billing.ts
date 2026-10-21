@@ -20,7 +20,18 @@ function cdv(): any {
 }
 
 export function billingAvailable(): boolean {
-  return Capacitor.getPlatform() === 'android' && !!cdv();
+  return Capacitor.getPlatform() === 'android';
+}
+
+// O plugin da loja carrega alguns instantes depois do app: espera ele aparecer.
+async function waitForStore(ms = 5000): Promise<any> {
+  const start = Date.now();
+  while (!cdv() && Date.now() - start < ms) await new Promise((r) => setTimeout(r, 100));
+  return cdv();
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([p, new Promise<T>((_, rej) => setTimeout(() => rej(new Error(label)), ms))]);
 }
 
 export function onBillingEvent(listener: Listener) {
@@ -40,34 +51,63 @@ async function activate(transaction: any) {
     // Confirma (acknowledge) na Google Play só depois que o servidor validou.
     await transaction.finish();
     if (result.active) emit({ type: 'activated' });
+    else emit({ type: 'error', message: 'A Google Play ainda não confirmou o pagamento. Toque em "restaurar compra" em alguns minutos.' });
   } catch (err: any) {
     emit({ type: 'error', message: err?.message || 'Não foi possível ativar o Pro.' });
   }
 }
 
+// Por que a loja não abriu (aparece para a pessoa e ajuda a achar o problema).
+let lastProblem = '';
+let registered = false;
+let initialized = false;
+
 /** Prepara a loja. Retorna false fora do Android (web) ou se a Google Play não responder. */
 export function initBilling(): Promise<boolean> {
   if (initPromise) return initPromise;
   initPromise = (async () => {
-    if (!billingAvailable()) return false;
-    const { store, ProductType, Platform } = cdv();
+    if (!billingAvailable()) { lastProblem = 'A assinatura está disponível no app instalado pela Google Play.'; return false; }
+    const lib = await waitForStore();
+    if (!lib) { lastProblem = 'A loja da Google Play não carregou neste aparelho. Feche e abra o app de novo. (código: plugin)'; return false; }
+    const { store, ProductType, Platform } = lib;
     const supabase = createClient();
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user) return false;
+    if (!session?.user) { lastProblem = 'Entre na sua conta para assinar.'; return false; }
 
     // O id da conta vai junto com a compra: o servidor confere que a assinatura é desta pessoa.
     store.obfuscator = 'disabled';
     store.applicationUsername = () => session.user.id;
 
-    store.register([{ id: PRO_PRODUCT_ID, type: ProductType.PAID_SUBSCRIPTION, platform: Platform.GOOGLE_PLAY }]);
-    store.when().approved((transaction: any) => {
-      if (transaction.products?.some((p: any) => p.id === PRO_PRODUCT_ID)) activate(transaction);
-    });
-    store.error((e: any) => console.warn('Loja:', e?.message));
+    if (!registered) {
+      registered = true;
+      store.register([{ id: PRO_PRODUCT_ID, type: ProductType.PAID_SUBSCRIPTION, platform: Platform.GOOGLE_PLAY }]);
+      store.when().approved((transaction: any) => {
+        if (transaction.products?.some((p: any) => p.id === PRO_PRODUCT_ID)) activate(transaction);
+      });
+      store.error((e: any) => console.warn('Loja:', e?.code, e?.message));
+    }
 
-    const errors = await store.initialize([Platform.GOOGLE_PLAY]);
-    return !errors?.length || !!store.get(PRO_PRODUCT_ID, Platform.GOOGLE_PLAY);
-  })().catch(() => false);
+    let errors: any[] | undefined;
+    if (!initialized) {
+      initialized = true;
+      errors = await withTimeout(store.initialize([Platform.GOOGLE_PLAY]), 15000, 'timeout');
+    } else {
+      await withTimeout(store.update(), 15000, 'timeout'); // tentou antes e falhou: busca o produto de novo
+    }
+    if (store.get(PRO_PRODUCT_ID, Platform.GOOGLE_PLAY)) return true;
+    lastProblem = errors?.length
+      ? `A Google Play não respondeu: ${errors[0]?.message || 'erro'} (código: ${errors[0]?.code ?? 'loja'})`
+      : 'A assinatura Pro ainda não está disponível na Google Play. Tente mais tarde. (código: produto)';
+    return false;
+  })().catch((e: any) => {
+    lastProblem = e?.message === 'timeout'
+      ? 'A Google Play demorou para responder. Confira a internet e tente de novo. (código: tempo)'
+      : `Não foi possível abrir a loja: ${e?.message || 'erro'}`;
+    return false;
+  }).then((ok) => {
+    if (!ok) initPromise = null; // deixa tentar de novo no próximo toque
+    return ok;
+  });
   return initPromise;
 }
 
@@ -81,23 +121,21 @@ export async function proPriceLabel(): Promise<string> {
 
 /** Abre a tela de assinatura da Google Play. Retorna uma mensagem de erro ou null. */
 export async function subscribePro(): Promise<string | null> {
-  if (!(await initBilling())) {
-    return 'A assinatura está disponível no app instalado pela Google Play.';
-  }
+  if (!(await initBilling())) return lastProblem || 'A assinatura não está disponível agora. Tente mais tarde.';
   const { store, Platform } = cdv();
   const offer = store.get(PRO_PRODUCT_ID, Platform.GOOGLE_PLAY)?.getOffer();
-  if (!offer) return 'O plano Pro ainda não está disponível na sua loja. Tente mais tarde.';
+  if (!offer) return 'O plano Pro ainda não está disponível na sua loja. Tente mais tarde. (código: oferta)';
   const error = await offer.order();
   if (error) {
     // Código 6777006 = pessoa cancelou a tela da Google Play: não é erro.
-    return error.code === 6777006 ? null : (error.message || 'Não foi possível concluir a assinatura.');
+    return error.code === 6777006 ? null : `${error.message || 'Não foi possível concluir a assinatura.'} (código: ${error.code ?? 'compra'})`;
   }
   return null;
 }
 
 /** "Restaurar compra": reenvia ao servidor as assinaturas que a Google Play conhece neste aparelho. */
 export async function restorePro(): Promise<string | null> {
-  if (!(await initBilling())) return 'Disponível apenas no app instalado pela Google Play.';
+  if (!(await initBilling())) return lastProblem || 'Disponível apenas no app instalado pela Google Play.';
   const { store } = cdv();
   await store.restorePurchases();
   const owned = (store.localTransactions ?? []).filter((t: any) =>
