@@ -77,6 +77,15 @@ export type WeeklySummary = {
 export type JournalKind = 'voz' | 'gratidao' | 'conversa' | 'aterramento' | 'noite' | 'terapia' | 'hoje';
 export type JournalEntry = { id: string; kind: JournalKind; mood: string | null; created_at: string; summary: string; content: string; title?: string };
 export type OrgSector = { id: string; name: string };
+// Caderno (estudos e ideias)
+export type NoteKind = 'aprendizado' | 'ideia' | 'lembrete';
+export type StudyNote = { id: string; kind: NoteKind; title: string; content: string; summary: string; subject: string; tags: string[]; pinned: boolean; created_at: string; updated_at: string; cards: number };
+export type StudySummary = { due: number; notes: number; cards: number; weekMinutes: number; streak: number; reviewedToday: number };
+export type StudyCard = { id: string; noteId: string | null; front: string; back: string; isNew: boolean; late: boolean; note: string | null; subject: string | null };
+export type StudyGrade = 'errei' | 'dificil' | 'facil';
+export type QuizQuestion = { pergunta: string; opcoes: string[]; correta: number; porque: string };
+export type StudyLesson = { crisis: boolean; titulo: string; materia: string; explicacao: string; topicos: string[]; quiz: QuizQuestion[] };
+export type StudySource = { id: string; title: string; kind: NoteKind; subject: string };
 export type CampaignKind = 'setembro' | 'provas' | 'pausa' | 'sono' | 'livre' | 'janeiro' | 'voltaaulas' | 'saudemental' | 'fimdeano' | 'outubrorosa' | 'novembroazul' | 'ansiedade';
 export type OrgKind = 'escola' | 'empresa' | 'outro';
 export type OrgDetails = { code: string | null; adminCode: string | null; kind: OrgKind; plan: 'teste' | 'ativo' | 'pausado'; trialUntil: string | null; owner: boolean; team: number };
@@ -218,6 +227,22 @@ export const noricaApi = {
 
   journalVoice: (text: string) =>
     call<{ entry: JournalEntry; crisis: boolean; tasks: string[] }>('journal_voice', { text }),
+  studyNoteSave: (note: { id?: string; kind: NoteKind; content: string; title?: string; summary?: string; subject?: string; tags?: string[]; cards?: { front: string; back: string }[]; organize?: boolean }) =>
+    call<{ note: StudyNote; organized: boolean; cardsCreated: number; aiNote: string | null; crisis: boolean }>('study_note_save', note),
+  studyNoteList: (q?: string) => call<{ notes: StudyNote[]; subjects: string[] }>('study_note_list', q ? { q } : {}),
+  studyNoteDelete: (id: string) => call<{ ok: boolean }>('study_note_delete', { id }),
+  studyNotePin: (id: string, pinned: boolean) => call<{ ok: boolean; pinned: boolean }>('study_note_pin', { id, pinned }),
+  studyNoteCards: (id: string) => call<{ cards: { id: string; front: string; back: string; due_on: string }[] }>('study_note_cards', { id }),
+  studySummary: () => call<StudySummary>('study_summary'),
+  studyDue: (limit = 20) => call<{ cards: StudyCard[]; summary: StudySummary }>('study_due', { limit }),
+  studyReview: (id: string, grade: StudyGrade) => call<{ ok: boolean; due_on: string; interval: number }>('study_review', { id, grade }),
+  studyCardSave: (front: string, back: string, noteId?: string) => call<{ ok: boolean }>('study_card_save', { front, back, noteId }),
+  studyCardDelete: (id: string) => call<{ ok: boolean }>('study_card_delete', { id }),
+  studyExplain: (text: string) => call<StudyLesson>('study_explain', { text }),
+  studyAsk: (question: string) => call<{ answer: string; sources: StudySource[]; ai: boolean; aiNote?: string }>('study_ask', { question }),
+  studySessionSave: (minutes: number, before: number | null, after: number | null) =>
+    call<{ ok: boolean; summary: StudySummary }>('study_session_save', { minutes, before, after }),
+
   journalSave: (kind: Exclude<JournalKind, 'voz'>, content: string, summary?: string) =>
     call<{ entry: JournalEntry; crisis: boolean }>('journal_save', { kind, content, summary }),
   journalList: (limit = 10, kind?: JournalKind) => call<{ entries: JournalEntry[] }>('journal_list', { limit, kind }),

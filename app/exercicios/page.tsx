@@ -7,7 +7,7 @@ import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import {
-  ArrowLeft, Eye, Hand, Ear, Flower2, Coffee, Sparkles, MessagesSquare, Loader2, CheckCircle2, Sword, Heart, LifeBuoy, ChevronRight, Moon, Waves, Route, Mail, CalendarClock, CalendarHeart, Trophy, Flame, PersonStanding, Timer, Headphones, HeartHandshake } from 'lucide-react';
+  ArrowLeft, Eye, Hand, Ear, Flower2, Coffee, Sparkles, MessagesSquare, Loader2, CheckCircle2, Sword, Heart, LifeBuoy, ChevronRight, Moon, Waves, Route, Mail, CalendarClock, CalendarHeart, Trophy, Flame, PersonStanding, Timer, Headphones, HeartHandshake, NotebookPen } from 'lucide-react';
 import { noricaApi, type JournalEntry } from '@/lib/norica-api';
 import { HelpSheet } from '@/components/AjudaAgora';
 
@@ -88,6 +88,9 @@ export default function ExerciciosPage() {
                   { href: '/toque/', title: 'Acalmar só com toques', desc: 'Para quando não dá vontade de escrever: respirar segurando o círculo ou estourar bolhas.', time: '1–3 min', icon: Hand, color: 'text-teal-300 bg-teal-500/10 border-teal-500/20' },
                   { href: '/noite/', title: 'Modo noite', desc: 'Para quando o sono não vem: respiração lenta, esvaziar a mente e sons com timer.', time: '5–30 min', icon: Moon, color: 'text-indigo-300 bg-indigo-500/10 border-indigo-500/20' },
                   { href: '/respiracao/', title: 'Respiração 4-7-8 com sons', desc: 'Ondas do mar, chuva, lareira, floresta ou café enquanto você respira.', time: '3 min', icon: Waves, color: 'text-teal-300 bg-teal-500/10 border-teal-500/20' },
+                ] },
+                { section: 'Estudos e ideias', items: [
+                  { href: '/caderno/', title: 'Caderno de estudos e ideias', desc: 'Anote o que aprendeu e suas ideias, por texto ou voz. A IA organiza, explica, faz quiz e te ajuda a lembrar.', time: 'todo dia', icon: NotebookPen, color: 'text-violet-300 bg-violet-400/10 border-violet-300/20' },
                 ] },
                 { section: 'Para o dia a dia', items: [
                   { href: '/trilhas/', title: 'Trilhas de 7 dias', desc: 'Prova, sono, gentileza consigo, quem cuida, pais de primeira viagem e LGBTQIA+.', time: '7 dias', icon: Route, color: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/20' },

@@ -16,6 +16,7 @@ import { checkSubscription, PRO_PRODUCT_ID } from "../_shared/google-play.ts";
 import { synthesize, TTS_VOICES, ttsConfigured } from "../_shared/tts.ts";
 import { pushConfigured, pushSoon } from "../_shared/push.ts";
 import { meditacaoById } from "../_shared/meditacoes.ts";
+import { ASK_PROMPT, cleanCards, cleanQuiz, cleanStr, EXPLAIN_PROMPT, type Grade, GRADES, nextReview, NOTE_KINDS, ORGANIZE_PROMPT, rankNotes } from "../_shared/caderno.ts";
 import {
   arenaFeedbackPrompt,
   arenaSystemPrompt,
@@ -873,6 +874,274 @@ async function prepConversation(_ctx: Ctx, body: Record<string, unknown>) {
     crisis,
     cenario: `Conversa difícil com ${pessoa}`.slice(0, 120),
   };
+}
+
+// ---------------------------------------------------------------------
+// Caderno: estudos e ideias (anotações, revisão espaçada, estudar e perguntar com a IA, foco)
+// ---------------------------------------------------------------------
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const NOTE_COLS = "id, kind, title, content, summary, subject, tags, pinned, created_at, updated_at";
+type NoteRow = { id: string; kind: string; title: string; content: string; summary: string | null; subject: string | null; tags: string | null; pinned: boolean; created_at: string; updated_at: string };
+
+async function noteOut(r: NoteRow, cards = 0) {
+  const [title, content, summary, subject, tagsRaw] = await Promise.all([
+    decrypt(r.title), decrypt(r.content),
+    r.summary ? decrypt(r.summary) : Promise.resolve(""),
+    r.subject ? decrypt(r.subject) : Promise.resolve(""),
+    r.tags ? decrypt(r.tags) : Promise.resolve("[]"),
+  ]);
+  let tags: string[] = [];
+  try { tags = (JSON.parse(tagsRaw) as unknown[]).filter((t): t is string => typeof t === "string"); } catch (_e) { /* sem etiquetas */ }
+  return { id: r.id, kind: r.kind, title, content, summary, subject, tags, pinned: r.pinned, created_at: r.created_at, updated_at: r.updated_at, cards };
+}
+type NoteOut = Awaited<ReturnType<typeof noteOut>>;
+
+async function allNotes(ctx: Ctx, limit = 300): Promise<NoteOut[]> {
+  const { data, error } = await ctx.db.from("study_notes").select(NOTE_COLS).eq("user_id", ctx.userId)
+    .order("created_at", { ascending: false }).limit(limit);
+  if (error) throw new HttpError(500, "Não foi possível abrir o Caderno agora");
+  const { data: cardRows } = await ctx.db.from("study_cards").select("note_id").eq("user_id", ctx.userId).limit(5000);
+  const counts = new Map<string, number>();
+  for (const c of cardRows ?? []) if (c.note_id) counts.set(c.note_id, (counts.get(c.note_id) ?? 0) + 1);
+  return await Promise.all((data ?? []).map((r) => noteOut(r as NoteRow, counts.get(r.id) ?? 0)));
+}
+
+async function insertCards(ctx: Ctx, noteId: string | null, cards: { front: string; back: string }[]): Promise<number> {
+  if (!cards.length) return 0;
+  const rows = await Promise.all(cards.map(async (c) => ({
+    user_id: ctx.userId, note_id: noteId, front: await encrypt(c.front), back: await encrypt(c.back), due_on: brtDay(),
+  })));
+  const { error } = await ctx.db.from("study_cards").insert(rows);
+  if (error) { console.error("study_cards:", error.message); return 0; }
+  return rows.length;
+}
+
+/** Salva uma anotação. Nova anotação: a IA organiza (título, resumo, matéria, etiquetas e cartões). */
+async function studyNoteSave(ctx: Ctx, body: Record<string, unknown>) {
+  const kind = (NOTE_KINDS as readonly string[]).includes(String(body.kind)) ? String(body.kind) : "aprendizado";
+  const content = cleanText(body.content, 6000);
+  const id = typeof body.id === "string" && UUID_RE.test(body.id) ? body.id : null;
+  const crisis = detectRisk(content);
+  let title = cleanStr(body.title, 80);
+  let summary = cleanStr(body.summary, 300);
+  let subject = cleanStr(body.subject, 40);
+  let tags = Array.isArray(body.tags) ? (body.tags as unknown[]).map((t) => cleanStr(t, 24).toLowerCase()).filter(Boolean).slice(0, 5) : [];
+  let cards = cleanCards(body.cards, 6); // cartões prontos (vindos do "Estudar com a IA")
+  let aiNote: string | null = null;
+  let organized = false;
+
+  // Nova anotação: organiza com a IA (pode desligar). Edição: só se pedir.
+  const wantAi = !crisis && (id ? body.organize === true : body.organize !== false);
+  if (wantAi) {
+    const limit = await consume(ctx.admin, ctx.userId, "study_ai");
+    if (limit) aiNote = limit;
+    else {
+      const raw = await withTimeout(
+        groqChat([{ role: "system", content: ORGANIZE_PROMPT }, { role: "user", content: `Tipo: ${kind}\nTexto:\n${content}` }],
+          { model: FAST_MODEL, temperature: 0.3, maxTokens: 500 }).catch(() => ""),
+        15000, "");
+      const p = parseJsonObject(raw) ?? {};
+      organized = Object.keys(p).length > 0;
+      title = title || cleanStr(p.titulo, 80);
+      summary = summary || cleanStr(p.resumo, 300);
+      subject = subject || cleanStr(p.materia, 40);
+      if (!tags.length && Array.isArray(p.etiquetas)) tags = (p.etiquetas as unknown[]).map((t) => cleanStr(t, 24).toLowerCase()).filter(Boolean).slice(0, 3);
+      if (!id && kind === "aprendizado" && !cards.length) cards = cleanCards(p.cartoes, 3);
+    }
+  }
+  if (!title) title = content.split(/\s+/).slice(0, 6).join(" ").slice(0, 80);
+
+  const row = {
+    kind,
+    title: await encrypt(title),
+    content: await encrypt(content),
+    summary: summary ? await encrypt(summary) : null,
+    subject: subject ? await encrypt(subject) : null,
+    tags: await encrypt(JSON.stringify(tags)),
+    updated_at: new Date().toISOString(),
+  };
+  const q = id
+    ? ctx.db.from("study_notes").update(row).eq("id", id).eq("user_id", ctx.userId)
+    : ctx.db.from("study_notes").insert({ ...row, user_id: ctx.userId });
+  const { data: saved, error } = await q.select(NOTE_COLS).single();
+  if (error || !saved) throw new HttpError(id ? 404 : 500, id ? "Anotação não encontrada" : "Não foi possível salvar a anotação agora");
+
+  const created = await insertCards(ctx, saved.id, cards);
+  let total = created;
+  if (id) {
+    const { count } = await ctx.db.from("study_cards").select("id", { count: "exact", head: true }).eq("note_id", id);
+    total = count ?? 0;
+  }
+  return { note: await noteOut(saved as NoteRow, total), organized, cardsCreated: created, aiNote, crisis };
+}
+
+async function studyNoteList(ctx: Ctx, body: Record<string, unknown>) {
+  const notes = await allNotes(ctx);
+  const q = typeof body.q === "string" ? body.q.trim().slice(0, 120) : "";
+  const subjects = [...new Set(notes.map((n) => n.subject).filter(Boolean))].slice(0, 30);
+  return { notes: q ? rankNotes(notes, q, 50) : notes, subjects };
+}
+
+async function studyNoteDelete(ctx: Ctx, body: Record<string, unknown>) {
+  const id = String(body.id ?? "");
+  if (!UUID_RE.test(id)) throw new HttpError(400, "Anotação inválida");
+  await ctx.db.from("study_notes").delete().eq("id", id).eq("user_id", ctx.userId);
+  return { ok: true };
+}
+
+async function studyNotePin(ctx: Ctx, body: Record<string, unknown>) {
+  const id = String(body.id ?? "");
+  if (!UUID_RE.test(id)) throw new HttpError(400, "Anotação inválida");
+  await ctx.db.from("study_notes").update({ pinned: body.pinned === true }).eq("id", id).eq("user_id", ctx.userId);
+  return { ok: true, pinned: body.pinned === true };
+}
+
+/** Dias seguidos com revisão (até hoje ou ontem). */
+async function reviewStreak(ctx: Ctx): Promise<{ streak: number; today: number }> {
+  const since = new Date(Date.now() - 60 * 86400_000).toISOString();
+  const { data } = await ctx.db.from("study_reviews").select("created_at").eq("user_id", ctx.userId).gte("created_at", since).limit(3000);
+  const days = new Set((data ?? []).map((r) => brtDay(new Date(new Date(r.created_at).getTime() - 3 * 3600_000))));
+  const today = brtDay();
+  const todayCount = (data ?? []).filter((r) => brtDay(new Date(new Date(r.created_at).getTime() - 3 * 3600_000)) === today).length;
+  let day = days.has(today) ? today : addDays(today, -1);
+  let streak = 0;
+  while (days.has(day)) { streak++; day = addDays(day, -1); }
+  return { streak, today: todayCount };
+}
+
+async function studySummary(ctx: Ctx) {
+  const today = brtDay();
+  const monday = mondayOf(today);
+  const [due, notes, cards, sessions, streak] = await Promise.all([
+    ctx.db.from("study_cards").select("id", { count: "exact", head: true }).eq("user_id", ctx.userId).lte("due_on", today),
+    ctx.db.from("study_notes").select("id", { count: "exact", head: true }).eq("user_id", ctx.userId),
+    ctx.db.from("study_cards").select("id", { count: "exact", head: true }).eq("user_id", ctx.userId),
+    ctx.db.from("study_sessions").select("minutes").eq("user_id", ctx.userId).gte("created_at", `${monday}T03:00:00Z`),
+    reviewStreak(ctx),
+  ]);
+  return {
+    due: due.count ?? 0,
+    notes: notes.count ?? 0,
+    cards: cards.count ?? 0,
+    weekMinutes: (sessions.data ?? []).reduce((s, r) => s + (r.minutes ?? 0), 0),
+    streak: streak.streak,
+    reviewedToday: streak.today,
+  };
+}
+
+/** Cartões para revisar hoje (os mais atrasados primeiro). */
+async function studyDue(ctx: Ctx, body: Record<string, unknown>) {
+  const today = brtDay();
+  const limit = Math.min(Math.max(Number(body.limit) || 20, 1), 50);
+  const { data, error } = await ctx.db.from("study_cards").select("id, note_id, front, back, reps, interval_days, due_on")
+    .eq("user_id", ctx.userId).lte("due_on", today).order("due_on", { ascending: true }).order("created_at", { ascending: true }).limit(limit);
+  if (error) throw new HttpError(500, "Não foi possível carregar a revisão agora");
+  const noteIds = [...new Set((data ?? []).map((c) => c.note_id).filter(Boolean))] as string[];
+  const titles = new Map<string, { title: string; subject: string }>();
+  if (noteIds.length) {
+    const { data: ns } = await ctx.db.from("study_notes").select("id, title, subject").in("id", noteIds);
+    for (const n of ns ?? []) titles.set(n.id, { title: await decrypt(n.title), subject: n.subject ? await decrypt(n.subject) : "" });
+  }
+  const cards = await Promise.all((data ?? []).map(async (c) => ({
+    id: c.id, noteId: c.note_id, front: await decrypt(c.front), back: await decrypt(c.back),
+    isNew: (c.reps ?? 0) === 0, late: c.due_on < today,
+    note: c.note_id ? titles.get(c.note_id)?.title ?? null : null,
+    subject: c.note_id ? titles.get(c.note_id)?.subject ?? null : null,
+  })));
+  return { cards, summary: await studySummary(ctx) };
+}
+
+async function studyReview(ctx: Ctx, body: Record<string, unknown>) {
+  const id = String(body.id ?? "");
+  const grade = String(body.grade ?? "") as Grade;
+  if (!UUID_RE.test(id) || !(GRADES as readonly string[]).includes(grade)) throw new HttpError(400, "Revisão inválida");
+  const { data: card } = await ctx.db.from("study_cards").select("ease, interval_days, reps, lapses").eq("id", id).eq("user_id", ctx.userId).maybeSingle();
+  if (!card) throw new HttpError(404, "Cartão não encontrado");
+  const next = nextReview(card, grade);
+  const due_on = addDays(brtDay(), next.interval_days);
+  const { error } = await ctx.db.from("study_cards").update({ ...next, due_on, reviewed_at: new Date().toISOString() }).eq("id", id).eq("user_id", ctx.userId);
+  if (error) throw new HttpError(500, "Não foi possível salvar a revisão");
+  await ctx.db.from("study_reviews").insert({ user_id: ctx.userId, card_id: id, grade });
+  return { ok: true, due_on, interval: next.interval_days };
+}
+
+async function studyCardSave(ctx: Ctx, body: Record<string, unknown>) {
+  const front = cleanStr(body.front, 200);
+  const back = cleanStr(body.back, 300);
+  if (!front || !back) throw new HttpError(400, "Escreva a pergunta e a resposta");
+  const noteId = typeof body.noteId === "string" && UUID_RE.test(body.noteId) ? body.noteId : null;
+  const n = await insertCards(ctx, noteId, [{ front, back }]);
+  if (!n) throw new HttpError(500, "Não foi possível criar o cartão");
+  return { ok: true };
+}
+
+async function studyNoteCards(ctx: Ctx, body: Record<string, unknown>) {
+  const id = String(body.id ?? "");
+  if (!UUID_RE.test(id)) throw new HttpError(400, "Anotação inválida");
+  const { data } = await ctx.db.from("study_cards").select("id, front, back, due_on").eq("note_id", id).eq("user_id", ctx.userId).order("created_at");
+  return { cards: await Promise.all((data ?? []).map(async (c) => ({ id: c.id, front: await decrypt(c.front), back: await decrypt(c.back), due_on: c.due_on }))) };
+}
+
+async function studyCardDelete(ctx: Ctx, body: Record<string, unknown>) {
+  const id = String(body.id ?? "");
+  if (!UUID_RE.test(id)) throw new HttpError(400, "Cartão inválido");
+  await ctx.db.from("study_cards").delete().eq("id", id).eq("user_id", ctx.userId);
+  return { ok: true };
+}
+
+/** Estudar com a IA: explicação simples, pontos-chave e quiz de 3 perguntas. */
+async function studyExplain(ctx: Ctx, body: Record<string, unknown>) {
+  const text = cleanText(body.text, 6000);
+  const crisis = detectRisk(text);
+  if (crisis) return { crisis: true };
+  const limit = await consume(ctx.admin, ctx.userId, "study_ai");
+  if (limit) throw new HttpError(429, limit);
+  const raw = await groqChat(
+    [{ role: "system", content: EXPLAIN_PROMPT }, { role: "user", content: text }],
+    { model: CHAT_MODEL, temperature: 0.4, maxTokens: 1600 },
+  ).catch((e) => { console.error("study_explain:", e); return ""; });
+  const p = parseJsonObject(raw) ?? {};
+  const explicacao = typeof p.explicacao === "string" ? p.explicacao.trim().slice(0, 3000) : "";
+  if (!explicacao) throw new HttpError(502, "Não consegui preparar a explicação agora. Tente de novo em instantes.");
+  const topicos = Array.isArray(p.topicos) ? (p.topicos as unknown[]).map((t) => cleanStr(t, 200)).filter(Boolean).slice(0, 6) : [];
+  return {
+    crisis: false,
+    titulo: cleanStr(p.titulo, 80) || text.split(/\s+/).slice(0, 6).join(" "),
+    materia: cleanStr(p.materia, 40),
+    explicacao,
+    topicos,
+    quiz: cleanQuiz(p.quiz),
+  };
+}
+
+/** Perguntar ao Caderno: a IA responde só com o que a pessoa anotou, citando as anotações. */
+async function studyAsk(ctx: Ctx, body: Record<string, unknown>) {
+  const question = cleanText(body.question, 400);
+  const notes = await allNotes(ctx);
+  const top = rankNotes(notes, question, 6);
+  const sources = top.map((n) => ({ id: n.id, title: n.title, kind: n.kind, subject: n.subject }));
+  if (!top.length) {
+    return { answer: "Não encontrei nada sobre isso no seu Caderno ainda. Quando aprender, anote aqui que eu te ajudo a lembrar. 📒", sources: [], ai: false };
+  }
+  const limit = await consume(ctx.admin, ctx.userId, "study_ai");
+  if (limit) return { answer: "Encontrei estas anotações que parecem falar disso. Toque para abrir:", sources, ai: false, aiNote: limit };
+  const context = top.map((n, i) => `[${i + 1}] ${n.title}${n.subject ? ` (${n.subject})` : ""}\n${(n.summary ? n.summary + "\n" : "")}${n.content.slice(0, 700)}`).join("\n\n");
+  const answer = await groqChat(
+    [{ role: "system", content: ASK_PROMPT }, { role: "user", content: `Pergunta: ${question}\n\nAnotações:\n${context}` }],
+    { model: FAST_MODEL, temperature: 0.2, maxTokens: 400 },
+  ).catch(() => "");
+  return { answer: answer.trim().slice(0, 1500) || "Encontrei estas anotações que parecem falar disso. Toque para abrir:", sources, ai: !!answer.trim() };
+}
+
+/** Sessão de foco terminada (minutos e ansiedade antes/depois, de 1 a 5). */
+async function studySessionSave(ctx: Ctx, body: Record<string, unknown>) {
+  const minutes = Math.round(Number(body.minutes));
+  if (!Number.isFinite(minutes) || minutes < 1 || minutes > 180) throw new HttpError(400, "Tempo inválido");
+  const lvl = (v: unknown) => { const n = Math.round(Number(v)); return n >= 1 && n <= 5 ? n : null; };
+  const { error } = await ctx.db.from("study_sessions").insert({ user_id: ctx.userId, minutes, anxiety_before: lvl(body.before), anxiety_after: lvl(body.after) });
+  if (error) throw new HttpError(500, "Não foi possível salvar a sessão");
+  return { ok: true, summary: await studySummary(ctx) };
 }
 
 // ---------------------------------------------------------------------
@@ -2192,7 +2461,7 @@ async function deleteAccount(ctx: Ctx) {
   const chatIds = (chats ?? []).map((c) => c.id);
   if (chatIds.length) await admin.from("messages").delete().in("chat_id", chatIds);
   await admin.from("chats").delete().eq("user_id", uid);
-  for (const table of ["mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "usage_events", "user_plans", "user_memory", "safety_plans", "message_feedback", "app_errors", "weekly_summaries", "journal_entries", "org_members", "monthly_reports", "future_letters", "care_invites", "promo_redemptions"]) {
+  for (const table of ["mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "usage_events", "user_plans", "user_memory", "safety_plans", "message_feedback", "app_errors", "weekly_summaries", "journal_entries", "org_members", "monthly_reports", "future_letters", "care_invites", "promo_redemptions", "study_reviews", "study_sessions", "study_cards", "study_notes"]) {
     await admin.from(table).delete().eq("user_id", uid);
   }
   await admin.from("care_nudges").delete().or(`from_user.eq.${uid},to_user.eq.${uid}`);
@@ -2314,7 +2583,7 @@ async function health(ctx: Ctx) {
     checks.criptografia = { ok: false, detail: String((e as Error).message) };
   }
 
-  for (const table of ["chats", "messages", "mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "user_plans", "usage_events", "app_errors", "user_memory", "safety_plans", "message_feedback", "weekly_summaries", "journal_entries", "organizations", "org_members", "org_sectors", "monthly_reports", "future_letters", "org_campaigns", "care_pairs", "care_invites", "care_nudges", "care_messages", "care_groups", "care_group_members", "care_challenges", "push_tokens", "leads", "promo_codes", "promo_redemptions"]) {
+  for (const table of ["chats", "messages", "mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "user_plans", "usage_events", "app_errors", "user_memory", "safety_plans", "message_feedback", "weekly_summaries", "journal_entries", "organizations", "org_members", "org_sectors", "monthly_reports", "future_letters", "org_campaigns", "care_pairs", "care_invites", "care_nudges", "care_messages", "care_groups", "care_group_members", "care_challenges", "push_tokens", "leads", "promo_codes", "promo_redemptions", "study_notes", "study_cards", "study_reviews", "study_sessions"]) {
     const { error } = await ctx.admin.from(table).select("*", { count: "exact", head: true });
     checks[`tabela_${table}`] = error ? { ok: false, detail: error.message } : { ok: true };
   }
@@ -2357,6 +2626,19 @@ const actions: Record<string, (ctx: Ctx, body: Record<string, unknown>) => Promi
   pro_interest: proInterest,
   verify_purchase: verifyPurchase,
   promo_redeem: promoRedeem,
+  study_note_save: studyNoteSave,
+  study_note_list: studyNoteList,
+  study_note_delete: studyNoteDelete,
+  study_note_pin: studyNotePin,
+  study_note_cards: studyNoteCards,
+  study_summary: studySummary,
+  study_due: studyDue,
+  study_review: studyReview,
+  study_card_save: studyCardSave,
+  study_card_delete: studyCardDelete,
+  study_explain: studyExplain,
+  study_ask: studyAsk,
+  study_session_save: studySessionSave,
   memory_get: memoryGet,
   memory_set: memorySet,
   memory_clear: memoryClear,

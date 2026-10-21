@@ -11,11 +11,11 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { billingConfigured, checkSubscription } from "./google-play.ts";
 
 export type Plan = "free" | "pro";
-export type UsageKind = "porto_message" | "arena_feedback" | "tts";
+export type UsageKind = "porto_message" | "arena_feedback" | "tts" | "study_ai";
 
 export const PLAN_LIMITS: Record<Plan, Record<UsageKind, number>> = {
-  free: { porto_message: 30, arena_feedback: 2, tts: 20 }, // por dia
-  pro: { porto_message: 300, arena_feedback: 50, tts: 120 }, // uso justo
+  free: { porto_message: 30, arena_feedback: 2, tts: 20, study_ai: 8 }, // por dia
+  pro: { porto_message: 300, arena_feedback: 50, tts: 120, study_ai: 150 }, // uso justo
 };
 
 export function launchMode(): boolean {
@@ -86,6 +86,7 @@ export async function consume(admin: SupabaseClient, userId: string, kind: Usage
   if (used >= limit) {
     if (effective === "pro") return "Você usou bastante hoje. Que tal uma pausa e voltar amanhã? 🌊";
     if (kind === "tts") return "A voz natural descansou por hoje. A leitura continua com a voz do celular.";
+    if (kind === "study_ai") return `Você usou as ${limit} ajudas da IA no Caderno hoje (plano Gratuito). Suas anotações e revisões continuam liberadas — e o Pro libera a IA sem limite.`;
     return kind === "porto_message"
       ? `Você chegou ao limite de ${limit} mensagens de hoje no plano Gratuito. Amanhã o Porto abre de novo — ou conheça o Pro no seu Perfil. Se precisar de ajuda agora, toque em "Ajuda".`
       : `Você já viu ${limit} retornos da Arena hoje no plano Gratuito. Volte amanhã ou conheça o Pro no seu Perfil.`;

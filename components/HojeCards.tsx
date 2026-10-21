@@ -5,7 +5,8 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ChevronRight, Flame, Mail, Route, X, Timer, HeartHandshake } from 'lucide-react';
+import { ChevronRight, Flame, Mail, Route, X, Timer, HeartHandshake, NotebookPen } from 'lucide-react';
+import { cachedStudy, refreshStudy } from '@/lib/caderno';
 import { usePhase, phaseLabel } from '@/lib/fase';
 import { updateFlameWidget } from '@/lib/flame-widget';
 import { getTracks, todayStep } from '@/lib/trilhas';
@@ -28,6 +29,7 @@ export default function HojeCards() {
   const phase = usePhase();
   const [minuteDone, setMinuteDone] = useState(true);
   const [friends, setFriends] = useState<FriendsState | null>(() => cacheGet<FriendsState>(getAuthState().user?.id, 'friends'));
+  const [studyDue, setStudyDue] = useState(0);
 
   useEffect(() => {
     const refresh = () => {
@@ -46,9 +48,14 @@ export default function HojeCards() {
     const f = setTimeout(() => {
       noricaApi.friendsList().then((s) => { if (!Array.isArray(s?.friends)) return; setFriends(s); cacheSet(getAuthState().user?.id, 'friends', s); updateFlameWidget(s); }).catch(() => {});
     }, 1500);
+    // Caderno: cartões para relembrar hoje (só busca no servidor para quem já usa o Caderno).
+    const study = () => setStudyDue(cachedStudy()?.due ?? 0);
+    study();
+    const st = (cachedStudy()?.cards ?? 0) > 0 ? setTimeout(() => { refreshStudy(); }, 2500) : null;
+    window.addEventListener('norica-caderno', study);
     window.addEventListener('norica-trilhas', refresh);
     window.addEventListener('norica-cartas', refresh);
-    return () => { clearTimeout(t); clearTimeout(f); window.removeEventListener('norica-trilhas', refresh); window.removeEventListener('norica-cartas', refresh); };
+    return () => { clearTimeout(t); clearTimeout(f); if (st) clearTimeout(st); window.removeEventListener('norica-caderno', study); window.removeEventListener('norica-trilhas', refresh); window.removeEventListener('norica-cartas', refresh); };
   }, []);
 
   const dismiss = (id: string) => {
@@ -135,6 +142,17 @@ export default function HojeCards() {
             </p>
           </div>
           <ChevronRight size={18} className="text-orange-200/50" />
+        </button>
+      )}
+
+      {studyDue > 0 && (
+        <button onClick={() => router.push('/caderno/revisar/')} className={`${card} bg-gradient-to-br from-violet-950/50 to-[#0b0f19] border-violet-300/20`} data-testid="caderno-card">
+          <div className="w-14 h-14 rounded-2xl bg-violet-400/15 text-violet-200 flex items-center justify-center shrink-0"><NotebookPen size={26} /></div>
+          <div className="flex-1">
+            <p className="text-[9px] font-black text-violet-300/80 uppercase tracking-[0.3em]">Caderno</p>
+            <p className="text-base font-black text-white tracking-tight leading-snug">{studyDue} {studyDue === 1 ? 'cartão' : 'cartões'} para relembrar hoje. Leva 2 minutos. 📒</p>
+          </div>
+          <ChevronRight size={18} className="text-violet-200/50" />
         </button>
       )}
 

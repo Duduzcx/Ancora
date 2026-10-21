@@ -25,6 +25,7 @@ const FREE_FEATURES: Feature[] = [
   { text: 'Logs diários com tarefas sugeridas pela IA' },
   { text: 'Farol com o mapa emocional dos últimos 7 dias' },
   { text: 'Cofre criptografado' },
+  { text: 'Caderno: anotações e revisão à vontade, e 8 ajudas da IA por dia' },
   { text: 'Conquistas da jornada, Modo noite e sons para dormir' },
 ];
 
@@ -35,6 +36,7 @@ const PRO_FEATURES: Feature[] = [
   { text: 'Farol com o mapa emocional dos últimos 30 dias' },
   { text: 'Resumo da semana escrito pela Nórica, todo domingo' },
   { text: 'Relatório mensal do seu mar em PDF para levar ao psicólogo' },
+  { text: 'Caderno com IA sem limite: organizar, explicar, quiz e perguntar às suas anotações' },
   { text: 'Novos cenários de treino na Arena', soon: true },
   { text: 'Você apoia um app brasileiro de cuidado emocional 💚' },
 ];
