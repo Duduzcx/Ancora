@@ -26,11 +26,14 @@ export default function CadernoPage() {
   const [open, setOpen] = useState<string | null>(null);
   const [summary, setSummary] = useState<StudySummary | null>(null);
   const [reminder, setReminder] = useState({ on: false, hour: 19 });
+  const [materia, setMateria] = useState<string | null>(null);
   const voice = useVoiceNote((t) => setText((cur) => (cur.trim() ? `${cur.trim()} ${t}` : t)));
 
   const load = () => noricaApi.studyNoteList().then((r) => { setNotes(r.notes); setSubjects(r.subjects); }).catch(() => setNotes((n) => n ?? []));
   useEffect(() => {
     setSummary(cachedStudy());
+    const m = new URLSearchParams(window.location.search).get('materia');
+    if (m) setMateria(m.slice(0, 40));
     setReminder(getReviewReminder());
     load();
     refreshStudy().then((s) => s && setSummary(s));
@@ -41,7 +44,7 @@ export default function CadernoPage() {
     if (!content || saving) return;
     setSaving(true); setErr(null); setSaved(null);
     try {
-      const r = await noricaApi.studyNoteSave({ kind, content });
+      const r = await noricaApi.studyNoteSave({ kind, content, ...(materia ? { subject: materia } : {}) });
       setSaved({ note: r.note, cards: r.cardsCreated, aiNote: r.aiNote });
       setText('');
       setNotes((n) => [r.note, ...(n ?? [])]);
@@ -113,6 +116,12 @@ export default function CadernoPage() {
 
         {/* Anotar */}
         <section className="p-5 rounded-[2rem] bg-white/5 border border-white/10 space-y-3" data-testid="anotar">
+          {materia && (
+            <p className="flex items-center justify-between text-[11px] font-black text-emerald-200" data-testid="anotar-materia-chip">
+              <span>📚 Anotando em: {materia}</span>
+              <button onClick={() => setMateria(null)} className="text-white/40" aria-label="Tirar matéria"><X size={13} /></button>
+            </p>
+          )}
           <div className="flex gap-1.5 flex-wrap">
             {KINDS.map((k) => (
               <button key={k.id} onClick={() => setKind(k.id)} aria-pressed={kind === k.id}

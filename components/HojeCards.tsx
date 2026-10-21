@@ -5,8 +5,9 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ChevronRight, Flame, Mail, Route, X, Timer, HeartHandshake, NotebookPen } from 'lucide-react';
+import { ChevronRight, Flame, Mail, Route, X, Timer, HeartHandshake, NotebookPen, GraduationCap } from 'lucide-react';
 import { cachedStudy, refreshStudy } from '@/lib/caderno';
+import { cachedFaculdade, countdown, daysUntil, kindOf, loadFaculdade, upcoming, type CourseEvent } from '@/lib/faculdade';
 import { usePhase, phaseLabel } from '@/lib/fase';
 import { updateFlameWidget } from '@/lib/flame-widget';
 import { getTracks, todayStep } from '@/lib/trilhas';
@@ -30,6 +31,7 @@ export default function HojeCards() {
   const [minuteDone, setMinuteDone] = useState(true);
   const [friends, setFriends] = useState<FriendsState | null>(() => cacheGet<FriendsState>(getAuthState().user?.id, 'friends'));
   const [studyDue, setStudyDue] = useState(0);
+  const [exam, setExam] = useState<{ e: CourseEvent; course: string | null } | null>(null);
 
   useEffect(() => {
     const refresh = () => {
@@ -53,9 +55,18 @@ export default function HojeCards() {
     study();
     const st = (cachedStudy()?.cards ?? 0) > 0 ? setTimeout(() => { refreshStudy(); }, 2500) : null;
     window.addEventListener('norica-caderno', study);
+    // Faculdade: a próxima prova/trabalho dos próximos 7 dias.
+    const fac = () => {
+      const f = cachedFaculdade();
+      const e = f ? upcoming(f.events, 7)[0] : null;
+      setExam(e ? { e, course: f!.courses.find((c) => c.id === e.course_id)?.name ?? null } : null);
+    };
+    fac();
+    const ft = (cachedFaculdade()?.courses.length ?? 0) > 0 ? setTimeout(() => { loadFaculdade().catch(() => {}); }, 3000) : null;
+    window.addEventListener('norica-faculdade', fac);
     window.addEventListener('norica-trilhas', refresh);
     window.addEventListener('norica-cartas', refresh);
-    return () => { clearTimeout(t); clearTimeout(f); if (st) clearTimeout(st); window.removeEventListener('norica-caderno', study); window.removeEventListener('norica-trilhas', refresh); window.removeEventListener('norica-cartas', refresh); };
+    return () => { clearTimeout(t); clearTimeout(f); if (st) clearTimeout(st); if (ft) clearTimeout(ft); window.removeEventListener('norica-faculdade', fac); window.removeEventListener('norica-caderno', study); window.removeEventListener('norica-trilhas', refresh); window.removeEventListener('norica-cartas', refresh); };
   }, []);
 
   const dismiss = (id: string) => {
@@ -142,6 +153,18 @@ export default function HojeCards() {
             </p>
           </div>
           <ChevronRight size={18} className="text-orange-200/50" />
+        </button>
+      )}
+
+      {exam && (
+        <button onClick={() => router.push('/faculdade/')} className={`${card} bg-gradient-to-br from-emerald-950/60 to-[#0b0f19] border-emerald-300/20`} data-testid="faculdade-card">
+          <div className="w-14 h-14 rounded-2xl bg-emerald-400/15 flex items-center justify-center text-2xl shrink-0">{kindOf(exam.e.kind).emoji}</div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[9px] font-black text-emerald-300/80 uppercase tracking-[0.3em] flex items-center gap-1"><GraduationCap size={11} /> Faculdade · {countdown(exam.e.day)}</p>
+            <p className="text-base font-black text-white tracking-tight leading-snug">{exam.e.title}{exam.course ? ` de ${exam.course}` : ''}</p>
+            {exam.e.kind === 'prova' && daysUntil(exam.e.day) <= 3 && <p className="text-[11px] text-white/55 font-semibold mt-0.5">Revise um pouco por dia e cuide do sono. Você consegue. 💚</p>}
+          </div>
+          <ChevronRight size={18} className="text-emerald-200/50" />
         </button>
       )}
 

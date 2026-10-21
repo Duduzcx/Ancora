@@ -7,7 +7,7 @@ import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import {
-  ArrowLeft, Eye, Hand, Ear, Flower2, Coffee, Sparkles, MessagesSquare, Loader2, CheckCircle2, Sword, Heart, LifeBuoy, ChevronRight, Moon, Waves, Route, Mail, CalendarClock, CalendarHeart, Trophy, Flame, PersonStanding, Timer, Headphones, HeartHandshake, NotebookPen } from 'lucide-react';
+  ArrowLeft, Eye, Hand, Ear, Flower2, Coffee, Sparkles, MessagesSquare, Loader2, CheckCircle2, Sword, Heart, LifeBuoy, ChevronRight, Moon, Waves, Route, Mail, CalendarClock, CalendarHeart, Trophy, Flame, PersonStanding, Timer, Headphones, HeartHandshake, NotebookPen, GraduationCap } from 'lucide-react';
 import { noricaApi, type JournalEntry } from '@/lib/norica-api';
 import { HelpSheet } from '@/components/AjudaAgora';
 
@@ -91,6 +91,7 @@ export default function ExerciciosPage() {
                 ] },
                 { section: 'Estudos e ideias', items: [
                   { href: '/caderno/', title: 'Caderno de estudos e ideias', desc: 'Anote o que aprendeu e suas ideias, por texto ou voz. A IA organiza, explica, faz quiz e te ajuda a lembrar.', time: 'todo dia', icon: NotebookPen, color: 'text-violet-300 bg-violet-400/10 border-violet-300/20' },
+                  { href: '/faculdade/', title: 'Faculdade: matérias e provas', desc: 'Uma página para cada matéria, calendário de provas e trabalhos, tarefas, notas e lembretes.', time: 'semestre', icon: GraduationCap, color: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/20' },
                 ] },
                 { section: 'Para o dia a dia', items: [
                   { href: '/trilhas/', title: 'Trilhas de 7 dias', desc: 'Prova, sono, gentileza consigo, quem cuida, pais de primeira viagem e LGBTQIA+.', time: '7 dias', icon: Route, color: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/20' },

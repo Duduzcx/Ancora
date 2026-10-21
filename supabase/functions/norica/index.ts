@@ -2461,7 +2461,7 @@ async function deleteAccount(ctx: Ctx) {
   const chatIds = (chats ?? []).map((c) => c.id);
   if (chatIds.length) await admin.from("messages").delete().in("chat_id", chatIds);
   await admin.from("chats").delete().eq("user_id", uid);
-  for (const table of ["mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "usage_events", "user_plans", "user_memory", "safety_plans", "message_feedback", "app_errors", "weekly_summaries", "journal_entries", "org_members", "monthly_reports", "future_letters", "care_invites", "promo_redemptions", "study_reviews", "study_sessions", "study_cards", "study_notes"]) {
+  for (const table of ["mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "usage_events", "user_plans", "user_memory", "safety_plans", "message_feedback", "app_errors", "weekly_summaries", "journal_entries", "org_members", "monthly_reports", "future_letters", "care_invites", "promo_redemptions", "study_reviews", "study_sessions", "study_cards", "study_notes", "course_tasks", "course_events", "courses"]) {
     await admin.from(table).delete().eq("user_id", uid);
   }
   await admin.from("care_nudges").delete().or(`from_user.eq.${uid},to_user.eq.${uid}`);
@@ -2583,7 +2583,7 @@ async function health(ctx: Ctx) {
     checks.criptografia = { ok: false, detail: String((e as Error).message) };
   }
 
-  for (const table of ["chats", "messages", "mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "user_plans", "usage_events", "app_errors", "user_memory", "safety_plans", "message_feedback", "weekly_summaries", "journal_entries", "organizations", "org_members", "org_sectors", "monthly_reports", "future_letters", "org_campaigns", "care_pairs", "care_invites", "care_nudges", "care_messages", "care_groups", "care_group_members", "care_challenges", "push_tokens", "leads", "promo_codes", "promo_redemptions", "study_notes", "study_cards", "study_reviews", "study_sessions"]) {
+  for (const table of ["chats", "messages", "mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "user_plans", "usage_events", "app_errors", "user_memory", "safety_plans", "message_feedback", "weekly_summaries", "journal_entries", "organizations", "org_members", "org_sectors", "monthly_reports", "future_letters", "org_campaigns", "care_pairs", "care_invites", "care_nudges", "care_messages", "care_groups", "care_group_members", "care_challenges", "push_tokens", "leads", "promo_codes", "promo_redemptions", "study_notes", "study_cards", "study_reviews", "study_sessions", "courses", "course_events", "course_tasks"]) {
     const { error } = await ctx.admin.from(table).select("*", { count: "exact", head: true });
     checks[`tabela_${table}`] = error ? { ok: false, detail: error.message } : { ok: true };
   }
