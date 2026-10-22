@@ -1,7 +1,7 @@
 {
   "name": "norica-web",
-  "version": "1.9.0",
-  "versionCode": 56,
+  "version": "1.9.1",
+  "versionCode": 57,
   "private": true,
   "scripts": {
     "dev": "next dev",

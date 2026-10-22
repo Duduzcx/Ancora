@@ -11,9 +11,9 @@ android {
         applicationId "com.zcx.ancora"
         minSdkVersion 30
         targetSdkVersion rootProject.ext.targetSdkVersion
-        // versionCode do relógio precisa ser diferente do celular (celular 56 → relógio 1000056).
-        versionCode 1000056
-        versionName "1.9.0-wear"
+        // versionCode do relógio precisa ser diferente do celular (celular 57 → relógio 1000057).
+        versionCode 1000057
+        versionName "1.9.1-wear"
     }
     buildTypes {
         release {
