@@ -30,3 +30,21 @@ export function cacheClear() {
       .forEach((k) => localStorage.removeItem(k));
   } catch (_e) {}
 }
+
+// Dados pessoais guardados no aparelho fora do cache (humor de hoje, tarefas, sequência, fase difícil).
+// Saem ao sair da conta, para a próxima pessoa no mesmo celular não ver nada.
+const PERSONAL_KEYS = /^norica-(first-name|hoje|last-date|last-logged-date|last-mood|log-insight|log-insight-time|prev-last-logged|progress|streak|tasks|fase:)/;
+
+export async function clearPersonalLocal() {
+  if (typeof window === 'undefined') return;
+  try {
+    Object.keys(localStorage).filter((k) => PERSONAL_KEYS.test(k)).forEach((k) => localStorage.removeItem(k));
+  } catch (_e) {}
+  // Relatórios em PDF/CSV que foram compartilhados ficam na pasta temporária do app.
+  try {
+    const [{ Capacitor }, { Filesystem, Directory }] = await Promise.all([import('@capacitor/core'), import('@capacitor/filesystem')]);
+    if (!Capacitor.isNativePlatform()) return;
+    const { files } = await Filesystem.readdir({ path: '', directory: Directory.Cache });
+    await Promise.all(files.filter((f) => /^norica.*\.(pdf|csv)$/i.test(f.name)).map((f) => Filesystem.deleteFile({ path: f.name, directory: Directory.Cache }).catch(() => {})));
+  } catch (_e) {}
+}

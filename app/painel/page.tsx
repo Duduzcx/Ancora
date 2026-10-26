@@ -36,6 +36,8 @@ export default function PainelPage() {
     if (new URLSearchParams(window.location.search).get('aba') === 'cuidado') setTab('cuidado');
   }, []);
   const isPsi = !!data?.info?.psi?.isPsi;
+  // A psicóloga acompanha o cuidado; códigos, campanhas e ajustes ficam com a coordenação.
+  const readOnly = isPsi && !data?.demo;
 
   const cur = data?.current ?? null;
   const prev = data?.previous ?? null;
@@ -95,7 +97,7 @@ export default function PainelPage() {
             )}
             {isPsi && tab === 'cuidado' ? <Cuidado demo={!!data.demo} /> : (<>
             {data.info && <Convite info={data.info} org={data.org} demo={!!data.demo} members={data.members} onRenamed={load} />}
-            {data.info && (data.info.kind === 'cursinho' || data.info.kind === 'escola') && <Vestibulares data={data} />}
+            {data.info && !readOnly && (data.info.kind === 'cursinho' || data.info.kind === 'escola') && <Vestibulares data={data} />}
 
             <div className="grid grid-cols-2 gap-3">
               <Tile label="Participantes" value={String(data.members)} hint="com o código da instituição" icon={Users} />
@@ -180,9 +182,9 @@ export default function PainelPage() {
               </div>
             )}
 
-            <Setores data={data} onChanged={load} />
+            <Setores data={data} onChanged={load} readOnly={readOnly} />
 
-            <Campanhas data={data} />
+            {!readOnly && <Campanhas data={data} />}
 
             <button onClick={() => buildOrgReportPdf(data).then((b) => shareFile(b, `norica-instituicao-${new Date().toLocaleDateString('en-CA')}.pdf`, 'Relatório da instituição')).catch(() => {})} className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl bg-white/5 border border-white/10 text-[11px] font-black uppercase tracking-widest text-white/80" data-testid="pdf-instituicao">
               <FileText size={16} className="text-emerald-300" /> Relatório da instituição (PDF)
@@ -263,7 +265,8 @@ const feminine = (l: string) => ['Turma', 'Equipe', 'Unidade'].includes(l);
 
 function toCsv(d: OrgDashboard) {
   const head = [d.sectorLabel, 'Participantes', 'Ativos na semana', '% dia difícil', '% semana anterior', '% calmo', '% ansioso', '% agitado', '% S.O.S', '% cuidaram nos Logs', 'Assuntos'];
-  const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  // Aspas e "'" na frente de =, +, -, @: o Excel não executa nada que venha dos nomes de turma ou dos assuntos.
+  const esc = (v: unknown) => { const t = String(v ?? ''); return `"${(/^[=+\-@\t\r]/.test(t) ? `'${t}` : t).replace(/"/g, '""')}"`; };
   const rows = [
     ['Geral', d.members, d.current?.active ?? '', d.current?.hardPeoplePct ?? '', d.previous?.hardPeoplePct ?? '', d.current?.moodPct.calmo ?? '', d.current?.moodPct.ansioso ?? '', d.current?.moodPct.agitado ?? '', d.current?.moodPct.sos ?? '', d.current?.logsPct ?? '', d.current?.topics.map((t) => t.topic).join('; ') ?? ''],
     ...d.sectors.map((r) => [r.name, r.members, r.current?.active ?? 'oculto', r.current?.hardPeoplePct ?? '', r.previous?.hardPeoplePct ?? '', r.current?.moodPct.calmo ?? '', r.current?.moodPct.ansioso ?? '', r.current?.moodPct.agitado ?? '', r.current?.moodPct.sos ?? '', r.current?.logsPct ?? '', r.current?.topics.map((t) => t.topic).join('; ') ?? '']),
@@ -289,7 +292,7 @@ async function exportCsv(d: OrgDashboard) {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
-function Setores({ data, onChanged }: { data: OrgDashboard; onChanged: () => void }) {
+function Setores({ data, onChanged, readOnly = false }: { data: OrgDashboard; onChanged: () => void; readOnly?: boolean }) {
   const [list, setList] = useState<OrgSector[]>(data.sectorList);
   const [label, setLabel] = useState(data.sectorLabel || 'Setor');
   const [name, setName] = useState('');
@@ -366,7 +369,7 @@ function Setores({ data, onChanged }: { data: OrgDashboard; onChanged: () => voi
         </div>
       )}
 
-      <div className="border-t border-white/5 pt-4 space-y-3">
+      {!readOnly && <div className="border-t border-white/5 pt-4 space-y-3">
         <button onClick={() => setManage((v) => !v)} className="text-[10px] font-black uppercase tracking-widest text-sky-300">
           {manage ? 'Fechar' : `Gerenciar ${plural(label).toLowerCase()} (${list.length})`}
         </button>
@@ -394,7 +397,7 @@ function Setores({ data, onChanged }: { data: OrgDashboard; onChanged: () => voi
             {err && <p className="text-xs font-bold text-rose-300">{err}</p>}
           </div>
         )}
-      </div>
+      </div>}
     </section>
   );
 }
@@ -586,7 +589,7 @@ function Convite({ info: initial, org, demo, members, onRenamed }: { info: OrgDe
           <button onClick={() => copy(info.adminCode ?? '', 'team')} className="shrink-0 w-9 h-9 rounded-lg bg-white/5 border border-white/10 text-white/60 flex items-center justify-center" aria-label="Copiar código da equipe">{copied === 'team' ? <Check size={14} /> : <Copy size={14} />}</button>
         </div>
       )}
-      {!demo && (
+      {!demo && !info.psi?.isPsi && (
         <>
           <button onClick={() => setSettings((v) => !v)} className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-white/40"><Settings size={12} /> Ajustes</button>
           {settings && (

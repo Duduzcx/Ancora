@@ -1,6 +1,6 @@
 {
   "name": "norica-web",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "versionCode": 59,
   "private": true,
   "scripts": {
@@ -15,11 +15,11 @@
     "@ai-sdk/groq": "^1.1.0",
     "@ai-sdk/react": "^3.0.172",
     "@capacitor-community/text-to-speech": "^8.0.2",
-    "@capacitor/android": "^8.3.1",
+    "@capacitor/android": "^8.5.3",
     "@capacitor/app": "^8.1.0",
     "@capacitor/browser": "^8.0.3",
-    "@capacitor/cli": "^8.3.1",
-    "@capacitor/core": "^8.3.1",
+    "@capacitor/cli": "^8.5.3",
+    "@capacitor/core": "^8.5.3",
     "@capacitor/filesystem": "^8.1.5",
     "@capacitor/haptics": "^8.0.2",
     "@capacitor/local-notifications": "^8.2.1",

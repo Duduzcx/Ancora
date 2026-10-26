@@ -104,12 +104,13 @@ async function assertOwnChat(ctx: Ctx, chatId: string) {
 }
 
 async function rateLimit(ctx: Ctx, crisisBypass = false) {
+  // Conta pelos registros de uso (o app não consegue apagar), não pelas mensagens.
   const since = new Date(Date.now() - 60_000).toISOString();
-  const { count } = await ctx.db
-    .from("messages")
-    .select("id, chats!inner(user_id)", { count: "exact", head: true })
-    .eq("chats.user_id", ctx.userId)
-    .eq("role", "user")
+  const { count } = await ctx.admin
+    .from("usage_events")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", ctx.userId)
+    .eq("kind", "porto_message")
     .gte("created_at", since);
   if ((count ?? 0) >= MAX_USER_MESSAGES_PER_MINUTE && !crisisBypass) {
     throw new HttpError(429, "Muitas mensagens em pouco tempo. Respire um pouco e tente de novo.");
@@ -133,6 +134,23 @@ async function extractTasks(reply: string): Promise<string[]> {
   } catch (_e) {
     return [];
   }
+}
+
+/** Limite de tentativas por janela de tempo (contra quem tenta adivinhar códigos ou abusar da IA). */
+async function throttle(ctx: Ctx, kind: string, max: number, windowMs: number, message: string) {
+  const since = new Date(Date.now() - windowMs).toISOString();
+  const { count } = await ctx.admin.from("usage_events").select("id", { count: "exact", head: true })
+    .eq("user_id", ctx.userId).eq("kind", kind).gte("created_at", since);
+  if ((count ?? 0) >= max) throw new HttpError(429, message);
+  await ctx.admin.from("usage_events").insert({ user_id: ctx.userId, kind });
+}
+
+/** Letras/números sorteados com gerador criptográfico (Math.random é previsível). */
+function secureChars(alphabet: string, n: number): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(n));
+  let out = "";
+  for (const b of bytes) out += alphabet[b % alphabet.length]; // 32 letras: 256 é múltiplo de 32, sem viés
+  return out;
 }
 
 function runInBackground(task: Promise<unknown>) {
@@ -547,7 +565,8 @@ async function editMessage(ctx: Ctx, body: Record<string, unknown>) {
 }
 
 // Frase do dia na aba Logs, baseada nos hábitos marcados.
-async function logInsight(_ctx: Ctx, body: Record<string, unknown>) {
+async function logInsight(ctx: Ctx, body: Record<string, unknown>) {
+  if (await consume(ctx.admin, ctx.userId, "ai_misc")) return { insight: "Cada cuidado marcado hoje conta. Continue no seu ritmo. 🌊" };
   const done = Array.isArray(body.completed)
     ? body.completed.filter((t): t is string => typeof t === "string").slice(0, 30).map((t) => t.slice(0, 60))
     : [];
@@ -602,11 +621,15 @@ async function deleteChat(ctx: Ctx, body: Record<string, unknown>) {
 // Arena
 // ---------------------------------------------------------------------
 
-async function arena(_ctx: Ctx, body: Record<string, unknown>) {
+async function arena(ctx: Ctx, body: Record<string, unknown>) {
   const scenario = cleanText(body.scenario, 120);
   const transcript = cleanTranscript(body.messages);
   const last = [...transcript].reverse().find((m) => m.role === "user");
   const crisis = last ? detectRisk(last.content) : false;
+  if (!crisis) {
+    const limitMessage = await consume(ctx.admin, ctx.userId, "ai_misc");
+    if (limitMessage) throw new HttpError(429, limitMessage);
+  }
   const opening = transcript.length === 0
     ? [{ role: "user" as const, content: "Comece a conversa como o personagem, de forma natural." }]
     : [];
@@ -758,7 +781,8 @@ async function weeklySummary(ctx: Ctx, body: Record<string, unknown>) {
   // No máximo um resumo novo por dia (o de domingo fecha a semana).
   const { data: existing } = await ctx.db.from("weekly_summaries").select("content, created_at")
     .eq("user_id", ctx.userId).eq("week_start", weekStart).maybeSingle();
-  if (existing && body.refresh !== true && brtDay(new Date(new Date(existing.created_at).getTime() - 3 * 3600_000)) === today) {
+  const forced = body.refresh === true && !!existing && !!(await consume(ctx.admin, ctx.userId, "ai_misc"));
+  if (existing && (body.refresh !== true || forced) && (forced || brtDay(new Date(new Date(existing.created_at).getTime() - 3 * 3600_000)) === today)) {
     const parts = splitGoal(await decrypt(existing.content));
     return { weekStart, empty: false, locked: false, summary: parts.summary, goal: parts.goal, stats: publicStats };
   }
@@ -822,9 +846,10 @@ async function journalEntryOut(row: { id: string; kind: string; content: string;
 async function journalVoice(ctx: Ctx, body: Record<string, unknown>) {
   const text = cleanText(body.text, 4000);
   const keywordRisk = detectRisk(text);
+  const limited = await consume(ctx.admin, ctx.userId, "ai_misc");
   const [risk, raw] = await Promise.all([
-    keywordRisk ? Promise.resolve<RiskLevel>("alto") : withTimeout(classifyRisk([], text), 2500, "nenhum" as RiskLevel),
-    groqChat([{ role: "system", content: VOICE_JOURNAL_PROMPT }, { role: "user", content: text }], { model: FAST_MODEL, temperature: 0.3, maxTokens: 300 })
+    keywordRisk ? Promise.resolve<RiskLevel>("alto") : limited ? Promise.resolve<RiskLevel>("nenhum") : withTimeout(classifyRisk([], text), 2500, "nenhum" as RiskLevel),
+    limited ? Promise.resolve("") : groqChat([{ role: "system", content: VOICE_JOURNAL_PROMPT }, { role: "user", content: text }], { model: FAST_MODEL, temperature: 0.3, maxTokens: 300 })
       .catch(() => ""),
   ]);
   const parsed = parseJsonObject(raw) ?? {};
@@ -887,11 +912,12 @@ async function journalDelete(ctx: Ctx, body: Record<string, unknown>) {
   return { ok: true };
 }
 
-async function prepConversation(_ctx: Ctx, body: Record<string, unknown>) {
+async function prepConversation(ctx: Ctx, body: Record<string, unknown>) {
   const pessoa = cleanText(body.pessoa, 60);
   const parts = ["objetivo", "sentimento", "pedido"].map((k) => (typeof body[k] === "string" ? String(body[k]).slice(0, 400) : ""));
   const crisis = detectRisk(parts.join(" "));
-  const raw = await groqChat(
+  const limited = await consume(ctx.admin, ctx.userId, "ai_misc");
+  const raw = limited ? "" : await groqChat(
     [
       { role: "system", content: CONVERSATION_PREP_PROMPT },
       { role: "user", content: `Com quem: ${pessoa}\nO que aconteceu / o que quero dizer: ${parts[0]}\nComo me sinto: ${parts[1]}\nO que vou pedir: ${parts[2]}` },
@@ -1376,6 +1402,11 @@ async function studyPlanVideos(ctx: Ctx, body: Record<string, unknown>) {
   }
   if (!youtubeConfigured()) return { videos: [], searchUrl: link, query: q };
   try {
+    await throttle(ctx, "youtube", 15, 86400_000, "limite");
+  } catch (_e) {
+    return { videos: [], searchUrl: link, query: q }; // passou do limite do dia: mostra o botão de busca
+  }
+  try {
     const videos = await searchVideos(q);
     if (videos.length) await ctx.admin.from("video_cache").upsert({ query: key, results: videos, fetched_at: new Date().toISOString() });
     return { videos, searchUrl: link, query: q };
@@ -1516,7 +1547,7 @@ function daysSince(days: Set<string>, today: string): number | null {
 async function friendsInvite(ctx: Ctx) {
   const name = (await personName(ctx)) ?? "Alguém";
   let code = "";
-  for (let i = 0; i < 6; i++) code += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
+  code = secureChars(CODE_CHARS, 6);
   await ctx.admin.from("care_invites").delete().eq("user_id", ctx.userId);
   const { error } = await ctx.admin.from("care_invites").insert({ code, user_id: ctx.userId, name, expires_at: new Date(Date.now() + 7 * 86400_000).toISOString() });
   if (error) throw new HttpError(500, "Não foi possível criar o convite");
@@ -1532,6 +1563,7 @@ async function myPairs(ctx: Ctx) {
 async function friendsJoin(ctx: Ctx, body: Record<string, unknown>) {
   const code = String(body.code ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
   if (code.length !== 6) throw new HttpError(400, "O código tem 6 letras e números");
+  await throttle(ctx, "friend_try", 15, 3600_000, "Muitas tentativas de código. Espere um pouco e confira com seu amigo.");
   const { data: inv } = await ctx.admin.from("care_invites").select("code, user_id, name, expires_at").eq("code", code).maybeSingle();
   if (!inv || new Date(inv.expires_at).getTime() < Date.now()) throw new HttpError(404, "Convite não encontrado ou vencido. Peça um código novo.");
   if (inv.user_id === ctx.userId) throw new HttpError(400, "Esse é o seu próprio código. Mande para um amigo 💛");
@@ -1700,7 +1732,8 @@ async function chatAudio(ctx: Ctx, body: Record<string, unknown>) {
   const b64 = typeof body.audio === "string" ? body.audio : "";
   if (!b64 || b64.length > 1_200_000) throw new HttpError(413, "Áudio muito longo (até 30 segundos)");
   const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-  const mime = typeof body.mime === "string" && /^audio\/[a-z0-9.+-]+/i.test(body.mime) ? body.mime.split(";")[0] : "audio/webm";
+  const baseMime = typeof body.mime === "string" ? body.mime.split(";")[0].trim().toLowerCase() : "";
+  const mime = ["audio/webm", "audio/ogg", "audio/mp4", "audio/mpeg", "audio/aac", "audio/x-m4a", "audio/wav"].includes(baseMime) ? baseMime : "audio/webm";
   const path = `${pair.id}/${crypto.randomUUID()}.${mime.includes("mp4") ? "m4a" : mime.includes("ogg") ? "ogg" : "webm"}`;
   const { error: upErr } = await ctx.admin.storage.from("care-audio").upload(path, bytes, { contentType: mime });
   if (upErr) throw new HttpError(500, "Não foi possível enviar o áudio");
@@ -1800,7 +1833,7 @@ async function groupsCreate(ctx: Ctx, body: Record<string, unknown>) {
   const { count } = await ctx.admin.from("care_group_members").select("group_id", { count: "exact", head: true }).eq("user_id", ctx.userId);
   if ((count ?? 0) >= MAX_GROUPS) throw new HttpError(409, `Você já está em ${MAX_GROUPS} grupos.`);
   let code = "";
-  for (let i = 0; i < 6; i++) code += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
+  code = secureChars(CODE_CHARS, 6);
   const { data: g, error } = await ctx.admin.from("care_groups").insert({ name, code, created_by: ctx.userId }).select("id").single();
   if (error || !g) throw new HttpError(500, "Não foi possível criar o grupo");
   await ctx.admin.from("care_group_members").insert({ group_id: g.id, user_id: ctx.userId, name: (await personName(ctx)) ?? "Alguém" });
@@ -1809,6 +1842,8 @@ async function groupsCreate(ctx: Ctx, body: Record<string, unknown>) {
 
 async function groupsJoin(ctx: Ctx, body: Record<string, unknown>) {
   const code = String(body.code ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (code.length !== 6) throw new HttpError(400, "O código tem 6 letras e números");
+  await throttle(ctx, "friend_try", 15, 3600_000, "Muitas tentativas de código. Espere um pouco e confira com seu grupo.");
   const { data: g } = await ctx.admin.from("care_groups").select("id, name, created_by").eq("code", code).maybeSingle();
   if (!g) throw new HttpError(404, "Grupo não encontrado. Confira o código.");
   const { data: ms } = await ctx.admin.from("care_group_members").select("user_id").eq("group_id", g.id);
@@ -1983,7 +2018,8 @@ async function monthlyReport(ctx: Ctx, body: Record<string, unknown>) {
   const month = `${today.slice(0, 7)}-01`;
   let letter = "";
   const { data: cached } = await ctx.db.from("monthly_reports").select("content, created_at").eq("user_id", ctx.userId).eq("month", month).maybeSingle();
-  if (cached && body.refresh !== true && brtDay(new Date(new Date(cached.created_at).getTime() - 3 * 3600_000)) === today) {
+  const forced = body.refresh === true && !!cached && !!(await consume(ctx.admin, ctx.userId, "ai_misc"));
+  if (cached && (forced || (body.refresh !== true && brtDay(new Date(new Date(cached.created_at).getTime() - 3 * 3600_000)) === today))) {
     letter = await decrypt(cached.content);
   } else {
     const facts = [
@@ -2043,6 +2079,14 @@ async function myMembership(ctx: Ctx, role?: "admin"): Promise<Membership | null
     : null;
 }
 
+/** Equipe que administra (coordenação/RH). A psicóloga só acompanha o cuidado: não muda códigos, campanhas ou ajustes. */
+async function staffOnly(ctx: Ctx, message: string): Promise<Membership> {
+  const me = await myMembership(ctx, "admin");
+  if (!me) throw new HttpError(403, message);
+  if (me.isPsi && !me.demo) throw new HttpError(403, "Esse ajuste fica com a coordenação da instituição. A psicóloga acompanha a aba Cuidado.");
+  return me;
+}
+
 async function sectorsOf(ctx: Ctx, orgId: string) {
   const { data } = await ctx.admin.from("org_sectors").select("id, name").eq("org_id", orgId).order("name", { ascending: true });
   return (data ?? []) as { id: string; name: string }[];
@@ -2074,8 +2118,7 @@ async function campaignsOf(ctx: Ctx, orgId: string) {
 }
 
 async function orgCampaignCreate(ctx: Ctx, body: Record<string, unknown>) {
-  const me = await myMembership(ctx, "admin");
-  if (!me) throw new HttpError(403, "Só a equipe da instituição pode criar campanhas");
+  const me = await staffOnly(ctx, "Só a equipe da instituição pode criar campanhas");
   const kind = String(body.kind ?? "livre");
   if (!CAMPAIGN_KINDS.includes(kind)) throw new HttpError(400, "Tipo de campanha inválido");
   const title = cleanText(body.title, 60);
@@ -2091,8 +2134,7 @@ async function orgCampaignCreate(ctx: Ctx, body: Record<string, unknown>) {
 }
 
 async function orgCampaignDelete(ctx: Ctx, body: Record<string, unknown>) {
-  const me = await myMembership(ctx, "admin");
-  if (!me) throw new HttpError(403, "Só a equipe da instituição pode remover campanhas");
+  const me = await staffOnly(ctx, "Só a equipe da instituição pode remover campanhas");
   await ctx.admin.from("org_campaigns").delete().eq("org_id", me.orgId).eq("id", String(body.id ?? ""));
   return { campaigns: await campaignsOf(ctx, me.orgId) };
 }
@@ -2158,16 +2200,15 @@ const TRIAL_DAYS = 30;
 const ORG_CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 function randomCode(prefix: string, n: number) {
-  let c = prefix;
-  for (let i = 0; i < n; i++) c += ORG_CODE_CHARS[Math.floor(Math.random() * ORG_CODE_CHARS.length)];
-  return c.slice(0, 12);
+  return (prefix + secureChars(ORG_CODE_CHARS, n)).slice(0, 12);
 }
 
 /** Código fácil de passar: começo do nome + números/letras (ex.: COLEGIO4K7). */
 async function newOrgCode(ctx: Ctx, name: string, team = false) {
   const base = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, team ? 4 : 7) || "NORICA";
   for (let i = 0; i < 8; i++) {
-    const code = randomCode(team ? `EQ${base}` : base, team ? 4 : 3);
+    // Código da equipe dá acesso ao painel: 10 letras/números sorteados (não dá para adivinhar).
+    const code = team ? randomCode("EQ", 10) : randomCode(base, 3);
     const col = team ? "admin_code" : "code";
     const { data } = await ctx.admin.from("organizations").select("id").eq(col, code).maybeSingle();
     if (!data) return code;
@@ -2200,7 +2241,7 @@ async function orgDetails(ctx: Ctx, me: Membership) {
   const { data: ms } = await ctx.admin.from("org_members").select("role, is_psi, share_psi").eq("org_id", me.orgId);
   return {
     code: o?.code ?? null,
-    adminCode: o?.demo ? null : o?.admin_code ?? null,
+    adminCode: o?.demo || me.isPsi ? null : o?.admin_code ?? null, // a psicóloga não recebe o código da equipe
     kind: o?.kind ?? "empresa",
     plan: o?.plan ?? "teste",
     trialUntil: o?.trial_until ?? null,
@@ -2209,7 +2250,7 @@ async function orgDetails(ctx: Ctx, me: Membership) {
     psi: {
       enabled: !!o?.psi_enabled || !!o?.demo,
       guardianOk: !!o?.psi_guardian_ok,
-      code: o?.demo ? null : o?.psi_code ?? null,
+      code: o?.demo || me.isPsi ? null : o?.psi_code ?? null,
       psychologists: (ms ?? []).filter((m) => m.is_psi).length,
       sharing: (ms ?? []).filter((m) => m.role === "member" && m.share_psi).length,
       isPsi: !!me.isPsi || (!!o?.demo && me.role === "admin"),
@@ -2218,8 +2259,8 @@ async function orgDetails(ctx: Ctx, me: Membership) {
 }
 
 async function orgRename(ctx: Ctx, body: Record<string, unknown>) {
-  const me = await myMembership(ctx, "admin");
-  if (!me || me.demo) throw new HttpError(403, "Só a equipe da instituição pode mudar isso");
+  const me = await staffOnly(ctx, "Só a equipe da instituição pode mudar isso");
+  if (me.demo) throw new HttpError(403, "Só a equipe da instituição pode mudar isso");
   const name = cleanText(body.name, 80);
   if (name.length < 3) throw new HttpError(400, "Nome muito curto");
   await ctx.admin.from("organizations").update({ name }).eq("id", me.orgId);
@@ -2227,8 +2268,8 @@ async function orgRename(ctx: Ctx, body: Record<string, unknown>) {
 }
 
 async function orgNewCode(ctx: Ctx, body: Record<string, unknown>) {
-  const me = await myMembership(ctx, "admin");
-  if (!me || me.demo) throw new HttpError(403, "Só a equipe da instituição pode mudar isso");
+  const me = await staffOnly(ctx, "Só a equipe da instituição pode mudar isso");
+  if (me.demo) throw new HttpError(403, "Só a equipe da instituição pode mudar isso");
   const team = body.team === true;
   const code = await newOrgCode(ctx, me.name, team);
   await ctx.admin.from("organizations").update(team ? { admin_code: code } : { code }).eq("id", me.orgId);
@@ -2263,6 +2304,10 @@ async function leadCreate(admin: SupabaseClient, body: Record<string, unknown>, 
   const { count } = await admin.from("leads").select("id", { count: "exact", head: true })
     .eq("ip_hash", ipHash).gte("created_at", new Date(Date.now() - 3600_000).toISOString());
   if ((count ?? 0) >= 5) throw new HttpError(429, "Recebemos seus pedidos. Logo entramos em contato!");
+  // Teto geral por dia: um robô trocando de IP não consegue encher a lista de contatos.
+  const { count: today } = await admin.from("leads").select("id", { count: "exact", head: true })
+    .gte("created_at", new Date(Date.now() - 86400_000).toISOString());
+  if ((today ?? 0) >= 200) throw new HttpError(429, "Recebemos muitos pedidos hoje. Tente de novo amanhã ou fale com a gente pelo Instagram.");
   const { error } = await admin.from("leads").insert({
     name, org_name: orgName, kind, size: txt(body.size, 40) || null, phone: phone || null,
     email: email || null, message: txt(body.message, 600) || null, ip_hash: ipHash,
@@ -2304,6 +2349,7 @@ async function orgStatus(ctx: Ctx) {
 async function orgJoin(ctx: Ctx, body: Record<string, unknown>) {
   const code = String(body.code ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
   if (code.length < 4) throw new HttpError(400, "Digite o código que a instituição passou para você");
+  await throttle(ctx, "org_try", 10, 3600_000, "Muitas tentativas de código. Espere uma hora e confira o código com a sua instituição.");
   let { data: org } = await ctx.admin.from("organizations").select("id, name, demo").eq("code", code).maybeSingle();
   let asTeam = false;
   let asPsi = false;
@@ -2372,8 +2418,8 @@ async function orgLeave(ctx: Ctx) {
 
 /** Equipe liga/desliga o acompanhamento. Escola e cursinho precisam confirmar a autorização dos responsáveis. */
 async function orgPsiSetup(ctx: Ctx, body: Record<string, unknown>) {
-  const me = await myMembership(ctx, "admin");
-  if (!me || me.demo) throw new HttpError(403, "Só a equipe da instituição pode mudar isso");
+  const me = await staffOnly(ctx, "Só a equipe da instituição pode mudar isso");
+  if (me.demo) throw new HttpError(403, "Só a equipe da instituição pode mudar isso");
   const enabled = body.enabled === true;
   const guardianOk = body.guardianOk === true;
   const needsGuardian = me.kind === "escola" || me.kind === "cursinho";
@@ -2382,7 +2428,7 @@ async function orgPsiSetup(ctx: Ctx, body: Record<string, unknown>) {
   }
   const { data: o } = await ctx.admin.from("organizations").select("psi_code").eq("id", me.orgId).maybeSingle();
   const update: Record<string, unknown> = { psi_enabled: enabled, psi_guardian_ok: guardianOk };
-  if (enabled && (!o?.psi_code || body.newCode === true)) update.psi_code = await newPsiCode(ctx, me.name);
+  if (enabled && (!o?.psi_code || body.newCode === true)) update.psi_code = await newPsiCode(ctx);
   await ctx.admin.from("organizations").update(update).eq("id", me.orgId);
   if (!enabled) {
     // Desligou: ninguém continua compartilhando sem querer quando ligar de novo.
@@ -2391,10 +2437,9 @@ async function orgPsiSetup(ctx: Ctx, body: Record<string, unknown>) {
   return { info: await orgDetails(ctx, (await myMembership(ctx, "admin"))!) };
 }
 
-async function newPsiCode(ctx: Ctx, name: string) {
-  const base = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4) || "NORI";
+async function newPsiCode(ctx: Ctx) {
   for (let i = 0; i < 8; i++) {
-    const code = randomCode(`PSI${base}`, 4);
+    const code = randomCode("PSI", 9); // dá acesso ao humor de quem compartilha: precisa ser impossível de adivinhar
     const { data } = await ctx.admin.from("organizations").select("id").eq("psi_code", code).maybeSingle();
     if (!data) return code;
   }
@@ -2502,8 +2547,7 @@ async function careAlert(ctx: Ctx) {
 }
 
 async function orgSectorCreate(ctx: Ctx, body: Record<string, unknown>) {
-  const me = await myMembership(ctx, "admin");
-  if (!me) throw new HttpError(403, "Só a equipe da instituição pode criar setores");
+  const me = await staffOnly(ctx, "Só a equipe da instituição pode criar setores");
   const name = cleanText(body.name, 40);
   const { error } = await ctx.admin.from("org_sectors").insert({ org_id: me.orgId, name });
   if (error) throw new HttpError(409, "Já existe um setor com esse nome");
@@ -2511,8 +2555,7 @@ async function orgSectorCreate(ctx: Ctx, body: Record<string, unknown>) {
 }
 
 async function orgSectorDelete(ctx: Ctx, body: Record<string, unknown>) {
-  const me = await myMembership(ctx, "admin");
-  if (!me) throw new HttpError(403, "Só a equipe da instituição pode remover setores");
+  const me = await staffOnly(ctx, "Só a equipe da instituição pode remover setores");
   await ctx.admin.from("org_members").update({ sector_id: null }).eq("org_id", me.orgId).eq("sector_id", String(body.id ?? ""));
   await ctx.admin.from("org_sectors").delete().eq("org_id", me.orgId).eq("id", String(body.id ?? ""));
   return { sectors: await sectorsOf(ctx, me.orgId) };
@@ -2541,8 +2584,7 @@ async function tts(ctx: Ctx, body: Record<string, unknown>) {
 
 const SECTOR_LABELS = ["Setor", "Turma", "Equipe", "Departamento", "Unidade"];
 async function orgSetLabel(ctx: Ctx, body: Record<string, unknown>) {
-  const me = await myMembership(ctx, "admin");
-  if (!me) throw new HttpError(403, "Só a equipe da instituição pode mudar isso");
+  const me = await staffOnly(ctx, "Só a equipe da instituição pode mudar isso");
   const label = String(body.label ?? "");
   if (!SECTOR_LABELS.includes(label)) throw new HttpError(400, "Nome de grupo inválido");
   await ctx.admin.from("organizations").update({ sector_label: label }).eq("id", me.orgId);
@@ -2879,6 +2921,15 @@ async function deleteAccount(ctx: Ctx) {
     await admin.from(table).delete().eq("user_id", uid);
   }
   await admin.from("care_nudges").delete().or(`from_user.eq.${uid},to_user.eq.${uid}`);
+  // Áudios do chat entre amigos (arquivos no Storage) das conversas da pessoa.
+  const { data: pairs } = await admin.from("care_pairs").select("id").or(`user_a.eq.${uid},user_b.eq.${uid}`);
+  const pairIds = (pairs ?? []).map((p) => p.id as string);
+  if (pairIds.length) {
+    const { data: audios } = await admin.from("care_messages").select("audio_path").in("pair_id", pairIds).not("audio_path", "is", null);
+    const paths = (audios ?? []).map((a) => a.audio_path as string).filter(Boolean);
+    for (let i = 0; i < paths.length; i += 100) await admin.storage.from("care-audio").remove(paths.slice(i, i + 100));
+    await admin.from("care_messages").delete().in("pair_id", pairIds);
+  }
   await admin.from("care_messages").delete().eq("from_user", uid);
   await admin.from("care_blocks").delete().or(`blocker.eq.${uid},blocked.eq.${uid}`);
   await admin.from("care_group_members").delete().eq("user_id", uid);
@@ -2988,6 +3039,7 @@ async function verifyPurchase(ctx: Ctx, body: Record<string, unknown>) {
 // ---------------------------------------------------------------------
 
 async function health(ctx: Ctx) {
+  await throttle(ctx, "health", 3, 3600_000, "Diagnóstico feito há pouco. Tente de novo em uma hora.");
   const checks: Record<string, { ok: boolean; detail?: string }> = {};
 
   try {
@@ -3131,7 +3183,9 @@ Deno.serve(async (req) => {
     // Única ação sem login: o formulário da página "Para escolas e empresas".
     if (body.action === "lead_create") {
       const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
-      const ip = (req.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || "?";
+      // IP real de quem chamou (o primeiro item do X-Forwarded-For pode ser inventado por quem envia).
+      const xff = (req.headers.get("x-forwarded-for") ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+      const ip = req.headers.get("cf-connecting-ip") ?? req.headers.get("x-real-ip") ?? xff[xff.length - 1] ?? "?";
       return json(await leadCreate(admin, body, ip));
     }
     const authHeader = req.headers.get("Authorization") ?? "";

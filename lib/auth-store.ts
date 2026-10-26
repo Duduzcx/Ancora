@@ -9,7 +9,7 @@
 import { useSyncExternalStore } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { createClient, peekStoredSession } from './supabase-client';
-import { cacheClear } from './cache';
+import { cacheClear, clearPersonalLocal } from './cache';
 
 export type AuthState = { session: Session | null; user: User | null; ready: boolean };
 
@@ -35,7 +35,7 @@ export function startAuth() {
     .catch(() => {});
 
   supabase.auth.onAuthStateChange((event, session) => {
-    if (event === 'SIGNED_OUT') cacheClear();
+    if (event === 'SIGNED_OUT') { cacheClear(); clearPersonalLocal(); }
     setState({ session, user: session?.user ?? null, ready: true });
   });
 

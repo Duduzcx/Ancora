@@ -4,6 +4,35 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+
+// Links nas respostas da IA: só https para sites de fora, sempre abertos no navegador
+// (nunca dentro do app). Bloqueia endereços internos como localhost.
+function safeUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== 'https:') return '';
+    if (/^(localhost|127\.|10\.|192\.168\.|0\.0\.0\.0|\[?::1\]?)/i.test(u.hostname)) return '';
+    return u.toString();
+  } catch (_e) {
+    return '';
+  }
+}
+
+function LinkSeguro({ href, children }: { href?: string; children?: React.ReactNode }) {
+  if (!href) return <span>{children}</span>;
+  return (
+    <a
+      href={href}
+      rel="noopener noreferrer"
+      onClick={(e) => {
+        e.preventDefault();
+        import('@capacitor/browser').then(({ Browser }) => Browser.open({ url: href })).catch(() => window.open(href, '_blank', 'noopener'));
+      }}
+    >
+      {children}
+    </a>
+  );
+}
 import { motion } from 'framer-motion';
 
 interface MensagemIAProps {
@@ -118,12 +147,16 @@ export function MensagemIA({
       className="relative p-6 rounded-3xl rounded-tl-sm text-sm leading-relaxed drop-shadow-sm border bg-[#1a2333]/95 border-white/5 backdrop-blur-xl text-slate-100 max-w-[85%] mr-auto"
     >
       <div className="leading-relaxed text-[15px] tracking-wide w-full">
-        <ReactMarkdown 
-          remarkPlugins={[remarkGfm]}
-          className="prose prose-invert prose-p:my-2 prose-strong:text-emerald-400 prose-strong:font-semibold max-w-none break-words text-[15px] leading-relaxed prose-ul:my-2 prose-ul:list-disc prose-ul:pl-5 prose-ol:my-2 prose-ol:list-decimal prose-ol:pl-5 prose-li:my-1 prose-a:text-sky-400 prose-headings:text-white prose-headings:font-bold"
-        >
-          {textoExibido}
-        </ReactMarkdown>
+        <div className="prose prose-invert prose-p:my-2 prose-strong:text-emerald-400 prose-strong:font-semibold max-w-none break-words text-[15px] leading-relaxed prose-ul:my-2 prose-ul:list-disc prose-ul:pl-5 prose-ol:my-2 prose-ol:list-decimal prose-ol:pl-5 prose-li:my-1 prose-a:text-sky-400 prose-headings:text-white prose-headings:font-bold">
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            urlTransform={safeUrl}
+            disallowedElements={['img']}
+            components={{ a: LinkSeguro }}
+          >
+            {textoExibido}
+          </ReactMarkdown>
+        </div>
         {digitando && (
           <span className="inline-block w-1.5 h-3.5 ml-1 bg-emerald-400 animate-pulse align-middle rounded-sm"></span>
         )}

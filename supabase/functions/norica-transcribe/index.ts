@@ -4,6 +4,7 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { groqTranscribe } from "../_shared/groq.ts";
+import { consume } from "../_shared/plans.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -33,6 +34,11 @@ Deno.serve(async (req) => {
     });
     const { data: { user } } = await db.auth.getUser(token);
     if (!user) return json({ error: "Faça login para continuar" }, 401);
+
+    // Limite diário de transcrições (evita uso abusivo da IA de voz).
+    const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
+    const limited = await consume(admin, user.id, "transcribe");
+    if (limited) return json({ error: limited }, 429);
 
     const form = await req.formData();
     const file = form.get("file");

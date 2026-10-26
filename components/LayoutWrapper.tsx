@@ -45,6 +45,12 @@ function parentRoute(path: string): string | null {
   return null;
 }
 
+/** Separa "com.zcx.norica://<host>/<resto>" sem depender de como o WebView interpreta esquemas próprios. */
+function deepLinkParts(raw: string): { host: string; rest: string } | null {
+  const m = String(raw).match(/^com\.zcx\.(?:norica|ancora):\/\/([a-z-]+)\/?([^?#]*)/i);
+  return m ? { host: m[1].toLowerCase(), rest: m[2] } : null;
+}
+
 export default function LayoutWrapper({ children }: { children: React.ReactNode }) {
   const [isMounted, setIsMounted] = useState(false);
   // Login compartilhado: abre na hora com a sessão salva no aparelho.
@@ -57,15 +63,20 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
   pathnameRef.current = pathname;
 
   // Widget "Como está o seu mar?" (com.zcx.norica://humor/<humor>): a Início registra e confirma.
-  const openFromWidget = (url: string): boolean => {
-    if (/:\/\/amigos\//.test(url)) { router.push('/amigos/'); return true; }
-    const h = url.match(/:\/\/habito\/(\d+)/);
+  const openFromWidget = (raw: string): boolean => {
+    // Lê o endereço de verdade (esquema + host). Antes, um link de login montado por um site
+    // podia "carregar" um humor escondido no meio do endereço.
+    const parts = deepLinkParts(raw);
+    if (!parts) return false;
+    const { host, rest } = parts;
+    if (host === 'amigos') { router.push('/amigos/'); return true; }
+    const h = host === 'habito' ? rest.match(/^(\d{1,3})$/) : null;
     if (h) {
       try { window.dispatchEvent(new CustomEvent('norica-widget-habit', { detail: h[1] })); } catch (_e) {}
       router.push(`/?habito=${h[1]}`);
       return true;
     }
-    const m = url.match(/:\/\/humor\/([a-z]+)/);
+    const m = host === 'humor' ? rest.match(/^(calmo|ansioso|agitado|sos|abrir)$/) : null;
     if (!m) return false;
     if (m[1] !== 'abrir') {
       try { window.dispatchEvent(new CustomEvent('norica-widget', { detail: m[1] })); } catch (_e) {}
@@ -89,20 +100,16 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
     if (Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('App')) {
       // Retorno do login pelo navegador (e-mail de confirmação, recuperação de senha, OAuth web).
       listeners.push(App.addListener('appUrlOpen', async (event: any) => {
-        log(`DeepLink aberto: ${event.url}`);
+        log(`DeepLink aberto: ${String(event.url).split(/[?#]/)[0]}`); // sem o código de login no registro
         if (!(event.url.includes('com.zcx.norica') || event.url.includes('com.zcx.ancora'))) return;
         if (openFromWidget(event.url)) return;
-        if (!(event.url.includes('access_token') || event.url.includes('code='))) return;
+        if (!event.url.includes('code=')) return;
         try {
           const url = new URL(event.url.replace('#', '?'));
           const code = url.searchParams.get('code');
-          if (code) {
-            await supabase.auth.exchangeCodeForSession(code);
-          } else {
-            const access_token = url.searchParams.get('access_token');
-            const refresh_token = url.searchParams.get('refresh_token');
-            if (access_token && refresh_token) await supabase.auth.setSession({ access_token, refresh_token });
-          }
+          // Só o código PKCE (precisa da chave guardada neste aparelho). Tokens prontos vindos de um link
+          // são ignorados: um site poderia trocar a conta da pessoa por outra sem ela perceber.
+          if (code && deepLinkParts(event.url)?.host === 'login-callback') await supabase.auth.exchangeCodeForSession(code);
         } catch (e: any) {
           log(`Erro no retorno do login: ${e?.message || e}`);
         }

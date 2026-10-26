@@ -17,7 +17,7 @@ import {
 import { useRouter } from 'next/navigation';
 import AnimatedBackground from '@/components/AnimatedBackground';
 import { getAuthState, useAuth } from '@/lib/auth-store';
-import { cacheGet, cacheSet } from '@/lib/cache';
+import { cacheGet, cacheSet, clearPersonalLocal } from '@/lib/cache';
 import { RATES, getVoicePrefs, listPortugueseVoices, naturalVoices, openVoiceInstall, setVoicePrefs, speak, stopSpeaking, type NaturalVoice, type VoiceOption } from '@/lib/speech';
 import { DEFAULT_REMINDER, disableReminder, enableReminder, formatTime, getReminder, sendTestNotification, setNotificationPref, type ReminderSettings } from '@/lib/reminder';
 
@@ -224,7 +224,10 @@ export default function PerfilPage() {
       await noricaApi.deleteAccount();
       try {
         Object.keys(localStorage).filter(k => k.startsWith('norica')).forEach(k => localStorage.removeItem(k));
+        // Caixa de calma (fotos, áudios e frases guardados só no aparelho) também sai com a conta.
+        indexedDB.deleteDatabase('norica-calma');
       } catch (_e) {}
+      await clearPersonalLocal().catch(() => {});
       await supabase.auth.signOut().catch(() => {});
       setIsDeleteOpen(false);
       router.replace('/');
