@@ -6,8 +6,8 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import Link from 'next/link';
-import { CalendarHeart, Loader2, Lock, Volume2, Square } from 'lucide-react';
-import { noricaApi, type WeeklySummary } from '@/lib/norica-api';
+import { CalendarHeart, Loader2, Lock, Volume2, Square, TrendingUp, TrendingDown, Minus, Target, Check, BookOpen } from 'lucide-react';
+import { noricaApi, addTasksToToday, type WeeklySummary } from '@/lib/norica-api';
 import { speak, stopSpeaking, onSpeakingChange } from '@/lib/speech';
 
 export default function ResumoSemanal() {
@@ -15,6 +15,7 @@ export default function ResumoSemanal() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [speaking, setSpeaking] = useState(false);
+  const [goalAdded, setGoalAdded] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -40,6 +41,22 @@ export default function ResumoSemanal() {
 
   const s = data?.stats;
   const moodsTotal = s ? Object.values(s.moods).reduce((a, b) => a + b, 0) : 0;
+  // Comparação com a semana passada: dias leves (calmo) e dias pesados (ansioso, agitado, S.O.S).
+  const prev = s?.previous;
+  const prevTotal = prev ? Object.values(prev.moods).reduce((a, b) => a + b, 0) : 0;
+  const heavy = (m: Record<string, number>) => (m.ansioso ?? 0) + (m.agitado ?? 0) + (m.sos ?? 0);
+  const compare = s && prev && prevTotal > 0 ? [
+    { l: 'dias calmos', now: s.moods.calmo ?? 0, before: prev.moods.calmo ?? 0, goodUp: true },
+    { l: 'dias pesados', now: heavy(s.moods), before: heavy(prev.moods), goodUp: false },
+    { l: 'dias nos Logs', now: s.daysWithLogs, before: prev.daysWithLogs, goodUp: true },
+  ] : null;
+  const st = s?.study;
+  const hasStudy = !!st && (st.reviews + st.focusMinutes + st.notes) > 0;
+
+  const addGoal = async () => {
+    if (!data?.goal) return;
+    try { await addTasksToToday([data.goal]); setGoalAdded(true); } catch (_e) { setError('Não deu para colocar nos Logs agora.'); }
+  };
 
   return (
     <motion.div
@@ -94,6 +111,34 @@ export default function ResumoSemanal() {
         </div>
       )}
 
+      {compare && (
+        <div data-testid="resumo-comparacao" className="p-4 rounded-2xl bg-black/20 border border-white/5 space-y-2">
+          <p className="text-[9px] font-black text-white/40 uppercase tracking-widest">Comparado com a semana passada</p>
+          {compare.map((c) => {
+            const diff = c.now - c.before;
+            const good = diff === 0 ? null : (diff > 0) === c.goodUp;
+            const Icon = diff === 0 ? Minus : diff > 0 ? TrendingUp : TrendingDown;
+            return (
+              <div key={c.l} className="flex items-center justify-between text-sm font-bold">
+                <span className="text-white/70">{c.l}</span>
+                <span className={`flex items-center gap-1.5 ${good === null ? 'text-white/50' : good ? 'text-emerald-300' : 'text-amber-300'}`}>
+                  <span className="text-white/35 text-xs">{c.before} →</span> {c.now} <Icon size={14} />
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {data && !data.empty && hasStudy && st && (
+        <div data-testid="resumo-estudos" className="flex items-center gap-3 p-4 rounded-2xl bg-sky-500/10 border border-sky-400/20">
+          <BookOpen size={16} className="text-sky-300 shrink-0" />
+          <p className="text-xs text-white/75 font-semibold leading-relaxed">
+            Estudos: <b className="text-white">{st.reviews}</b> revisões, <b className="text-white">{st.focusMinutes}</b> min de foco e <b className="text-white">{st.notes}</b> anotações no Caderno.
+          </p>
+        </div>
+      )}
+
       {data?.summary && (
         <>
           <p className="text-[15px] text-white/85 font-semibold leading-relaxed whitespace-pre-line">{data.summary}</p>
@@ -104,6 +149,23 @@ export default function ResumoSemanal() {
             {speaking ? <Square size={12} /> : <Volume2 size={13} />} {speaking ? 'Parar' : 'Ouvir'}
           </button>
         </>
+      )}
+
+      {data?.goal && (
+        <div data-testid="resumo-meta" className="flex items-center gap-3 p-4 rounded-2xl bg-emerald-500/10 border border-emerald-400/25">
+          <Target size={18} className="text-emerald-300 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-[9px] font-black text-emerald-300/80 uppercase tracking-widest">Meta da próxima semana</p>
+            <p className="text-sm text-white font-bold leading-snug mt-0.5">{data.goal}</p>
+          </div>
+          <button
+            onClick={addGoal}
+            disabled={goalAdded}
+            className={`shrink-0 px-3 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest ${goalAdded ? 'bg-white/10 text-emerald-300' : 'bg-emerald-500 text-slate-950'}`}
+          >
+            {goalAdded ? <span className="flex items-center gap-1"><Check size={12} /> Nos Logs</span> : 'Colocar nos Logs'}
+          </button>
+        </div>
       )}
 
       {data?.locked && (

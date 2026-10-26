@@ -28,10 +28,15 @@ export default function PlanoPage() {
   const [id, setId] = useState<string | null>(null);
   const [plans, setPlans] = useState<StudyPlan[] | null>(null);
   const [creating, setCreating] = useState(false);
+  const [preset, setPreset] = useState<{ goal: string; deadline: string } | null>(null);
 
   useEffect(() => {
     const read = () => setId(new URLSearchParams(window.location.search).get('id'));
     read();
+    // Veio do card da prova (ENEM/ETEC): abre o "criar plano" já preenchido até o dia da prova.
+    const q = new URLSearchParams(window.location.search);
+    const goal = q.get('objetivo'), prova = q.get('prova');
+    if (goal) { setPreset({ goal: goal.slice(0, 200), deadline: prova && /^\d{4}-\d{2}-\d{2}$/.test(prova) ? prova : '' }); setCreating(true); }
     window.addEventListener('popstate', read);
     noricaApi.studyPlanList().then((r) => setPlans(Array.isArray(r?.plans) ? r.plans : [])).catch(() => setPlans([]));
     return () => window.removeEventListener('popstate', read);
@@ -54,7 +59,7 @@ export default function PlanoPage() {
         ) : id && plans === null ? (
           <div className="py-20 flex justify-center"><Loader2 className="animate-spin text-sky-300" /></div>
         ) : creating || (plans !== null && plans.length === 0) ? (
-          <CreatePlan onCreated={(p) => { setPlans((l) => [p, ...(l ?? [])]); setCreating(false); open(p.id); }} />
+          <CreatePlan preset={preset} onCreated={(p) => { setPlans((l) => [p, ...(l ?? [])]); setCreating(false); open(p.id); }} />
         ) : (
           <section className="space-y-4">
             <div className="space-y-2">
@@ -93,11 +98,11 @@ export default function PlanoPage() {
   );
 }
 
-function CreatePlan({ onCreated }: { onCreated: (p: StudyPlan) => void }) {
-  const [goal, setGoal] = useState('');
-  const [mode, setMode] = useState<'dias' | 'data'>('dias');
+function CreatePlan({ onCreated, preset }: { onCreated: (p: StudyPlan) => void; preset?: { goal: string; deadline: string } | null }) {
+  const [goal, setGoal] = useState(preset?.goal ?? '');
+  const [mode, setMode] = useState<'dias' | 'data'>(preset?.deadline ? 'data' : 'dias');
   const [days, setDays] = useState(14);
-  const [deadline, setDeadline] = useState('');
+  const [deadline, setDeadline] = useState(preset?.deadline ?? '');
   const [minutes, setMinutes] = useState(30);
   const [level, setLevel] = useState<PlanLevel>('basico');
   const [courseId, setCourseId] = useState<string>('');

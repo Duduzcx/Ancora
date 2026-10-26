@@ -89,6 +89,20 @@ export async function buildReportPdf(r: MonthlyReport): Promise<Blob> {
   doc.text(`Sem registro: ${empty}`, lx + 4.5, y);
   y += 11;
 
+  if (r.prevMoodCount && Object.values(r.prevMoodCount).some((n) => n)) {
+    section('Comparado com os 30 dias anteriores');
+    const pm = r.prevMoodCount;
+    const rows = (Object.keys(MOOD_LABEL) as (keyof typeof MOOD_LABEL)[]).map((k) => {
+      const now = r.moodCount[k] ?? 0, before = pm[k] ?? 0, d = now - before;
+      return `${MOOD_LABEL[k]}: ${before} → ${now} dia(s)${d ? ` (${d > 0 ? '+' : ''}${d})` : ''}`;
+    });
+    para(rows.join('   ·   '));
+    const heavy = (m: Record<string, number>) => (m.ansioso ?? 0) + (m.agitado ?? 0) + (m.sos ?? 0);
+    const dh = heavy(r.moodCount) - heavy(pm);
+    para(dh < 0 ? `Menos dias pesados que no período anterior (${-dh} a menos).` : dh > 0 ? `Mais dias pesados que no período anterior (${dh} a mais) — vale conversar sobre o que mudou.` : 'Dias pesados na mesma quantidade do período anterior.');
+    y += 3;
+  }
+
   section('Cuidados do dia a dia (Logs)');
   para(`Dias com pelo menos um hábito marcado: ${r.habitDays} de 30.`);
   const top = Object.entries(r.habitFreq).sort((a, b) => b[1] - a[1]).slice(0, 6);
@@ -99,6 +113,13 @@ export async function buildReportPdf(r: MonthlyReport): Promise<Blob> {
   para(r.topics.length ? r.topics.join(' · ') : 'Nenhum assunto registrado no período.');
   para(`Conversas no Porto: ${r.conversations}  ·  Registros no diário: ${r.journalCount}`);
   y += 3;
+
+  const st = r.study;
+  if (st && st.reviews + st.focusMinutes + st.notes > 0) {
+    section('Estudos e foco');
+    para(`Revisões de cartões: ${st.reviews}  ·  Minutos de foco: ${st.focusMinutes}  ·  Anotações no Caderno: ${st.notes}`);
+    y += 3;
+  }
 
   if (r.letter) {
     section('Leitura da Nórica');
@@ -154,7 +175,7 @@ export default function RelatorioMensal() {
         <span className="text-[9px] font-black text-white/40 uppercase tracking-widest">Pro · PDF</span>
       </div>
       <p className="text-sm text-white/70 font-semibold leading-relaxed">
-        Seus últimos 30 dias — humor, hábitos, assuntos e uma leitura da Nórica — em um PDF para levar à terapia.
+        Seus últimos 30 dias — humor comparado ao mês anterior, hábitos, estudos e uma leitura da Nórica — em um PDF para levar à terapia.
       </p>
       {locked ? (
         <div className="flex items-start gap-3 p-4 rounded-2xl bg-black/25 border border-sky-500/20">

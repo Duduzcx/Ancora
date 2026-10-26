@@ -343,6 +343,8 @@ async function prepareChat(ctx: Ctx, body: Record<string, unknown>): Promise<Pre
   ]);
   const risk: RiskLevel = keywordRisk ? "alto" : aiRisk;
   const crisis = risk === "alto";
+  // Quem compartilha com a psicóloga da instituição: ela recebe um alerta (sem nome nem conteúdo).
+  if (crisis) runInBackground(notifyPsi(ctx, "risco"));
   await rateLimit(ctx, crisis);
   // Limite do plano Gratuito (desligado no lançamento). Mensagens com sinal de risco nunca são bloqueadas.
   if (!crisis) {
@@ -711,16 +713,43 @@ async function weekStats(ctx: Ctx, start: string, end: string) {
   return { moodCount, daysWithLogs, days: days ?? [], chats: chats ?? [], journal: journal ?? [] };
 }
 
+/** Estudos no período: revisões, minutos de foco e anotações do Caderno. */
+async function studyStats(ctx: Ctx, start: string, end: string) {
+  const from = dayStartIso(start), to = dayStartIso(addDays(end, 1));
+  const [rv, ss, nt] = await Promise.all([
+    ctx.db.from("study_reviews").select("id", { count: "exact", head: true }).eq("user_id", ctx.userId).gte("created_at", from).lt("created_at", to),
+    ctx.db.from("study_sessions").select("minutes").eq("user_id", ctx.userId).gte("created_at", from).lt("created_at", to),
+    ctx.db.from("study_notes").select("id", { count: "exact", head: true }).eq("user_id", ctx.userId).gte("created_at", from).lt("created_at", to),
+  ]);
+  return { reviews: rv.count ?? 0, focusMinutes: (ss.data ?? []).reduce((a, r) => a + (r.minutes ?? 0), 0), notes: nt.count ?? 0 };
+}
+
+/** Separa a "META:" (meta da próxima semana) do texto do resumo. */
+function splitGoal(text: string): { summary: string; goal: string | null } {
+  const lines = text.split("\n");
+  const i = lines.findIndex((l) => /^\s*\**\s*meta\s*:/i.test(l));
+  if (i < 0) return { summary: text.trim(), goal: null };
+  const goal = lines[i].replace(/^\s*\**\s*meta\s*:\s*\**/i, "").replace(/\*+$/, "").trim().slice(0, 120);
+  return { summary: lines.filter((_, j) => j !== i).join("\n").trim(), goal: goal || null };
+}
+
 async function weeklySummary(ctx: Ctx, body: Record<string, unknown>) {
   const today = brtDay();
   const weekStart = mondayOf(today);
-  const info = await getPlan(ctx.admin, ctx.userId);
-  const stats = await weekStats(ctx, weekStart, today);
+  const prevStart = addDays(weekStart, -7);
+  const [info, stats, prev, study] = await Promise.all([
+    getPlan(ctx.admin, ctx.userId),
+    weekStats(ctx, weekStart, today),
+    weekStats(ctx, prevStart, addDays(weekStart, -1)),
+    studyStats(ctx, weekStart, today).catch(() => ({ reviews: 0, focusMinutes: 0, notes: 0 })),
+  ]);
   const publicStats = {
     moods: stats.moodCount,
     daysWithLogs: stats.daysWithLogs,
     conversations: stats.chats.length,
     journalEntries: stats.journal.length,
+    previous: { moods: prev.moodCount, daysWithLogs: prev.daysWithLogs },
+    study,
   };
   const hasData = Object.values(stats.moodCount).some((n) => n > 0) || stats.daysWithLogs > 0 || stats.chats.length > 0 || stats.journal.length > 0;
   if (!hasData) return { weekStart, empty: true, locked: false, summary: null, stats: publicStats };
@@ -730,7 +759,8 @@ async function weeklySummary(ctx: Ctx, body: Record<string, unknown>) {
   const { data: existing } = await ctx.db.from("weekly_summaries").select("content, created_at")
     .eq("user_id", ctx.userId).eq("week_start", weekStart).maybeSingle();
   if (existing && body.refresh !== true && brtDay(new Date(new Date(existing.created_at).getTime() - 3 * 3600_000)) === today) {
-    return { weekStart, empty: false, locked: false, summary: await decrypt(existing.content), stats: publicStats };
+    const parts = splitGoal(await decrypt(existing.content));
+    return { weekStart, empty: false, locked: false, summary: parts.summary, goal: parts.goal, stats: publicStats };
   }
 
   const titles: string[] = [];
@@ -750,14 +780,16 @@ async function weeklySummary(ctx: Ctx, body: Record<string, unknown>) {
     `Assuntos das conversas: ${[...new Set([...stats.days.map((d) => d.assunto).filter(Boolean), ...titles])].slice(0, 8).join("; ") || "nenhum"}.`,
     stats.days.length ? `Conselhos do dia já dados: ${stats.days.map((d) => d.conselho).filter(Boolean).slice(0, 3).join(" | ")}` : "",
     journalLines.length ? `Diário:\n${journalLines.join("\n")}` : "",
+    `Semana anterior: humor ${Object.entries(prev.moodCount).filter(([, n]) => n).map(([k, n]) => `${k} ${n}x`).join(", ") || "sem registros"}; dias nos Logs ${prev.daysWithLogs}.`,
+    study.reviews || study.focusMinutes || study.notes ? `Estudos: ${study.notes} anotações no Caderno, ${study.reviews} cartões revisados, ${study.focusMinutes} min de foco.` : "",
   ].filter(Boolean).join("\n");
 
   const name = await personName(ctx);
   let summary = "";
   try {
     summary = await groqChat(
-      [{ role: "system", content: WEEKLY_PROMPT }, { role: "user", content: `${name ? `Nome: ${name}\n` : ""}${lines}` }],
-      { temperature: 0.6, maxTokens: 300 },
+      [{ role: "system", content: WEEKLY_PROMPT + "\nSe houver dados da semana anterior, comente com leveza o que mudou (sem números exatos demais). Depois do texto, numa linha separada, escreva \"META: \" e uma meta pequena, concreta e gentil para a próxima semana (até 12 palavras, começando com verbo)." }, { role: "user", content: `${name ? `Nome: ${name}\n` : ""}${lines}` }],
+      { temperature: 0.6, maxTokens: 340 },
     );
   } catch (e) {
     console.error(e);
@@ -769,7 +801,8 @@ async function weeklySummary(ctx: Ctx, body: Record<string, unknown>) {
     content: await encrypt(summary),
     created_at: new Date().toISOString(),
   }, { onConflict: "user_id,week_start" });
-  return { weekStart, empty: false, locked: false, summary, stats: publicStats };
+  const parts = splitGoal(summary);
+  return { weekStart, empty: false, locked: false, summary: parts.summary, goal: parts.goal, stats: publicStats };
 }
 
 // ---------------------------------------------------------------------
@@ -1900,6 +1933,17 @@ async function monthlyReport(ctx: Ctx, body: Record<string, unknown>) {
   if (info.effective !== "pro") throw new HttpError(402, "O relatório mensal faz parte do Nórica Pro");
   const today = brtDay();
   const start = addDays(today, -29);
+  const prevStart = addDays(start, -30);
+  const [{ data: prevMoods }, { data: prevDays }, study] = await Promise.all([
+    ctx.db.from("mood_logs").select("mood, created_at").eq("user_id", ctx.userId).gte("created_at", dayStartIso(prevStart)).lt("created_at", dayStartIso(start)),
+    ctx.db.from("daily_logs").select("date, humor").eq("user_id", ctx.userId).gte("date", prevStart).lt("date", start),
+    studyStats(ctx, start, today).catch(() => ({ reviews: 0, focusMinutes: 0, notes: 0 })),
+  ]);
+  const prevByDay: Record<string, string> = {};
+  for (const d of prevDays ?? []) if (d.humor) prevByDay[d.date] = d.humor;
+  for (const m of prevMoods ?? []) prevByDay[brtDay(new Date(new Date(m.created_at).getTime() - 3 * 3600_000))] = m.mood;
+  const prevMoodCount: Record<string, number> = { calmo: 0, ansioso: 0, agitado: 0, sos: 0 };
+  for (const v of Object.values(prevByDay)) if (v in prevMoodCount) prevMoodCount[v]++;
   const [{ data: moods }, { data: habits }, { data: days }, { data: chats }, { data: journal }] = await Promise.all([
     ctx.db.from("mood_logs").select("mood, created_at").eq("user_id", ctx.userId).gte("created_at", dayStartIso(start)).order("created_at", { ascending: true }),
     ctx.db.from("habit_logs").select("day, progress, completed").eq("user_id", ctx.userId).gte("day", start),
@@ -1949,6 +1993,8 @@ async function monthlyReport(ctx: Ctx, body: Record<string, unknown>) {
       `Segunda quinzena: ${series.slice(15).map((p) => p.mood ?? "-").join(" ")}`,
       `Dias com hábitos marcados: ${habitDays}.`,
       `Assuntos: ${topTopics.join("; ") || "nenhum"}.`,
+      Object.values(prevMoodCount).some((n) => n) ? `30 dias anteriores (para comparar): ${Object.entries(prevMoodCount).map(([k, n]) => `${k} ${n}`).join(", ")}.` : "",
+      study.reviews || study.focusMinutes || study.notes ? `Estudos: ${study.notes} anotações, ${study.reviews} revisões, ${study.focusMinutes} min de foco.` : "",
       journalLines.length ? `Diário:\n${journalLines.join("\n")}` : "",
     ].filter(Boolean).join("\n");
     try {
@@ -1972,6 +2018,8 @@ async function monthlyReport(ctx: Ctx, body: Record<string, unknown>) {
     journalCount: (journal ?? []).length,
     conversations: (chats ?? []).length,
     letter: letter || null,
+    prevMoodCount,
+    study,
   };
 }
 
@@ -1981,17 +2029,17 @@ async function monthlyReport(ctx: Ctx, body: Record<string, unknown>) {
 
 const MIN_GROUP = 5; // abaixo disso, nenhum número é mostrado (evita identificar alguém)
 
-type Membership = { orgId: string; name: string; role: string; sectorId: string | null; sectorLabel: string; kind?: string; demo?: boolean };
+type Membership = { orgId: string; name: string; role: string; sectorId: string | null; sectorLabel: string; kind?: string; demo?: boolean; isPsi?: boolean; sharePsi?: boolean; psiEnabled?: boolean };
 
 async function myMembership(ctx: Ctx, role?: "admin"): Promise<Membership | null> {
-  let query = ctx.admin.from("org_members").select("org_id, role, sector_id").eq("user_id", ctx.userId);
+  let query = ctx.admin.from("org_members").select("org_id, role, sector_id, is_psi, share_psi").eq("user_id", ctx.userId);
   if (role) query = query.eq("role", role);
   const { data: rows } = await query.order("role", { ascending: true }).limit(1);
   const m = rows?.[0];
   if (!m) return null;
-  const { data: org } = await ctx.admin.from("organizations").select("id, name, sector_label, kind, demo").eq("id", m.org_id).maybeSingle();
+  const { data: org } = await ctx.admin.from("organizations").select("id, name, sector_label, kind, demo, psi_enabled").eq("id", m.org_id).maybeSingle();
   return org
-    ? { orgId: org.id as string, name: org.name as string, role: m.role as string, sectorId: (m.sector_id as string) ?? null, sectorLabel: (org.sector_label as string) || "Setor", kind: (org.kind as string) || "empresa", demo: !!org.demo }
+    ? { orgId: org.id as string, name: org.name as string, role: m.role as string, sectorId: (m.sector_id as string) ?? null, sectorLabel: (org.sector_label as string) || "Setor", kind: (org.kind as string) || "empresa", demo: !!org.demo, isPsi: !!m.is_psi, sharePsi: !!m.share_psi, psiEnabled: !!org.psi_enabled }
     : null;
 }
 
@@ -2003,14 +2051,14 @@ async function sectorsOf(ctx: Ctx, orgId: string) {
 async function orgOut(ctx: Ctx, m: Membership | null) {
   if (!m) return { org: null };
   const [sectors, campaigns] = await Promise.all([sectorsOf(ctx, m.orgId), activeCampaigns(ctx, m.orgId)]);
-  return { org: { name: m.name, role: m.role, kind: m.kind ?? "empresa", sectorId: m.sectorId, sectorLabel: m.sectorLabel, sectors, campaigns } };
+  return { org: { name: m.name, role: m.role, kind: m.kind ?? "empresa", sectorId: m.sectorId, sectorLabel: m.sectorLabel, sectors, campaigns, psi: { enabled: !!m.psiEnabled || !!m.demo, isPsi: !!m.isPsi || (!!m.demo && m.role === "admin"), share: !!m.sharePsi } } };
 }
 
 // ---------------------------------------------------------------------
 // Campanhas da instituição (aparecem na Início de quem faz parte dela)
 // ---------------------------------------------------------------------
 
-const CAMPAIGN_KINDS = ["setembro", "provas", "pausa", "sono", "livre", "janeiro", "voltaaulas", "saudemental", "fimdeano", "outubrorosa", "novembroazul", "ansiedade"];
+const CAMPAIGN_KINDS = ["setembro", "provas", "pausa", "sono", "livre", "janeiro", "voltaaulas", "saudemental", "fimdeano", "outubrorosa", "novembroazul", "ansiedade", "enem", "vesperaenem", "etec", "simulado", "resultado"];
 
 async function activeCampaigns(ctx: Ctx, orgId: string) {
   const today = brtDay();
@@ -2130,24 +2178,26 @@ async function newOrgCode(ctx: Ctx, name: string, team = false) {
 async function orgCreate(ctx: Ctx, body: Record<string, unknown>) {
   const name = cleanText(body.name, 80);
   if (name.length < 3) throw new HttpError(400, "Escreva o nome da instituição");
-  const kind = ["escola", "empresa", "outro"].includes(String(body.kind)) ? String(body.kind) : "empresa";
+  const kind = ["escola", "empresa", "cursinho", "outro"].includes(String(body.kind)) ? String(body.kind) : "empresa";
   const { count } = await ctx.admin.from("organizations").select("id", { count: "exact", head: true }).eq("created_by", ctx.userId);
   if ((count ?? 0) >= 3) throw new HttpError(409, "Você já criou 3 instituições. Fale com a gente para criar mais.");
   const code = await newOrgCode(ctx, name);
   const adminCode = await newOrgCode(ctx, name, true);
   const { data: org, error } = await ctx.admin.from("organizations").insert({
     name, code, admin_code: adminCode, kind, created_by: ctx.userId, plan: "teste",
-    trial_until: addDays(brtDay(), TRIAL_DAYS), sector_label: kind === "escola" ? "Turma" : "Setor",
+    trial_until: addDays(brtDay(), TRIAL_DAYS), sector_label: kind === "escola" || kind === "cursinho" ? "Turma" : "Setor",
   }).select("id").single();
   if (error || !org) throw new HttpError(500, "Não foi possível criar a instituição");
   await leaveDemos(ctx);
   await ctx.admin.from("org_members").upsert({ org_id: org.id, user_id: ctx.userId, role: "admin" }, { onConflict: "org_id,user_id" });
+  // Cursinho já começa com as turmas mais comuns (dá para renomear e criar outras).
+  if (kind === "cursinho") await ctx.admin.from("org_sectors").insert([{ org_id: org.id, name: "ENEM" }, { org_id: org.id, name: "ETEC" }]);
   return orgOut(ctx, await myMembership(ctx, "admin"));
 }
 
 async function orgDetails(ctx: Ctx, me: Membership) {
-  const { data: o } = await ctx.admin.from("organizations").select("code, admin_code, kind, plan, trial_until, created_by, demo").eq("id", me.orgId).maybeSingle();
-  const { data: ms } = await ctx.admin.from("org_members").select("role").eq("org_id", me.orgId);
+  const { data: o } = await ctx.admin.from("organizations").select("code, admin_code, kind, plan, trial_until, created_by, demo, psi_enabled, psi_guardian_ok, psi_code").eq("id", me.orgId).maybeSingle();
+  const { data: ms } = await ctx.admin.from("org_members").select("role, is_psi, share_psi").eq("org_id", me.orgId);
   return {
     code: o?.code ?? null,
     adminCode: o?.demo ? null : o?.admin_code ?? null,
@@ -2156,6 +2206,14 @@ async function orgDetails(ctx: Ctx, me: Membership) {
     trialUntil: o?.trial_until ?? null,
     owner: o?.created_by === ctx.userId,
     team: (ms ?? []).filter((m) => m.role === "admin").length,
+    psi: {
+      enabled: !!o?.psi_enabled || !!o?.demo,
+      guardianOk: !!o?.psi_guardian_ok,
+      code: o?.demo ? null : o?.psi_code ?? null,
+      psychologists: (ms ?? []).filter((m) => m.is_psi).length,
+      sharing: (ms ?? []).filter((m) => m.role === "member" && m.share_psi).length,
+      isPsi: !!me.isPsi || (!!o?.demo && me.role === "admin"),
+    },
   };
 }
 
@@ -2194,7 +2252,7 @@ async function leadCreate(admin: SupabaseClient, body: Record<string, unknown>, 
   const txt = (v: unknown, max: number) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, max) : "");
   const name = txt(body.name, 80);
   const orgName = txt(body.orgName, 120);
-  const kind = ["escola", "empresa", "outro"].includes(String(body.kind)) ? String(body.kind) : "outro";
+  const kind = ["escola", "empresa", "cursinho", "outro"].includes(String(body.kind)) ? String(body.kind) : "outro";
   const phone = txt(body.phone, 30).replace(/[^0-9+()\s-]/g, "");
   const email = txt(body.email, 120).toLowerCase();
   if (name.length < 2 || orgName.length < 2) throw new HttpError(400, "Preencha seu nome e o da instituição");
@@ -2248,17 +2306,23 @@ async function orgJoin(ctx: Ctx, body: Record<string, unknown>) {
   if (code.length < 4) throw new HttpError(400, "Digite o código que a instituição passou para você");
   let { data: org } = await ctx.admin.from("organizations").select("id, name, demo").eq("code", code).maybeSingle();
   let asTeam = false;
+  let asPsi = false;
   if (!org) {
     // Código da equipe (coordenação, RH): entra direto como quem vê o painel.
     const r = await ctx.admin.from("organizations").select("id, name, demo").eq("admin_code", code).maybeSingle();
     org = r.data; asTeam = !!org;
+  }
+  if (!org) {
+    // Código da psicóloga: entra como equipe e vê o acompanhamento de quem compartilha.
+    const r = await ctx.admin.from("organizations").select("id, name, demo").eq("psi_code", code).eq("psi_enabled", true).maybeSingle();
+    org = r.data; asTeam = asPsi = !!org;
   }
   if (!org) throw new HttpError(404, "Código não encontrado. Confira com a sua instituição.");
   await ctx.admin.from("org_members").delete().eq("user_id", ctx.userId).neq("org_id", org.id).eq("role", "member");
   await leaveDemos(ctx, org.id as string);
   // Demonstração: quem entra vê o painel como a equipe (com números fictícios).
   const { error } = await ctx.admin.from("org_members").upsert(
-    { org_id: org.id, user_id: ctx.userId, ...(org.demo || asTeam ? { role: "admin" } : {}) },
+    { org_id: org.id, user_id: ctx.userId, ...(org.demo || asTeam ? { role: "admin" } : {}), ...(asPsi ? { is_psi: true } : {}) },
     { onConflict: "org_id,user_id", ignoreDuplicates: !(org.demo || asTeam) },
   );
   if (error) throw new HttpError(500, "Não foi possível entrar agora");
@@ -2299,6 +2363,142 @@ async function orgLeave(ctx: Ctx) {
     throw new HttpError(409, `Você é a única pessoa da equipe de ${still.name}. Para sair, passe o código da equipe para alguém da coordenação/RH ou apague a instituição no painel (Ajustes).`);
   }
   return { ok: true };
+}
+
+// ---------------------------------------------------------------------
+// Acompanhamento pela psicóloga da instituição (só de quem escolheu compartilhar)
+// A psicóloga vê o humor dos últimos 14 dias e alertas. Nunca conversas, diário, Cofre ou Caderno.
+// ---------------------------------------------------------------------
+
+/** Equipe liga/desliga o acompanhamento. Escola e cursinho precisam confirmar a autorização dos responsáveis. */
+async function orgPsiSetup(ctx: Ctx, body: Record<string, unknown>) {
+  const me = await myMembership(ctx, "admin");
+  if (!me || me.demo) throw new HttpError(403, "Só a equipe da instituição pode mudar isso");
+  const enabled = body.enabled === true;
+  const guardianOk = body.guardianOk === true;
+  const needsGuardian = me.kind === "escola" || me.kind === "cursinho";
+  if (enabled && needsGuardian && !guardianOk) {
+    throw new HttpError(400, "Para ligar, confirme que a instituição tem a autorização dos responsáveis pelos alunos menores de 18 anos.");
+  }
+  const { data: o } = await ctx.admin.from("organizations").select("psi_code").eq("id", me.orgId).maybeSingle();
+  const update: Record<string, unknown> = { psi_enabled: enabled, psi_guardian_ok: guardianOk };
+  if (enabled && (!o?.psi_code || body.newCode === true)) update.psi_code = await newPsiCode(ctx, me.name);
+  await ctx.admin.from("organizations").update(update).eq("id", me.orgId);
+  if (!enabled) {
+    // Desligou: ninguém continua compartilhando sem querer quando ligar de novo.
+    await ctx.admin.from("org_members").update({ share_psi: false, share_psi_at: null }).eq("org_id", me.orgId);
+  }
+  return { info: await orgDetails(ctx, (await myMembership(ctx, "admin"))!) };
+}
+
+async function newPsiCode(ctx: Ctx, name: string) {
+  const base = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4) || "NORI";
+  for (let i = 0; i < 8; i++) {
+    const code = randomCode(`PSI${base}`, 4);
+    const { data } = await ctx.admin.from("organizations").select("id").eq("psi_code", code).maybeSingle();
+    if (!data) return code;
+  }
+  throw new HttpError(500, "Não foi possível gerar o código agora");
+}
+
+/** A própria pessoa liga ou desliga o compartilhamento com a psicóloga. */
+async function orgSharePsi(ctx: Ctx, body: Record<string, unknown>) {
+  const m = await myMembership(ctx);
+  if (!m) throw new HttpError(404, "Você não faz parte de uma instituição");
+  if (!m.psiEnabled && body.share === true) throw new HttpError(409, "A sua instituição ainda não ligou o acompanhamento pela psicóloga.");
+  const share = body.share === true;
+  await ctx.admin.from("org_members").update({ share_psi: share, share_psi_at: share ? new Date().toISOString() : null })
+    .eq("org_id", m.orgId).eq("user_id", ctx.userId);
+  return orgOut(ctx, await myMembership(ctx));
+}
+
+type CareFlag = "sos" | "dificil" | "sumiu" | null;
+
+function demoCare(sectors: { id: string; name: string }[]) {
+  const names = ["Ana Clara", "Bruno", "Camila", "Diego", "Eduarda", "Felipe", "Giovana", "Henrique", "Isabela", "João Pedro"];
+  const rnd = seeded(7);
+  const moods = ["calmo", "ansioso", "agitado", "sos"];
+  const today = brtDay();
+  return names.map((n, i) => {
+    const series = Array.from({ length: 14 }, (_, d) => {
+      const r = rnd();
+      const mood = r < 0.18 ? null : i === 1 && d > 10 ? (d === 13 ? "sos" : "ansioso") : moods[r < 0.55 ? 0 : r < 0.8 ? 1 : r < 0.97 ? 2 : 1];
+      return { day: addDays(today, d - 13), mood };
+    });
+    if (i === 4) for (const p of series.slice(7)) p.mood = null;
+    return careRow(`demo-${i}`, n, sectors[i % Math.max(1, sectors.length)]?.name ?? null, series);
+  });
+}
+
+function careRow(id: string, name: string, sector: string | null, series: { day: string; mood: string | null }[]) {
+  const marked = series.filter((p) => p.mood);
+  const last = marked[marked.length - 1] ?? null;
+  const last7 = series.slice(-7);
+  const hard7 = last7.filter((p) => p.mood === "ansioso" || p.mood === "agitado" || p.mood === "sos").length;
+  const daysAway = last ? Math.round((Date.parse(`${brtDay()}T12:00:00Z`) - Date.parse(`${last.day}T12:00:00Z`)) / 86400_000) : 14;
+  const flag: CareFlag = last7.some((p) => p.mood === "sos") ? "sos" : hard7 >= 3 ? "dificil" : daysAway >= 5 ? "sumiu" : null;
+  return { id, name, sector, series, lastMood: last?.mood ?? null, lastDay: last?.day ?? null, daysAway, hard7, flag };
+}
+
+/** Lista para a psicóloga: só de quem compartilha. Cada abertura fica registrada. */
+async function orgCareList(ctx: Ctx) {
+  const me = await myMembership(ctx, "admin");
+  const { data: orgRow } = me ? await ctx.admin.from("organizations").select("demo, psi_enabled").eq("id", me.orgId).maybeSingle() : { data: null };
+  if (!me || (!me.isPsi && !orgRow?.demo)) throw new HttpError(403, "Disponível só para a psicóloga da instituição");
+  const sectors = await sectorsOf(ctx, me.orgId);
+  const order = { sos: 0, dificil: 1, sumiu: 2 } as Record<string, number>;
+  const sort = <T extends { flag: CareFlag; name: string }>(l: T[]) => l.sort((a, b) => (order[a.flag ?? ""] ?? 3) - (order[b.flag ?? ""] ?? 3) || a.name.localeCompare(b.name));
+  if (orgRow?.demo) return { people: sort(demoCare(sectors)), notSharing: 31, demo: true };
+  if (!orgRow?.psi_enabled) throw new HttpError(409, "O acompanhamento está desligado nesta instituição.");
+
+  const { data: members } = await ctx.admin.from("org_members").select("user_id, sector_id, share_psi, role").eq("org_id", me.orgId).eq("role", "member");
+  const sharing = (members ?? []).filter((m) => m.share_psi);
+  const ids = sharing.map((m) => m.user_id as string);
+  const since = addDays(brtDay(), -13);
+  const [{ data: moods }, { data: days }, { data: profiles }] = ids.length
+    ? await Promise.all([
+      ctx.admin.from("mood_logs").select("user_id, mood, created_at").in("user_id", ids).gte("created_at", dayStartIso(since)).order("created_at"),
+      ctx.admin.from("daily_logs").select("user_id, date, humor").in("user_id", ids).gte("date", since),
+      ctx.admin.from("profiles").select("id, display_name").in("id", ids),
+    ])
+    : [{ data: [] }, { data: [] }, { data: [] }];
+  const dayOf = (iso: string) => brtDay(new Date(new Date(iso).getTime() - 3 * 3600_000));
+  const byUser = new Map<string, Record<string, string>>();
+  for (const d of days ?? []) if (d.humor) { const m = byUser.get(d.user_id) ?? {}; m[d.date] = d.humor; byUser.set(d.user_id, m); }
+  for (const x of moods ?? []) { const m = byUser.get(x.user_id) ?? {}; m[dayOf(x.created_at)] = x.mood; byUser.set(x.user_id, m); }
+  const names = new Map((profiles ?? []).map((p) => [p.id as string, (p.display_name as string) || "Sem nome"]));
+  const secName = new Map(sectors.map((s) => [s.id, s.name]));
+  const people = sharing.map((m) => {
+    const md = byUser.get(m.user_id as string) ?? {};
+    const series = Array.from({ length: 14 }, (_, i) => { const day = addDays(since, i); return { day, mood: md[day] ?? null }; });
+    return careRow(m.user_id as string, names.get(m.user_id as string) ?? "Sem nome", m.sector_id ? secName.get(m.sector_id as string) ?? null : null, series);
+  });
+  await ctx.admin.from("org_care_access").insert({ org_id: me.orgId, psi_user: ctx.userId, viewed: people.length });
+  return { people: sort(people), notSharing: (members ?? []).length - sharing.length, demo: false };
+}
+
+/** Avisa a psicóloga (push, sem nome nem conteúdo) quando alguém que compartilha pede ajuda. No máximo 1 vez a cada 6 h por pessoa. */
+async function notifyPsi(ctx: Ctx, reason: "sos" | "risco") {
+  const { data: rows } = await ctx.admin.from("org_members").select("org_id, share_psi, last_alert_at, role").eq("user_id", ctx.userId).eq("role", "member").eq("share_psi", true).limit(1);
+  const m = rows?.[0];
+  if (!m) return false;
+  if (m.last_alert_at && Date.now() - new Date(m.last_alert_at).getTime() < 6 * 3600_000) return false;
+  const { data: org } = await ctx.admin.from("organizations").select("psi_enabled").eq("id", m.org_id).maybeSingle();
+  if (!org?.psi_enabled) return false;
+  const { data: psis } = await ctx.admin.from("org_members").select("user_id").eq("org_id", m.org_id).eq("is_psi", true);
+  const ids = (psis ?? []).map((p) => p.user_id as string).filter((id) => id !== ctx.userId);
+  if (!ids.length) return false;
+  await ctx.admin.from("org_members").update({ last_alert_at: new Date().toISOString() }).eq("org_id", m.org_id).eq("user_id", ctx.userId);
+  runInBackground(pushSoon(ctx.admin, ids, {
+    title: "Alerta de cuidado 💙",
+    body: reason === "sos" ? "Alguém que compartilha com você tocou no S.O.S. Abra o painel para acolher." : "Uma conversa de alguém que compartilha com você mostrou sinal de risco. Abra o painel.",
+    route: "/painel/?aba=cuidado",
+  }));
+  return true;
+}
+
+async function careAlert(ctx: Ctx) {
+  return { notified: await notifyPsi(ctx, "sos") };
 }
 
 async function orgSectorCreate(ctx: Ctx, body: Record<string, unknown>) {
@@ -2797,7 +2997,7 @@ async function health(ctx: Ctx) {
     checks.criptografia = { ok: false, detail: String((e as Error).message) };
   }
 
-  for (const table of ["chats", "messages", "mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "user_plans", "usage_events", "app_errors", "user_memory", "safety_plans", "message_feedback", "weekly_summaries", "journal_entries", "organizations", "org_members", "org_sectors", "monthly_reports", "future_letters", "org_campaigns", "care_pairs", "care_invites", "care_nudges", "care_messages", "care_groups", "care_group_members", "care_challenges", "push_tokens", "leads", "promo_codes", "promo_redemptions", "study_notes", "study_cards", "study_reviews", "study_sessions", "study_plans", "video_cache", "courses", "course_events", "course_tasks"]) {
+  for (const table of ["chats", "messages", "mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "user_plans", "usage_events", "app_errors", "user_memory", "safety_plans", "message_feedback", "weekly_summaries", "journal_entries", "organizations", "org_members", "org_sectors", "monthly_reports", "future_letters", "org_campaigns", "care_pairs", "care_invites", "care_nudges", "care_messages", "care_groups", "care_group_members", "care_challenges", "push_tokens", "leads", "promo_codes", "promo_redemptions", "study_notes", "study_cards", "study_reviews", "study_sessions", "study_plans", "video_cache", "org_care_access", "courses", "course_events", "course_tasks"]) {
     const { error } = await ctx.admin.from(table).select("*", { count: "exact", head: true });
     checks[`tabela_${table}`] = error ? { ok: false, detail: error.message } : { ok: true };
   }
@@ -2880,6 +3080,10 @@ const actions: Record<string, (ctx: Ctx, body: Record<string, unknown>) => Promi
   org_sector_delete: orgSectorDelete,
   org_set_label: orgSetLabel,
   org_campaign_create: orgCampaignCreate,
+  org_psi_setup: orgPsiSetup,
+  org_share_psi: orgSharePsi,
+  org_care_list: orgCareList,
+  care_alert: careAlert,
   org_campaign_delete: orgCampaignDelete,
   org_create: orgCreate,
   org_rename: orgRename,

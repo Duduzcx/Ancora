@@ -5,7 +5,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ChevronRight, Flame, Mail, Route, X, Timer, HeartHandshake, NotebookPen, GraduationCap } from 'lucide-react';
+import { ChevronRight, Flame, Mail, Route, X, Timer, HeartHandshake, NotebookPen, GraduationCap, Target } from 'lucide-react';
 import { cachedStudy, refreshStudy, cachedPlans, type PlanBrief } from '@/lib/caderno';
 import { cachedFaculdade, countdown, daysUntil, kindOf, loadFaculdade, upcoming, type CourseEvent } from '@/lib/faculdade';
 import { usePhase, phaseLabel } from '@/lib/fase';
@@ -17,6 +17,7 @@ import { cacheGet, cacheSet } from '@/lib/cache';
 import { getAuthState } from '@/lib/auth-store';
 import { noricaApi, type FriendsState, type OrgCampaign, type OrgInfo } from '@/lib/norica-api';
 import { CAMPAIGN_TEMPLATES } from '@/lib/campanhas';
+import { proximosExames, diasAte, type Exame } from '@/lib/vestibulares';
 
 const card = 'w-full p-6 rounded-3xl border text-left flex items-center gap-4 shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] active:scale-[0.98] transition-transform card-in';
 const DISMISS_KEY = 'norica-campanhas-vistas';
@@ -33,6 +34,7 @@ export default function HojeCards() {
   const [studyDue, setStudyDue] = useState(0);
   const [plan, setPlan] = useState<PlanBrief | null>(null);
   const [exam, setExam] = useState<{ e: CourseEvent; course: string | null } | null>(null);
+  const [vest, setVest] = useState<Exame | null>(null);
 
   useEffect(() => {
     const refresh = () => {
@@ -45,6 +47,9 @@ export default function HojeCards() {
       try { seen = JSON.parse(localStorage.getItem(DISMISS_KEY) || '[]'); } catch (_e) {}
       const today = new Date().toLocaleDateString('en-CA');
       setCampaign(org?.campaigns?.find((c) => c.starts_on <= today && c.ends_on >= today && !seen.includes(c.id)) ?? null);
+      // Cursinho: contagem regressiva da próxima prova (ENEM/ETEC) nos próximos 60 dias.
+      const next = org?.kind === 'cursinho' ? proximosExames().find((e) => !e.nome.startsWith('Resultado') && diasAte(e.dia) <= 60) ?? null : null;
+      setVest(next);
     };
     refresh();
     const t = setTimeout(refresh, 3500); // depois que o app atualiza as informações em segundo plano
@@ -155,6 +160,20 @@ export default function HojeCards() {
             </p>
           </div>
           <ChevronRight size={18} className="text-orange-200/50" />
+        </button>
+      )}
+
+      {vest && (
+        <button onClick={() => router.push(`/caderno/plano/?objetivo=${encodeURIComponent(vest.tipo === 'enem' ? 'Revisão para o ENEM' : 'Revisão para o Vestibulinho ETEC')}&prova=${vest.dia}`)} className={`${card} bg-gradient-to-br from-violet-950/60 to-[#0b0f19] border-violet-300/25`} data-testid="vestibular-card">
+          <div className="w-14 h-14 rounded-2xl bg-violet-400/15 text-violet-200 flex flex-col items-center justify-center shrink-0 leading-none">
+            <span className="text-xl font-black tabular-nums">{diasAte(vest.dia)}</span>
+            <span className="text-[8px] font-black uppercase tracking-widest mt-0.5">{diasAte(vest.dia) === 1 ? 'dia' : 'dias'}</span>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[9px] font-black text-violet-300/80 uppercase tracking-[0.3em] flex items-center gap-1"><Target size={11} /> {vest.nome}</p>
+            <p className="text-base font-black text-white tracking-tight leading-snug">{diasAte(vest.dia) <= 1 ? 'É agora! Descanse, você se preparou. 🍀' : 'Monte seu plano até o dia da prova — um pouco por dia.'}</p>
+          </div>
+          <ChevronRight size={18} className="text-violet-200/50" />
         </button>
       )}
 

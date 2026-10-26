@@ -398,6 +398,14 @@ export default function PerfilPage() {
     }
   };
 
+  const toggleSharePsi = async (share: boolean) => {
+    if (share && !window.confirm('Compartilhar seu humor com a psicóloga da instituição?\n\nEla verá só o humor dos últimos 14 dias e um aviso se você tocar no S.O.S. Nunca suas conversas, diário ou Cofre. Você pode desligar quando quiser.')) return;
+    setOrgBusy(true); setOrgError(null);
+    try { setOrg((await noricaApi.orgSharePsi(share)).org); }
+    catch (err: any) { setOrgError(err?.message || 'Não foi possível salvar agora.'); }
+    finally { setOrgBusy(false); }
+  };
+
   const leaveOrg = async () => {
     if (!window.confirm(`Sair de ${org?.name ?? 'a instituição'}? Você pode entrar de novo depois com o código.`)) return;
     setOrgBusy(true); setOrgError(null);
@@ -994,9 +1002,33 @@ export default function PerfilPage() {
                       <p className="text-[10px] text-white/40 font-semibold">Serve só para os números somados do grupo. Ninguém vê o que você marca.</p>
                     </div>
                   )}
+                  {org.role === 'member' && org.psi?.enabled && (
+                    <div className="p-4 rounded-2xl bg-rose-400/5 border border-rose-300/20 space-y-3" data-testid="compartilhar-psi">
+                      <div className="flex items-start gap-3">
+                        <div className="flex-1">
+                          <p className="text-sm font-black text-white leading-tight">Compartilhar meu humor com a psicóloga</p>
+                          <p className="text-[11px] text-white/55 font-semibold leading-relaxed mt-1">
+                            A psicóloga de {org.name} vê só o humor dos seus últimos 14 dias e recebe um aviso se você tocar no S.O.S — para poder te oferecer uma conversa. <b className="text-white/75">Nunca</b> conversas, diário ou Cofre.
+                          </p>
+                        </div>
+                        <button
+                          role="switch"
+                          aria-checked={!!org.psi.share}
+                          aria-label="Compartilhar meu humor com a psicóloga"
+                          disabled={orgBusy}
+                          onClick={() => toggleSharePsi(!org.psi?.share)}
+                          className={`shrink-0 w-12 h-7 rounded-full p-1 transition-colors ${org.psi.share ? 'bg-rose-400' : 'bg-white/15'}`}
+                          data-testid="toggle-psi"
+                        >
+                          <span className={`block w-5 h-5 rounded-full bg-white shadow transition-transform ${org.psi.share ? 'translate-x-5' : ''}`} />
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-white/40 font-semibold leading-relaxed">É escolha sua e dá para desligar a qualquer momento. Se você tem menos de 18 anos, a instituição precisa da autorização do seu responsável.</p>
+                    </div>
+                  )}
                   {org.role === 'admin' && (
                     <button onClick={() => router.push('/painel/')} className="w-full py-4 rounded-2xl bg-amber-400 text-slate-950 font-black uppercase tracking-widest text-[10px]">
-                      Abrir painel da instituição
+                      {org.psi?.isPsi ? 'Abrir painel de cuidado' : 'Abrir painel da instituição'}
                     </button>
                   )}
                   <button onClick={leaveOrg} disabled={orgBusy} className="w-full py-4 rounded-2xl bg-white/5 border border-white/10 text-white/60 font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-2" data-testid="sair-instituicao">

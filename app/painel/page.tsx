@@ -7,8 +7,9 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Building2, Loader2, Copy, Share2, RefreshCw, Settings, CalendarDays, Check, Trash2, ShieldCheck, Users, TrendingUp, TrendingDown, Minus, Lock, AlertTriangle, Lightbulb, Plus, X, Download, Layers, Sparkles, Megaphone, FileText } from 'lucide-react';
-import { noricaApi, type CampaignKind, type OrgCampaign, type OrgDashboard, type OrgDetails, type OrgSector } from '@/lib/norica-api';
+import { ArrowLeft, Building2, Loader2, Copy, Share2, RefreshCw, Settings, CalendarDays, Check, Trash2, ShieldCheck, Users, TrendingUp, TrendingDown, Minus, Lock, AlertTriangle, Lightbulb, Plus, X, Download, Layers, Sparkles, Megaphone, FileText, HeartPulse, Target, BellRing, UserX } from 'lucide-react';
+import { noricaApi, type CampaignKind, type CarePerson, type OrgCampaign, type OrgDashboard, type OrgDetails, type OrgSector } from '@/lib/norica-api';
+import { proximosExames, diasAte, type Exame } from '@/lib/vestibulares';
 import { CAMPAIGN_TEMPLATES, nextWindow } from '@/lib/campanhas';
 import { shareText } from '@/lib/share-text';
 import { buildOrgReportPdf } from '@/lib/relatorio-instituicao';
@@ -27,8 +28,14 @@ export default function PainelPage() {
   const [data, setData] = useState<OrgDashboard | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const [tab, setTab] = useState<'grupo' | 'cuidado'>('grupo');
   const load = () => noricaApi.orgDashboard().then(setData).catch((err) => setError(err?.message || 'Não foi possível carregar o painel.'));
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    // Veio do alerta da psicóloga: abre direto na aba Cuidado.
+    if (new URLSearchParams(window.location.search).get('aba') === 'cuidado') setTab('cuidado');
+  }, []);
+  const isPsi = !!data?.info?.psi?.isPsi;
 
   const cur = data?.current ?? null;
   const prev = data?.previous ?? null;
@@ -77,7 +84,18 @@ export default function PainelPage() {
                 </p>
               </div>
             )}
+            {isPsi && (
+              <div className="grid grid-cols-2 gap-1 p-1 rounded-2xl bg-white/5 border border-white/10" role="tablist">
+                {([['grupo', 'Grupo', Users], ['cuidado', 'Cuidado', HeartPulse]] as const).map(([id, label, Icon]) => (
+                  <button key={id} role="tab" aria-selected={tab === id} onClick={() => setTab(id)} data-testid={`aba-${id}`} className={`py-3 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 transition-colors ${tab === id ? (id === 'cuidado' ? 'bg-rose-400 text-slate-950' : 'bg-emerald-500 text-slate-950') : 'text-white/50'}`}>
+                    <Icon size={14} /> {label}
+                  </button>
+                ))}
+              </div>
+            )}
+            {isPsi && tab === 'cuidado' ? <Cuidado demo={!!data.demo} /> : (<>
             {data.info && <Convite info={data.info} org={data.org} demo={!!data.demo} members={data.members} onRenamed={load} />}
+            {data.info && (data.info.kind === 'cursinho' || data.info.kind === 'escola') && <Vestibulares data={data} />}
 
             <div className="grid grid-cols-2 gap-3">
               <Tile label="Participantes" value={String(data.members)} hint="com o código da instituição" icon={Users} />
@@ -190,6 +208,7 @@ export default function PainelPage() {
             <p className="text-[11px] text-white/40 font-semibold leading-relaxed">
               Use estes números para planejar ações coletivas (rodas de conversa, semanas mais leves perto de provas, divulgar o CVV 188). Eles não servem para acompanhar pessoas individualmente.
             </p>
+            </>)}
           </>
         )}
       </div>
@@ -527,7 +546,7 @@ function Convite({ info: initial, org, demo, members, onRenamed }: { info: OrgDe
   const [name, setName] = useState(org);
   const [busy, setBusy] = useState(false);
   useEffect(() => setInfo(initial), [initial]);
-  const people = info.kind === 'escola' ? 'alunos' : info.kind === 'empresa' ? 'funcionários' : 'participantes';
+  const people = info.kind === 'escola' || info.kind === 'cursinho' ? 'alunos' : info.kind === 'empresa' ? 'funcionários' : 'participantes';
   const invite = `${org} agora tem a Nórica, um app de apoio emocional 💚\n\n1. Baixe: https://play.google.com/store/apps/details?id=com.zcx.ancora\n2. Em Perfil → Instituição Parceira, digite o código: ${info.code}\n\nA instituição vê só números somados do grupo, nunca o que você escreve ou sente.`;
   const copy = async (text: string, k: string) => { try { await navigator.clipboard.writeText(text); setCopied(k); setTimeout(() => setCopied(null), 2000); } catch (_e) {} };
   const trial = info.plan === 'teste' && info.trialUntil ? Math.max(0, Math.round((Date.parse(`${info.trialUntil}T12:00:00`) - Date.parse(`${new Date().toLocaleDateString('en-CA')}T12:00:00`)) / 86400_000)) : null;
@@ -573,18 +592,230 @@ function Convite({ info: initial, org, demo, members, onRenamed }: { info: OrgDe
           {settings && (
             <div className="space-y-3 p-4 rounded-2xl bg-black/25 border border-white/5">
               <div className="flex gap-2">
-                <input value={name} onChange={(e) => setName(e.target.value)} maxLength={80} className="flex-1 min-w-0 bg-black/30 border border-white/10 rounded-xl px-3 py-2.5 text-sm outline-none" aria-label="Nome da instituição" />
-                <button onClick={rename} disabled={busy || name.trim().length < 3} className="px-3 rounded-xl bg-white/10 text-[10px] font-black uppercase disabled:opacity-40">Salvar</button>
+                <input value={name} onChange={(e) => setName(e.target.value)} maxLength={80} className="flex-1 min-w-0 bg-black/30 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white outline-none" aria-label="Nome da instituição" />
+                <button onClick={rename} disabled={busy || name.trim().length < 3} className="px-3 rounded-xl bg-white/10 text-white/80 text-[10px] font-black uppercase disabled:opacity-40">Salvar</button>
               </div>
               <div className="grid grid-cols-2 gap-2">
-                <button onClick={() => newCode(false)} disabled={busy} className="py-2.5 rounded-xl bg-white/5 border border-white/10 text-[10px] font-black uppercase flex items-center justify-center gap-1.5"><RefreshCw size={11} /> Novo código</button>
-                <button onClick={() => newCode(true)} disabled={busy} className="py-2.5 rounded-xl bg-white/5 border border-white/10 text-[10px] font-black uppercase flex items-center justify-center gap-1.5"><RefreshCw size={11} /> Novo da equipe</button>
+                <button onClick={() => newCode(false)} disabled={busy} className="py-2.5 rounded-xl bg-white/5 border border-white/10 text-white/75 text-[10px] font-black uppercase flex items-center justify-center gap-1.5"><RefreshCw size={11} /> Novo código</button>
+                <button onClick={() => newCode(true)} disabled={busy} className="py-2.5 rounded-xl bg-white/5 border border-white/10 text-white/75 text-[10px] font-black uppercase flex items-center justify-center gap-1.5"><RefreshCw size={11} /> Novo da equipe</button>
               </div>
+              {!info.psi?.isPsi && <PsiSetup info={info} people={people} onChange={setInfo} />}
               {info.owner && <button onClick={remove} disabled={busy} className="w-full py-2.5 rounded-xl text-rose-300/80 text-[10px] font-black uppercase flex items-center justify-center gap-1.5"><Trash2 size={11} /> Apagar instituição</button>}
             </div>
           )}
         </>
       )}
+    </section>
+  );
+}
+
+
+// ---------------------------------------------------------------------
+// Psicóloga da instituição: ligar o acompanhamento (equipe) e a aba Cuidado (psicóloga)
+// ---------------------------------------------------------------------
+
+function PsiSetup({ info, people, onChange }: { info: OrgDetails; people: string; onChange: (i: OrgDetails) => void }) {
+  const psi = info.psi;
+  const school = info.kind === 'escola' || info.kind === 'cursinho';
+  const [guardian, setGuardian] = useState(!!psi?.guardianOk);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const run = async (enabled: boolean, newCode = false) => {
+    setBusy(true); setErr(null);
+    try { onChange((await noricaApi.orgPsiSetup(enabled, guardian, newCode)).info); } catch (e: any) { setErr(e?.message || 'Não foi possível salvar.'); } finally { setBusy(false); }
+  };
+  return (
+    <div className="space-y-3 p-4 rounded-2xl bg-rose-400/5 border border-rose-300/20" data-testid="psi-setup">
+      <p className="flex items-center gap-2 text-[11px] font-black text-rose-200 uppercase tracking-widest"><HeartPulse size={13} /> Acompanhamento pela psicóloga</p>
+      <p className="text-[12px] text-white/60 font-semibold leading-relaxed">
+        A psicóloga da instituição entra com um código próprio e vê <b className="text-white/80">só o humor dos últimos 14 dias</b> de quem escolher compartilhar no Perfil — nunca conversas, diário ou Cofre. Ela recebe um aviso (sem nome) quando alguém que compartilha toca no S.O.S.
+      </p>
+      {psi?.enabled ? (
+        <>
+          <div className="p-3 rounded-xl bg-black/30 border border-white/10 flex items-center gap-3">
+            <div className="flex-1 min-w-0">
+              <p className="text-[9px] font-black text-white/40 uppercase tracking-widest">Código da psicóloga</p>
+              <p className="text-base font-black tracking-[0.06em] text-rose-200 break-all" data-testid="codigo-psi">{psi.code}</p>
+            </div>
+            <button onClick={() => { navigator.clipboard?.writeText(psi.code ?? '').then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000); }).catch(() => {}); }} className="shrink-0 w-9 h-9 rounded-lg bg-white/5 border border-white/10 text-white/60 flex items-center justify-center" aria-label="Copiar código da psicóloga">{copied ? <Check size={14} /> : <Copy size={14} />}</button>
+          </div>
+          <p className="text-[11px] text-white/50 font-semibold">{psi.psychologists} psicóloga(s) · <b className="text-white/75">{psi.sharing}</b> {people} compartilhando</p>
+          <div className="grid grid-cols-2 gap-2">
+            <button onClick={() => run(true, true)} disabled={busy} className="py-2.5 rounded-xl bg-white/5 border border-white/10 text-white/75 text-[10px] font-black uppercase flex items-center justify-center gap-1.5"><RefreshCw size={11} /> Novo código</button>
+            <button onClick={() => { if (window.confirm('Desligar o acompanhamento? Todos param de compartilhar e precisarão ligar de novo.')) run(false); }} disabled={busy} className="py-2.5 rounded-xl text-rose-300/80 border border-rose-300/20 text-[10px] font-black uppercase" data-testid="psi-desligar">Desligar</button>
+          </div>
+        </>
+      ) : (
+        <>
+          {school && (
+            <label className="flex items-start gap-3 text-[12px] text-white/65 font-semibold leading-snug">
+              <input type="checkbox" checked={guardian} onChange={(e) => setGuardian(e.target.checked)} className="mt-0.5 accent-rose-400 w-4 h-4 shrink-0" data-testid="psi-responsaveis" />
+              <span>A instituição tem a <b className="text-white/85">autorização por escrito dos responsáveis</b> pelos alunos menores de 18 anos para este acompanhamento.</span>
+            </label>
+          )}
+          <button onClick={() => run(true)} disabled={busy || (school && !guardian)} className="w-full py-3 rounded-xl bg-rose-400 text-slate-950 text-[10px] font-black uppercase tracking-widest disabled:opacity-40 flex items-center justify-center gap-2" data-testid="psi-ligar">
+            {busy && <Loader2 size={13} className="animate-spin" />} Ligar e gerar código da psicóloga
+          </button>
+        </>
+      )}
+      {err && <p className="text-xs font-bold text-rose-300">{err}</p>}
+    </div>
+  );
+}
+
+const FLAG: Record<string, { label: string; cls: string; icon: any }> = {
+  sos: { label: 'Tocou no S.O.S', cls: 'bg-rose-500/15 border-rose-400/40 text-rose-200', icon: BellRing },
+  dificil: { label: 'Semana difícil', cls: 'bg-amber-400/10 border-amber-300/35 text-amber-200', icon: AlertTriangle },
+  sumiu: { label: 'Sem registro há dias', cls: 'bg-white/5 border-white/15 text-white/60', icon: UserX },
+};
+
+function Cuidado({ demo }: { demo: boolean }) {
+  const [people, setPeople] = useState<CarePerson[] | null>(null);
+  const [notSharing, setNotSharing] = useState(0);
+  const [err, setErr] = useState<string | null>(null);
+  const [filter, setFilter] = useState<'atencao' | 'todos'>('atencao');
+  useEffect(() => {
+    noricaApi.orgCareList().then((r) => { setPeople(r.people); setNotSharing(r.notSharing); }).catch((e) => setErr(e?.message || 'Não foi possível carregar.'));
+  }, []);
+  const flagged = (people ?? []).filter((p) => p.flag);
+  const shown = filter === 'atencao' ? flagged : people ?? [];
+
+  return (
+    <section className="space-y-5" data-testid="cuidado">
+      <div className="p-5 rounded-[2rem] bg-gradient-to-br from-rose-950/50 to-white/[0.03] border border-rose-300/20 space-y-2">
+        <h2 className="flex items-center gap-2 text-sm font-black text-white uppercase tracking-tighter"><HeartPulse size={16} className="text-rose-300" /> Quem pediu para você acompanhar</h2>
+        <p className="text-[12px] text-white/60 font-semibold leading-relaxed">
+          Aparece só quem ligou &quot;Compartilhar meu humor com a psicóloga&quot; no Perfil. Você vê o humor dos últimos 14 dias — nunca conversas, diário ou Cofre. Cada acesso fica registrado.
+        </p>
+        {demo && <p className="text-[11px] text-sky-200 font-bold">Demonstração: nomes e dados fictícios.</p>}
+      </div>
+
+      {!people && !err && <div className="space-y-2">{[0, 1, 2].map((i) => <div key={i} className="skeleton h-20 rounded-2xl" />)}</div>}
+      {err && <p className="text-sm font-bold text-rose-300">{err}</p>}
+
+      {people && (
+        <>
+          <div className="grid grid-cols-3 gap-2">
+            <Mini v={String(people.length)} l="compartilham" />
+            <Mini v={String(flagged.length)} l="pedem atenção" tone={flagged.length ? 'warn' : undefined} />
+            <Mini v={String(notSharing)} l="não compartilham" />
+          </div>
+          <div className="flex gap-2">
+            {([['atencao', `Pedem atenção (${flagged.length})`], ['todos', `Todos (${people.length})`]] as const).map(([id, l]) => (
+              <button key={id} onClick={() => setFilter(id)} className={`px-3 py-1.5 rounded-full text-[11px] font-black border ${filter === id ? 'bg-rose-400/20 border-rose-300/40 text-rose-100' : 'border-white/10 text-white/50'}`}>{l}</button>
+            ))}
+          </div>
+          {shown.length === 0 ? (
+            <p className="text-sm text-white/55 font-semibold p-5 rounded-2xl bg-white/5 border border-white/10">
+              {people.length === 0 ? 'Ninguém está compartilhando ainda. Explique para a turma como ligar no Perfil → Instituição — é sempre escolha de cada um.' : 'Ninguém com sinal de atenção agora. 💚'}
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {shown.map((p) => {
+                const f = p.flag ? FLAG[p.flag] : null;
+                return (
+                  <li key={p.id} className="p-4 rounded-2xl bg-white/5 border border-white/10 space-y-3" data-testid="cuidado-pessoa">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-black text-white truncate">{p.name}</p>
+                        <p className="text-[10px] font-bold text-white/40">{p.sector ?? 'Sem turma'} · {p.lastDay ? (p.daysAway === 0 ? 'registrou hoje' : `último registro há ${p.daysAway} dia(s)`) : 'sem registros'}</p>
+                      </div>
+                      {f && <span className={`shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-full border text-[9px] font-black uppercase tracking-widest ${f.cls}`}><f.icon size={11} /> {f.label}</span>}
+                    </div>
+                    <div className="flex gap-[3px]" role="img" aria-label={`Humor dos últimos 14 dias de ${p.name}`}>
+                      {p.series.map((d) => (
+                        <span key={d.day} title={`${br(d.day)}: ${d.mood ?? 'sem registro'}`} className="flex-1 h-3 rounded-[3px]" style={{ background: d.mood ? MOOD_COLOR[d.mood as keyof typeof MOOD_COLOR] : 'rgba(255,255,255,0.07)' }} />
+                      ))}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <div className="flex flex-wrap gap-3">
+            {MOODS.map((m) => (
+              <span key={m.key} className="flex items-center gap-1.5 text-[10px] font-bold text-white/50">
+                <span className="w-2 h-2 rounded-full" style={{ background: MOOD_COLOR[m.key as keyof typeof MOOD_COLOR] }} /> {m.label}
+              </span>
+            ))}
+          </div>
+          <p className="text-[11px] text-white/40 font-semibold leading-relaxed">
+            Use para oferecer uma conversa, nunca para cobrar ou expor. Em risco imediato, siga o protocolo da instituição e acione os responsáveis, o CVV (188) ou o SAMU (192).
+          </p>
+        </>
+      )}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------
+// Cursinho / escola: provas com data exata e campanhas de um toque
+// ---------------------------------------------------------------------
+
+const shift = (iso: string, n: number) => { const d = new Date(`${iso}T12:00:00`); d.setDate(d.getDate() + n); return d.toLocaleDateString('en-CA'); };
+function examCampaigns(e: Exame): { kind: CampaignKind; start: string; end: string; label: string }[] {
+  if (e.id === 'enem26-1') return [
+    { kind: 'enem', start: shift(e.dia, -14), end: shift(e.dia, -2), label: 'Reta final' },
+    { kind: 'vesperaenem', start: shift(e.dia, -1), end: e.dia, label: 'Véspera' },
+  ];
+  if (e.id === 'enem26-2') return [{ kind: 'vesperaenem', start: shift(e.dia, -1), end: e.dia, label: 'Véspera' }];
+  if (e.id === 'etec27-r') return [{ kind: 'resultado', start: e.dia, end: shift(e.dia, 6), label: 'Resultado' }];
+  if (e.tipo === 'etec') return [{ kind: 'etec', start: shift(e.dia, -14), end: e.dia, label: 'Reta final' }];
+  return [];
+}
+
+function Vestibulares({ data }: { data: OrgDashboard }) {
+  const [list, setList] = useState<OrgCampaign[]>(data.campaigns ?? []);
+  const [busy, setBusy] = useState<string | null>(null);
+  useEffect(() => { setList(data.campaigns ?? []); }, [data]);
+  const exams = proximosExames().slice(0, 4);
+  if (!exams.length) return null;
+  const today = plusDays(0);
+  const on = (k: CampaignKind, start: string, end: string) => list.some((c) => c.kind === k && c.ends_on >= start && c.starts_on <= end);
+  const activate = async (k: CampaignKind, start: string, end: string) => {
+    setBusy(`${k}${start}`);
+    try {
+      const t = CAMPAIGN_TEMPLATES[k];
+      setList((await noricaApi.orgCampaignCreate({ kind: k, title: t.title, message: t.message, startsOn: start < today ? today : start, endsOn: end })).campaigns);
+    } catch (_e) {} finally { setBusy(null); }
+  };
+  return (
+    <section className="bg-white/5 border border-white/10 rounded-[2.5rem] p-6 space-y-4" data-testid="vestibulares">
+      <div>
+        <h2 className="flex items-center gap-2 text-sm font-black text-white uppercase tracking-tighter"><Target size={16} className="text-violet-300" /> Provas que vêm aí</h2>
+        <p className="text-[11px] text-white/45 font-semibold mt-1">Ative o apoio certo para cada fase: reta final, véspera e resultado. Os alunos veem na Início.</p>
+      </div>
+      <ul className="space-y-2">
+        {exams.map((e) => {
+          const n = diasAte(e.dia);
+          return (
+            <li key={e.id} className="p-4 rounded-2xl bg-black/25 border border-white/5 space-y-3">
+              <div className="flex items-center gap-3">
+                <div className="w-12 shrink-0 text-center">
+                  <p className="text-2xl font-black text-violet-200 tabular-nums leading-none">{n}</p>
+                  <p className="text-[8px] font-black text-white/40 uppercase tracking-widest mt-1">{n === 1 ? 'dia' : 'dias'}</p>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-black text-white">{e.nome}</p>
+                  <p className="text-[10px] font-bold text-white/45">{br(e.dia)}{e.hora ? ` · ${e.hora}` : ''} · {e.detalhe}</p>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {examCampaigns(e).filter((c) => c.end >= today).map((c) => {
+                  const done = on(c.kind, c.start, c.end);
+                  return (
+                    <button key={c.kind + c.start} onClick={() => activate(c.kind, c.start, c.end)} disabled={done || busy === `${c.kind}${c.start}`} data-testid={`vest-${c.kind}`} className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest flex items-center gap-1 ${done ? 'bg-emerald-500/15 text-emerald-300' : 'bg-violet-400 text-slate-950'}`}>
+                      {busy === `${c.kind}${c.start}` ? <Loader2 size={11} className="animate-spin" /> : done ? <Check size={11} /> : <Megaphone size={11} />} {CAMPAIGN_TEMPLATES[c.kind].emoji} {c.label} · {c.start <= today ? 'desde hoje' : br(c.start).slice(0, 5)}
+                    </button>
+                  );
+                })}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="text-[10px] text-white/35 font-semibold">Datas oficiais divulgadas (Inep e Centro Paula Souza). Confira sempre os sites oficiais.</p>
     </section>
   );
 }

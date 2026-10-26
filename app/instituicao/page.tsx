@@ -5,13 +5,14 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Building2, GraduationCap, Briefcase, Users, Loader2, ShieldCheck, Check } from 'lucide-react';
+import { ArrowLeft, Building2, GraduationCap, Briefcase, Users, Loader2, ShieldCheck, Check, Target } from 'lucide-react';
 import { noricaApi, type OrgKind } from '@/lib/norica-api';
 import { cacheSet } from '@/lib/cache';
 import { getAuthState } from '@/lib/auth-store';
 
 const KINDS: { id: OrgKind; label: string; hint: string; icon: any }[] = [
-  { id: 'escola', label: 'Escola ou cursinho', hint: 'Grupos por turma', icon: GraduationCap },
+  { id: 'escola', label: 'Escola', hint: 'Grupos por turma', icon: GraduationCap },
+  { id: 'cursinho', label: 'Cursinho', hint: 'ENEM, ETEC e vestibular', icon: Target },
   { id: 'empresa', label: 'Empresa', hint: 'Grupos por setor', icon: Briefcase },
   { id: 'outro', label: 'Outro', hint: 'ONG, igreja, clube…', icon: Users },
 ];
@@ -48,7 +49,7 @@ export default function CriarInstituicaoPage() {
         </div>
 
         <ul className="space-y-2">
-          {['Painel com humor, temas que pesam e alertas por turma ou setor', 'Campanhas prontas (Setembro Amarelo, provas, sono…) com um toque', 'Relatório mensal em PDF para a direção ou o RH'].map((t) => (
+          {['Painel com humor, temas que pesam e alertas por turma ou setor', 'Campanhas prontas (Setembro Amarelo, provas, sono…) com um toque', 'Relatório mensal em PDF para a direção ou o RH', 'Psicóloga da equipe acompanha quem escolher compartilhar o humor (com autorização)'].map((t) => (
             <li key={t} className="flex items-start gap-2 text-[13px] text-white/75 font-semibold"><Check size={15} className="text-emerald-300 shrink-0 mt-0.5" /> {t}</li>
           ))}
         </ul>
@@ -60,7 +61,7 @@ export default function CriarInstituicaoPage() {
           </label>
           <div className="space-y-2">
             <span className="text-[10px] font-black text-white/50 uppercase tracking-widest">Tipo</span>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2">
               {KINDS.map((k) => (
                 <button key={k.id} onClick={() => setKind(k.id)} aria-pressed={kind === k.id} className={`p-3 rounded-2xl border text-center space-y-1 ${kind === k.id ? 'bg-amber-400/15 border-amber-300/40 text-amber-100' : 'bg-black/20 border-white/10 text-white/60'}`}>
                   <k.icon size={18} className="mx-auto" />

@@ -72,7 +72,8 @@ export type WeeklySummary = {
   empty: boolean;
   locked: boolean; // plano Gratuito: vê só os números
   summary: string | null;
-  stats: { moods: Record<string, number>; daysWithLogs: number; conversations: number; journalEntries: number };
+  stats: { moods: Record<string, number>; daysWithLogs: number; conversations: number; journalEntries: number; previous?: { moods: Record<string, number>; daysWithLogs: number }; study?: { reviews: number; focusMinutes: number; notes: number } };
+  goal?: string | null;
 };
 export type JournalKind = 'voz' | 'gratidao' | 'conversa' | 'aterramento' | 'noite' | 'terapia' | 'hoje';
 export type JournalEntry = { id: string; kind: JournalKind; mood: string | null; created_at: string; summary: string; content: string; title?: string };
@@ -91,11 +92,13 @@ export type PlanLevel = 'zero' | 'basico' | 'revisao';
 export type PlanDay = { dia: number; titulo: string; objetivo: string; passos: string[]; exercicio: string; busca_video: string; revisao: { front: string; back: string }[] };
 export type StudyPlan = { id: string; goal: string; titulo: string; materia: string; level: PlanLevel; minutes: number; dias: PlanDay[]; dicas: string[]; totalDays: number; doneDays: number[]; startsOn: string; deadline: string | null; created_at: string };
 export type PlanVideo = { id: string; title: string; channel: string; thumb: string; url: string };
-export type CampaignKind = 'setembro' | 'provas' | 'pausa' | 'sono' | 'livre' | 'janeiro' | 'voltaaulas' | 'saudemental' | 'fimdeano' | 'outubrorosa' | 'novembroazul' | 'ansiedade';
-export type OrgKind = 'escola' | 'empresa' | 'outro';
-export type OrgDetails = { code: string | null; adminCode: string | null; kind: OrgKind; plan: 'teste' | 'ativo' | 'pausado'; trialUntil: string | null; owner: boolean; team: number };
+export type CampaignKind = 'setembro' | 'provas' | 'pausa' | 'sono' | 'livre' | 'janeiro' | 'voltaaulas' | 'saudemental' | 'fimdeano' | 'outubrorosa' | 'novembroazul' | 'ansiedade' | 'enem' | 'vesperaenem' | 'etec' | 'simulado' | 'resultado';
+export type OrgKind = 'escola' | 'empresa' | 'cursinho' | 'outro';
+export type OrgPsiInfo = { enabled: boolean; guardianOk: boolean; code: string | null; psychologists: number; sharing: number; isPsi: boolean };
+export type OrgDetails = { code: string | null; adminCode: string | null; kind: OrgKind; plan: 'teste' | 'ativo' | 'pausado'; trialUntil: string | null; owner: boolean; team: number; psi?: OrgPsiInfo };
 export type OrgCampaign = { id: string; kind: CampaignKind; title: string; message: string; starts_on: string; ends_on: string };
-export type OrgInfo = { name: string; role: 'member' | 'admin'; kind?: OrgKind; sectorId?: string | null; sectorLabel?: string; sectors?: OrgSector[]; campaigns?: OrgCampaign[] } | null;
+export type OrgInfo = { name: string; role: 'member' | 'admin'; kind?: OrgKind; sectorId?: string | null; sectorLabel?: string; sectors?: OrgSector[]; campaigns?: OrgCampaign[]; psi?: { enabled: boolean; isPsi: boolean; share: boolean } } | null;
+export type CarePerson = { id: string; name: string; sector: string | null; series: { day: string; mood: string | null }[]; lastMood: string | null; lastDay: string | null; daysAway: number; hard7: number; flag: 'sos' | 'dificil' | 'sumiu' | null };
 export type Patterns =
   | { enough: false; daysMarked: number; needed: number }
   | {
@@ -141,6 +144,8 @@ export type MonthlyReport = {
   journalCount: number;
   conversations: number;
   letter: string | null;
+  prevMoodCount?: Record<string, number>;
+  study?: { reviews: number; focusMinutes: number; notes: number };
 };
 export type OrgDashboard = {
   org: string;
@@ -301,6 +306,9 @@ export const noricaApi = {
   groupsLeave: (groupId: string) => call<{ groups: CareGroup[] }>('groups_leave', { groupId }),
   pushRegister: (token: string) => call<{ ok: boolean; server: boolean }>('push_register', { token }),
   pushUnregister: (token: string) => call<{ ok: boolean }>('push_unregister', { token }),
+  orgPsiSetup: (enabled: boolean, guardianOk: boolean, newCode = false) => call<{ info: OrgDetails }>('org_psi_setup', { enabled, guardianOk, newCode }),
+  orgSharePsi: (share: boolean) => call<{ org: OrgInfo }>('org_share_psi', { share }),
+  orgCareList: () => call<{ people: CarePerson[]; notSharing: number; demo: boolean }>('org_care_list'),
   orgCreate: (name: string, kind: OrgKind) => call<{ org: OrgInfo }>('org_create', { name, kind }),
   orgRename: (name: string) => call<{ ok: boolean; name: string }>('org_rename', { name }),
   orgNewCode: (team: boolean) => call<{ info: OrgDetails }>('org_new_code', { team }),
@@ -456,6 +464,8 @@ export async function logMood(mood: Mood, feeling?: string | null) {
     if (mood === 'agitado' || mood === 'sos') r.scheduleMorningAfter().catch(() => {});
     r.scheduleEveningCheckins().catch(() => {});
   }).catch(() => {});
+  // S.O.S de quem compartilha com a psicóloga da instituição: ela recebe um alerta (o servidor confere tudo).
+  if (mood === 'sos') call<{ notified: boolean }>('care_alert').catch(() => {});
   // Vai para a fila do aparelho e é enviado assim que houver internet.
   await queueMood(mood, feeling);
 }
