@@ -90,7 +90,7 @@ export default function ExerciciosPage() {
                   { href: '/respiracao/', title: 'Respiração 4-7-8 com sons', desc: 'Ondas do mar, chuva, lareira, floresta ou café enquanto você respira.', time: '3 min', icon: Waves, color: 'text-teal-300 bg-teal-500/10 border-teal-500/20' },
                 ] },
                 { section: 'Estudos e ideias', items: [
-                  { href: '/caderno/', title: 'Caderno de estudos e ideias', desc: 'Anote o que aprendeu e suas ideias, por texto ou voz. A IA organiza, explica, faz quiz e te ajuda a lembrar.', time: 'todo dia', icon: NotebookPen, color: 'text-violet-300 bg-violet-400/10 border-violet-300/20' },
+                  { href: '/caderno/', title: 'Caderno de estudos e ideias', desc: 'Anote o que aprendeu, monte um plano de estudos com videoaulas e revise para não esquecer. A IA organiza, explica e faz quiz.', time: 'todo dia', icon: NotebookPen, color: 'text-violet-300 bg-violet-400/10 border-violet-300/20' },
                   { href: '/faculdade/', title: 'Faculdade: matérias e provas', desc: 'Uma página para cada matéria, calendário de provas e trabalhos, tarefas, notas e lembretes.', time: 'semestre', icon: GraduationCap, color: 'text-emerald-300 bg-emerald-500/10 border-emerald-500/20' },
                 ] },
                 { section: 'Para o dia a dia', items: [

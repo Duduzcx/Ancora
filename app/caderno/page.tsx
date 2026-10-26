@@ -5,7 +5,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Mic, Square, Loader2, Check, Search, RotateCcw, Sparkles, MessageCircleQuestion, Timer, Pin, PinOff, Trash2, ChevronDown, Plus, X, NotebookPen, Bell } from 'lucide-react';
+import { Map as MapIcon, ArrowLeft, Mic, Square, Loader2, Check, Search, RotateCcw, Sparkles, MessageCircleQuestion, Timer, Pin, PinOff, Trash2, ChevronDown, Plus, X, NotebookPen, Bell } from 'lucide-react';
 import { noricaApi, type NoteKind, type StudyNote, type StudySummary } from '@/lib/norica-api';
 import { KINDS, kindInfo, cachedStudy, refreshStudy, useVoiceNote, dayLabel, getReviewReminder, setReviewReminder, cachedNotes, rememberNotes } from '@/lib/caderno';
 import { HelpSheet } from '@/components/AjudaAgora';
@@ -30,7 +30,7 @@ export default function CadernoPage() {
   const voice = useVoiceNote((t) => setText((cur) => (cur.trim() ? `${cur.trim()} ${t}` : t)));
 
   // A lista aparece na hora a partir do aparelho (só títulos e resumos) e se atualiza quando o servidor responde.
-  const load = () => noricaApi.studyNoteList().then((r) => { setNotes(r.notes); setSubjects(r.subjects); rememberNotes(r.notes, r.subjects); }).catch(() => setNotes((n) => n ?? []));
+  const load = () => noricaApi.studyNoteList().then((r) => { const ns = Array.isArray(r?.notes) ? r.notes : []; const sj = Array.isArray(r?.subjects) ? r.subjects : []; setNotes(ns); setSubjects(sj); rememberNotes(ns, sj); }).catch(() => setNotes((n) => n ?? []));
   useEffect(() => {
     const cached = cachedNotes();
     if (cached) { setNotes(cached.notes); setSubjects(cached.subjects); }
@@ -185,6 +185,15 @@ export default function CadernoPage() {
             </div>
           )}
         </section>
+
+        {/* Plano de estudos */}
+        <button onClick={() => router.push('/caderno/plano/')} className="w-full p-5 rounded-[2rem] bg-gradient-to-br from-sky-950/70 to-[#0b0f19] border border-sky-300/25 text-left flex items-center gap-4 active:scale-[0.98] transition-transform" data-testid="ferramenta-plano">
+          <span className="w-12 h-12 rounded-2xl bg-sky-300/15 border border-sky-300/25 text-sky-200 flex items-center justify-center shrink-0"><MapIcon size={22} /></span>
+          <span className="flex-1 min-w-0">
+            <span className="block text-[15px] font-black tracking-tight">Plano de estudos</span>
+            <span className="block text-[12px] text-white/55 font-semibold leading-snug">Diga o que precisa aprender e até quando. A IA monta o plano por dias, com videoaulas.</span>
+          </span>
+        </button>
 
         {/* Ferramentas */}
         <section className="grid grid-cols-2 gap-2">

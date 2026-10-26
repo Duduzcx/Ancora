@@ -131,3 +131,60 @@ export function cleanQuiz(v: unknown) {
     return { pergunta: cleanStr(o.pergunta, 240), opcoes, correta, porque: cleanStr(o.porque, 240) };
   }).filter((q) => q.pergunta && q.opcoes.length >= 2 && Number.isInteger(q.correta) && q.correta >= 0 && q.correta < q.opcoes.length).slice(0, 3);
 }
+
+// ---------------------------------------------------------------------
+// Plano de estudos
+// ---------------------------------------------------------------------
+
+export const PLAN_LEVELS = ["zero", "basico", "revisao"] as const;
+export type PlanLevel = (typeof PLAN_LEVELS)[number];
+const LEVEL_TEXT: Record<PlanLevel, string> = {
+  zero: "começando do zero (explique a base antes)",
+  basico: "já sabe um pouco (vá direto ao ponto, reforce a base rapidamente)",
+  revisao: "revisão para prova (foque em exercícios, pegadinhas e resumo)",
+};
+
+export function planPrompt(days: number, minutes: number, level: PlanLevel) {
+  return `Você é a Nórica, uma professora particular brasileira, organizada e encorajadora, num app de bem-estar.
+Monte um PLANO DE ESTUDOS de ${days} dias, com cerca de ${minutes} minutos por dia, para alguém ${LEVEL_TEXT[level]}.
+Se o objetivo tiver relação com ENEM, vestibular, ETEC, concurso ou faculdade, siga o que costuma cair.
+Responda SOMENTE com JSON, sem texto em volta:
+{"titulo": "até 6 palavras",
+ "materia": "matéria em até 3 palavras",
+ "dias": [{"dia": 1,
+           "titulo": "tema do dia em até 6 palavras",
+           "objetivo": "1 frase: o que a pessoa vai conseguir fazer no fim do dia",
+           "passos": ["3 a 4 passos curtos e práticos, começando com verbo"],
+           "exercicio": "1 exercício ou desafio curto para fixar",
+           "busca_video": "termo de busca para achar uma boa videoaula em português sobre o tema do dia (até 6 palavras)",
+           "revisao": [{"pergunta": "pergunta curta", "resposta": "resposta curta e correta"}]}],
+ "dicas": ["2 a 3 dicas de como estudar melhor esse conteúdo e cuidar da ansiedade"]}
+Regras: exatamente ${days} itens em "dias", numerados de 1 a ${days}, do mais básico ao mais avançado; o último dia é revisão geral.
+"revisao" tem 1 ou 2 perguntas por dia. Seja correta; se não tiver certeza de um fato, diga para conferir no material.
+Nunca dê instruções perigosas. Português do Brasil, linguagem simples.`;
+}
+
+export type PlanDay = { dia: number; titulo: string; objetivo: string; passos: string[]; exercicio: string; busca_video: string; revisao: { front: string; back: string }[] };
+export type PlanContent = { goal: string; titulo: string; materia: string; level: PlanLevel; minutes: number; dias: PlanDay[]; dicas: string[] };
+
+export function cleanPlan(raw: Record<string, unknown>, days: number): Omit<PlanContent, "goal" | "level" | "minutes"> | null {
+  const dias = Array.isArray(raw.dias) ? (raw.dias as unknown[]).map((d, i) => {
+    const o = (d ?? {}) as Record<string, unknown>;
+    return {
+      dia: i + 1,
+      titulo: cleanStr(o.titulo, 80) || `Dia ${i + 1}`,
+      objetivo: cleanStr(o.objetivo, 240),
+      passos: Array.isArray(o.passos) ? (o.passos as unknown[]).map((p) => cleanStr(p, 200)).filter(Boolean).slice(0, 5) : [],
+      exercicio: cleanStr(o.exercicio, 300),
+      busca_video: cleanStr(o.busca_video, 80),
+      revisao: cleanCards(o.revisao, 2),
+    };
+  }).filter((d) => d.titulo && d.passos.length).slice(0, days) : [];
+  if (dias.length < Math.min(days, 3)) return null;
+  return {
+    titulo: cleanStr(raw.titulo, 80) || "Plano de estudos",
+    materia: cleanStr(raw.materia, 40),
+    dias,
+    dicas: Array.isArray(raw.dicas) ? (raw.dicas as unknown[]).map((d) => cleanStr(d, 200)).filter(Boolean).slice(0, 3) : [],
+  };
+}

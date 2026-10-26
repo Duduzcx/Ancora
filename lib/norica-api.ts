@@ -87,6 +87,10 @@ export type StudyGrade = 'errei' | 'dificil' | 'facil';
 export type QuizQuestion = { pergunta: string; opcoes: string[]; correta: number; porque: string };
 export type StudyLesson = { crisis: boolean; titulo: string; materia: string; explicacao: string; topicos: string[]; quiz: QuizQuestion[] };
 export type StudySource = { id: string; title: string; kind: NoteKind; subject: string };
+export type PlanLevel = 'zero' | 'basico' | 'revisao';
+export type PlanDay = { dia: number; titulo: string; objetivo: string; passos: string[]; exercicio: string; busca_video: string; revisao: { front: string; back: string }[] };
+export type StudyPlan = { id: string; goal: string; titulo: string; materia: string; level: PlanLevel; minutes: number; dias: PlanDay[]; dicas: string[]; totalDays: number; doneDays: number[]; startsOn: string; deadline: string | null; created_at: string };
+export type PlanVideo = { id: string; title: string; channel: string; thumb: string; url: string };
 export type CampaignKind = 'setembro' | 'provas' | 'pausa' | 'sono' | 'livre' | 'janeiro' | 'voltaaulas' | 'saudemental' | 'fimdeano' | 'outubrorosa' | 'novembroazul' | 'ansiedade';
 export type OrgKind = 'escola' | 'empresa' | 'outro';
 export type OrgDetails = { code: string | null; adminCode: string | null; kind: OrgKind; plan: 'teste' | 'ativo' | 'pausado'; trialUntil: string | null; owner: boolean; team: number };
@@ -242,6 +246,13 @@ export const noricaApi = {
   studyCardDelete: (id: string) => call<{ ok: boolean }>('study_card_delete', { id }),
   studyExplain: (text: string) => call<StudyLesson>('study_explain', { text }),
   studyAsk: (question: string) => call<{ answer: string; sources: StudySource[]; ai: boolean; aiNote?: string }>('study_ask', { question }),
+  studyPlanCreate: (p: { goal: string; days?: number; deadline?: string | null; minutes: number; level: PlanLevel }) =>
+    call<{ crisis: boolean; plan?: StudyPlan }>('study_plan_create', p),
+  studyPlanList: () => call<{ plans: StudyPlan[]; videos: boolean }>('study_plan_list'),
+  studyPlanGet: (id: string) => call<{ plan: StudyPlan; videos: boolean }>('study_plan_get', { id }),
+  studyPlanDay: (id: string, day: number, done: boolean) => call<{ doneDays: number[]; cardsCreated: number }>('study_plan_day', { id, day, done }),
+  studyPlanVideos: (id: string, day: number) => call<{ videos: PlanVideo[]; searchUrl: string; query: string }>('study_plan_videos', { id, day }),
+  studyPlanDelete: (id: string) => call<{ ok: boolean }>('study_plan_delete', { id }),
   studySessionSave: (minutes: number, before: number | null, after: number | null) =>
     call<{ ok: boolean; summary: StudySummary }>('study_session_save', { minutes, before, after }),
 

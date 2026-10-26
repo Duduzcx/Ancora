@@ -6,7 +6,7 @@
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ChevronRight, Flame, Mail, Route, X, Timer, HeartHandshake, NotebookPen, GraduationCap } from 'lucide-react';
-import { cachedStudy, refreshStudy } from '@/lib/caderno';
+import { cachedStudy, refreshStudy, cachedPlans, type PlanBrief } from '@/lib/caderno';
 import { cachedFaculdade, countdown, daysUntil, kindOf, loadFaculdade, upcoming, type CourseEvent } from '@/lib/faculdade';
 import { usePhase, phaseLabel } from '@/lib/fase';
 import { updateFlameWidget } from '@/lib/flame-widget';
@@ -31,6 +31,7 @@ export default function HojeCards() {
   const [minuteDone, setMinuteDone] = useState(true);
   const [friends, setFriends] = useState<FriendsState | null>(() => cacheGet<FriendsState>(getAuthState().user?.id, 'friends'));
   const [studyDue, setStudyDue] = useState(0);
+  const [plan, setPlan] = useState<PlanBrief | null>(null);
   const [exam, setExam] = useState<{ e: CourseEvent; course: string | null } | null>(null);
 
   useEffect(() => {
@@ -51,10 +52,11 @@ export default function HojeCards() {
       noricaApi.friendsList().then((s) => { if (!Array.isArray(s?.friends)) return; setFriends(s); cacheSet(getAuthState().user?.id, 'friends', s); updateFlameWidget(s); }).catch(() => {});
     }, 1500);
     // Caderno: cartões para relembrar hoje (só busca no servidor para quem já usa o Caderno).
-    const study = () => setStudyDue(cachedStudy()?.due ?? 0);
+    const study = () => { setStudyDue(cachedStudy()?.due ?? 0); setPlan(cachedPlans().find((p) => p.next) ?? null); };
     study();
     const st = (cachedStudy()?.cards ?? 0) > 0 ? setTimeout(() => { refreshStudy(); }, 2500) : null;
     window.addEventListener('norica-caderno', study);
+    window.addEventListener('norica-planos', study);
     // Faculdade: a próxima prova/trabalho dos próximos 7 dias.
     const fac = () => {
       const f = cachedFaculdade();
@@ -66,7 +68,7 @@ export default function HojeCards() {
     window.addEventListener('norica-faculdade', fac);
     window.addEventListener('norica-trilhas', refresh);
     window.addEventListener('norica-cartas', refresh);
-    return () => { clearTimeout(t); clearTimeout(f); if (st) clearTimeout(st); if (ft) clearTimeout(ft); window.removeEventListener('norica-faculdade', fac); window.removeEventListener('norica-caderno', study); window.removeEventListener('norica-trilhas', refresh); window.removeEventListener('norica-cartas', refresh); };
+    return () => { clearTimeout(t); clearTimeout(f); if (st) clearTimeout(st); if (ft) clearTimeout(ft); window.removeEventListener('norica-faculdade', fac); window.removeEventListener('norica-caderno', study); window.removeEventListener('norica-planos', study); window.removeEventListener('norica-trilhas', refresh); window.removeEventListener('norica-cartas', refresh); };
   }, []);
 
   const dismiss = (id: string) => {
@@ -165,6 +167,17 @@ export default function HojeCards() {
             {exam.e.kind === 'prova' && daysUntil(exam.e.day) <= 3 && <p className="text-[11px] text-white/55 font-semibold mt-0.5">Revise um pouco por dia e cuide do sono. Você consegue. 💚</p>}
           </div>
           <ChevronRight size={18} className="text-emerald-200/50" />
+        </button>
+      )}
+
+      {plan?.next && (
+        <button onClick={() => router.push(`/caderno/plano/?id=${plan.id}`)} className={`${card} bg-gradient-to-br from-sky-950/60 to-[#0b0f19] border-sky-300/20`} data-testid="plano-card-inicio">
+          <div className="w-14 h-14 rounded-2xl bg-sky-400/15 flex items-center justify-center text-2xl shrink-0">📚</div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[9px] font-black text-sky-300/80 uppercase tracking-[0.3em]">Plano de estudos · {plan.done}/{plan.total}</p>
+            <p className="text-base font-black text-white tracking-tight leading-snug">Dia {plan.next.dia}: {plan.next.titulo}</p>
+          </div>
+          <ChevronRight size={18} className="text-sky-200/50" />
         </button>
       )}
 

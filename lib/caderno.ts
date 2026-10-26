@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import { BookOpen, Lightbulb, BellRing } from 'lucide-react';
 import { cacheGet, cacheSet } from '@/lib/cache';
 import { getAuthState } from '@/lib/auth-store';
-import { noricaApi, type NoteKind, type StudyNote, type StudySummary } from '@/lib/norica-api';
+import { noricaApi, type NoteKind, type StudyNote, type StudyPlan, type StudySummary } from '@/lib/norica-api';
 import { cancelNotices, scheduleNotices } from '@/lib/reminder';
 
 export const KINDS: { id: NoteKind; label: string; short: string; icon: any; cls: string; dot: string; hint: string }[] = [
@@ -131,4 +131,46 @@ export function dayLabel(iso: string) {
   if (diff === 1) return 'Ontem';
   if (diff < 7) return `${diff} dias atrás`;
   return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
+}
+
+// ---------------------------------------------------------------------
+// Plano de estudos: dia de hoje e lembrete diário
+// ---------------------------------------------------------------------
+
+/** Qual dia do plano é hoje (1 = dia em que começou), limitado ao total de dias. */
+export function planToday(p: StudyPlan) {
+  const start = new Date(`${p.startsOn}T12:00:00`);
+  const now = new Date(); now.setHours(12, 0, 0, 0);
+  const n = Math.round((now.getTime() - start.getTime()) / 86400000) + 1;
+  return Math.min(Math.max(n, 1), p.totalDays);
+}
+/** Próximo dia a fazer: o primeiro ainda não marcado. */
+export const planNext = (p: StudyPlan) => p.dias.find((d) => !p.doneDays.includes(d.dia)) ?? null;
+
+const PLAN_PREF = 'norica-plano-lembrete';
+const PLAN_IDS = [7701, 7702, 7703, 7704, 7705, 7706, 7707];
+export function getPlanReminder(): { planId: string | null; hour: number } {
+  try { return { planId: null, hour: 18, ...JSON.parse(localStorage.getItem(PLAN_PREF) || '{}') }; } catch (_e) { return { planId: null, hour: 18 }; }
+}
+export async function setPlanReminder(p: StudyPlan | null, hour = 18): Promise<boolean> {
+  try { localStorage.setItem(PLAN_PREF, JSON.stringify({ planId: p?.id ?? null, hour })); } catch (_e) {}
+  await cancelNotices(PLAN_IDS).catch(() => {});
+  if (!p) return true;
+  const today = planToday(p);
+  const list = PLAN_IDS.map((id, i) => {
+    const d = p.dias.find((x) => x.dia === today + i);
+    if (!d) return null;
+    const at = new Date(); at.setDate(at.getDate() + i); at.setHours(hour, 0, 0, 0);
+    return { id, at, route: `/caderno/plano/?id=${p.id}`, title: `Dia ${d.dia} do seu plano 📚`, body: `${d.titulo} — ${p.minutes} minutinhos hoje. Você consegue!` };
+  }).filter(Boolean) as { id: number; at: Date; route: string; title: string; body: string }[];
+  return scheduleNotices(list);
+}
+
+// Resumo dos planos guardado no aparelho (card "Dia N do seu plano" na Início).
+export type PlanBrief = { id: string; titulo: string; next: { dia: number; titulo: string } | null; done: number; total: number };
+export const cachedPlans = () => cacheGet<PlanBrief[]>(uid(), 'planos') ?? [];
+export function rememberPlans(plans: StudyPlan[]) {
+  const brief = plans.map((p) => { const n = planNext(p); return { id: p.id, titulo: p.titulo, next: n ? { dia: n.dia, titulo: n.titulo } : null, done: p.doneDays.length, total: p.totalDays }; });
+  cacheSet(uid(), 'planos', brief);
+  try { window.dispatchEvent(new Event('norica-planos')); } catch (_e) {}
 }

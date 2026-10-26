@@ -16,7 +16,8 @@ import { checkSubscription, PRO_PRODUCT_ID } from "../_shared/google-play.ts";
 import { synthesize, TTS_VOICES, ttsConfigured } from "../_shared/tts.ts";
 import { pushConfigured, pushSoon } from "../_shared/push.ts";
 import { meditacaoById } from "../_shared/meditacoes.ts";
-import { ASK_PROMPT, cleanCards, cleanQuiz, cleanStr, EXPLAIN_PROMPT, type Grade, GRADES, nextReview, NOTE_KINDS, ORGANIZE_PROMPT, rankNotes } from "../_shared/caderno.ts";
+import { ASK_PROMPT, cleanCards, cleanPlan as cleanStudyPlan, cleanQuiz, cleanStr, EXPLAIN_PROMPT, type Grade, GRADES, nextReview, NOTE_KINDS, ORGANIZE_PROMPT, type PlanContent, type PlanLevel, PLAN_LEVELS, planPrompt, rankNotes } from "../_shared/caderno.ts";
+import { searchUrl, searchVideos, type Video, youtubeConfigured } from "../_shared/youtube.ts";
 import {
   arenaFeedbackPrompt,
   arenaSystemPrompt,
@@ -25,6 +26,7 @@ import {
   LOG_INSIGHT_PROMPT,
   type ChatMode,
   detectRisk,
+  normalize,
   MEMORY_PROMPT,
   MODES,
   portoSystemPrompt,
@@ -1217,6 +1219,143 @@ async function studySessionSave(ctx: Ctx, body: Record<string, unknown>) {
   const { error } = await ctx.db.from("study_sessions").insert({ user_id: ctx.userId, minutes, anxiety_before: lvl(body.before), anxiety_after: lvl(body.after) });
   if (error) throw new HttpError(500, "Não foi possível salvar a sessão");
   return { ok: true, summary: await studySummary(ctx) };
+}
+
+// ---------------------------------------------------------------------
+// Plano de estudos: objetivo + prazo → plano por dias, com vídeos e cartões de revisão
+// ---------------------------------------------------------------------
+
+const PLAN_COLS = "id, content, total_days, done_days, starts_on, deadline, archived, created_at, updated_at";
+type PlanRow = { id: string; content: string; total_days: number; done_days: number[] | null; starts_on: string; deadline: string | null; archived: boolean; created_at: string; updated_at: string };
+type PlanStored = PlanContent & { notas?: Record<string, string> };
+
+async function readPlan(r: PlanRow): Promise<PlanStored> {
+  return JSON.parse(await decrypt(r.content)) as PlanStored;
+}
+async function planOut(r: PlanRow) {
+  const c = await readPlan(r);
+  const { notas: _n, ...rest } = c;
+  return { id: r.id, ...rest, totalDays: r.total_days, doneDays: r.done_days ?? [], startsOn: r.starts_on, deadline: r.deadline, created_at: r.created_at };
+}
+const clampInt = (v: unknown, min: number, max: number, def: number) => {
+  const n = Math.round(Number(v));
+  return Number.isFinite(n) && n > 0 ? Math.min(max, Math.max(min, n)) : def;
+};
+
+async function studyPlanCreate(ctx: Ctx, body: Record<string, unknown>) {
+  const goal = cleanText(body.goal, 600);
+  if (detectRisk(goal)) return { crisis: true };
+  const level = (PLAN_LEVELS as readonly string[]).includes(String(body.level)) ? String(body.level) as PlanLevel : "basico";
+  const minutes = clampInt(body.minutes, 10, 180, 30);
+  const deadline = typeof body.deadline === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.deadline) && body.deadline > brtDay() ? body.deadline : null;
+  let days = clampInt(body.days, 1, 30, 14);
+  if (deadline) days = Math.min(30, Math.max(1, Math.round((Date.parse(`${deadline}T12:00:00Z`) - Date.parse(`${brtDay()}T12:00:00Z`)) / 86400_000)));
+
+  const limit = await consume(ctx.admin, ctx.userId, "study_ai");
+  if (limit) throw new HttpError(429, limit);
+  const raw = await groqChat(
+    [
+      { role: "system", content: planPrompt(days, minutes, level) },
+      { role: "user", content: `Objetivo: ${goal}${deadline ? `\nData da prova ou prazo: ${deadline}` : ""}` },
+    ],
+    { model: CHAT_MODEL, temperature: 0.4, maxTokens: Math.min(7000, 260 * days + 600) },
+  ).catch((e) => { console.error("study_plan:", e); return ""; });
+  const parsed = parseJsonObject(raw);
+  const plan = parsed ? cleanStudyPlan(parsed, days) : null;
+  if (!plan) throw new HttpError(502, "Não consegui montar o plano agora. Tente de novo em instantes.");
+
+  const content: PlanStored = { goal, level, minutes, ...plan, notas: {} };
+  const { data, error } = await ctx.db.from("study_plans").insert({
+    user_id: ctx.userId, content: await encrypt(JSON.stringify(content)), total_days: plan.dias.length, deadline, starts_on: brtDay(),
+  }).select(PLAN_COLS).single();
+  if (error || !data) throw new HttpError(500, "Não foi possível guardar o plano agora");
+  return { crisis: false, plan: await planOut(data as PlanRow) };
+}
+
+async function studyPlanList(ctx: Ctx) {
+  const { data, error } = await ctx.db.from("study_plans").select(PLAN_COLS).eq("user_id", ctx.userId).eq("archived", false)
+    .order("created_at", { ascending: false }).limit(20);
+  if (error) throw new HttpError(500, "Não foi possível carregar os planos");
+  return { plans: await Promise.all((data ?? []).map((r) => planOut(r as PlanRow))), videos: youtubeConfigured() };
+}
+
+async function planRow(ctx: Ctx, id: unknown): Promise<PlanRow> {
+  if (typeof id !== "string" || !UUID_RE.test(id)) throw new HttpError(400, "Plano inválido");
+  const { data } = await ctx.db.from("study_plans").select(PLAN_COLS).eq("id", id).eq("user_id", ctx.userId).maybeSingle();
+  if (!data) throw new HttpError(404, "Plano não encontrado");
+  return data as PlanRow;
+}
+
+async function studyPlanGet(ctx: Ctx, body: Record<string, unknown>) {
+  return { plan: await planOut(await planRow(ctx, body.id)), videos: youtubeConfigured() };
+}
+
+/** Marca (ou desmarca) um dia. Ao concluir, o dia vira anotação no Caderno com cartões de revisão. */
+async function studyPlanDay(ctx: Ctx, body: Record<string, unknown>) {
+  const r = await planRow(ctx, body.id);
+  const day = clampInt(body.day, 1, 60, 0);
+  if (!day || day > r.total_days) throw new HttpError(400, "Dia inválido");
+  const done = body.done !== false;
+  const set = new Set(r.done_days ?? []);
+  if (done) set.add(day); else set.delete(day);
+  const doneDays = [...set].sort((a, b) => a - b);
+
+  let cardsCreated = 0;
+  const c = await readPlan(r);
+  const notas = c.notas ?? {};
+  const d = c.dias.find((x) => x.dia === day);
+  if (done && d && !notas[String(day)]) {
+    const text = [d.objetivo, ...d.passos.map((p) => `• ${p}`), d.exercicio ? `Exercício: ${d.exercicio}` : ""].filter(Boolean).join("\n");
+    const { data: note } = await ctx.db.from("study_notes").insert({
+      user_id: ctx.userId, kind: "aprendizado",
+      title: await encrypt(`Dia ${day}: ${d.titulo}`.slice(0, 80)),
+      content: await encrypt(text),
+      summary: d.objetivo ? await encrypt(d.objetivo) : null,
+      subject: c.materia ? await encrypt(c.materia) : null,
+      tags: await encrypt(JSON.stringify(["plano"])),
+    }).select("id").single();
+    if (note) {
+      notas[String(day)] = note.id;
+      cardsCreated = await insertCards(ctx, note.id, d.revisao);
+    }
+  }
+  const { error } = await ctx.db.from("study_plans").update({
+    done_days: doneDays,
+    content: await encrypt(JSON.stringify({ ...c, notas })),
+    updated_at: new Date().toISOString(),
+  }).eq("id", r.id).eq("user_id", ctx.userId);
+  if (error) throw new HttpError(500, "Não foi possível salvar agora");
+  return { doneDays, cardsCreated };
+}
+
+/** Videoaulas do dia: guardadas por termo de busca (cache de 30 dias) para economizar a cota do YouTube. */
+async function studyPlanVideos(ctx: Ctx, body: Record<string, unknown>) {
+  const r = await planRow(ctx, body.id);
+  const c = await readPlan(r);
+  const d = c.dias.find((x) => x.dia === Number(body.day));
+  if (!d) throw new HttpError(400, "Dia inválido");
+  const q = (d.busca_video || `${d.titulo} ${c.materia}`).trim().slice(0, 120);
+  const key = normalize(q).replace(/[^a-z0-9 ]/g, "").trim().slice(0, 200);
+  const link = searchUrl(q);
+  const { data: cached } = await ctx.admin.from("video_cache").select("results, fetched_at").eq("query", key).maybeSingle();
+  if (cached && Date.now() - new Date(cached.fetched_at).getTime() < 30 * 86400_000 && Array.isArray(cached.results) && cached.results.length) {
+    return { videos: cached.results as Video[], searchUrl: link, query: q };
+  }
+  if (!youtubeConfigured()) return { videos: [], searchUrl: link, query: q };
+  try {
+    const videos = await searchVideos(q);
+    if (videos.length) await ctx.admin.from("video_cache").upsert({ query: key, results: videos, fetched_at: new Date().toISOString() });
+    return { videos, searchUrl: link, query: q };
+  } catch (e) {
+    console.error("youtube:", (e as Error).message);
+    return { videos: [], searchUrl: link, query: q };
+  }
+}
+
+async function studyPlanDelete(ctx: Ctx, body: Record<string, unknown>) {
+  const r = await planRow(ctx, body.id);
+  await ctx.db.from("study_plans").delete().eq("id", r.id).eq("user_id", ctx.userId);
+  return { ok: true };
 }
 
 // ---------------------------------------------------------------------
@@ -2536,7 +2675,7 @@ async function deleteAccount(ctx: Ctx) {
   const chatIds = (chats ?? []).map((c) => c.id);
   if (chatIds.length) await admin.from("messages").delete().in("chat_id", chatIds);
   await admin.from("chats").delete().eq("user_id", uid);
-  for (const table of ["mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "usage_events", "user_plans", "user_memory", "safety_plans", "message_feedback", "app_errors", "weekly_summaries", "journal_entries", "org_members", "monthly_reports", "future_letters", "care_invites", "promo_redemptions", "study_reviews", "study_sessions", "study_cards", "study_notes", "course_tasks", "course_events", "courses"]) {
+  for (const table of ["mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "usage_events", "user_plans", "user_memory", "safety_plans", "message_feedback", "app_errors", "weekly_summaries", "journal_entries", "org_members", "monthly_reports", "future_letters", "care_invites", "promo_redemptions", "study_reviews", "study_sessions", "study_cards", "study_notes", "study_plans", "course_tasks", "course_events", "courses"]) {
     await admin.from(table).delete().eq("user_id", uid);
   }
   await admin.from("care_nudges").delete().or(`from_user.eq.${uid},to_user.eq.${uid}`);
@@ -2658,7 +2797,7 @@ async function health(ctx: Ctx) {
     checks.criptografia = { ok: false, detail: String((e as Error).message) };
   }
 
-  for (const table of ["chats", "messages", "mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "user_plans", "usage_events", "app_errors", "user_memory", "safety_plans", "message_feedback", "weekly_summaries", "journal_entries", "organizations", "org_members", "org_sectors", "monthly_reports", "future_letters", "org_campaigns", "care_pairs", "care_invites", "care_nudges", "care_messages", "care_groups", "care_group_members", "care_challenges", "push_tokens", "leads", "promo_codes", "promo_redemptions", "study_notes", "study_cards", "study_reviews", "study_sessions", "courses", "course_events", "course_tasks"]) {
+  for (const table of ["chats", "messages", "mood_logs", "habit_logs", "daily_logs", "vault_entries", "consents", "user_plans", "usage_events", "app_errors", "user_memory", "safety_plans", "message_feedback", "weekly_summaries", "journal_entries", "organizations", "org_members", "org_sectors", "monthly_reports", "future_letters", "org_campaigns", "care_pairs", "care_invites", "care_nudges", "care_messages", "care_groups", "care_group_members", "care_challenges", "push_tokens", "leads", "promo_codes", "promo_redemptions", "study_notes", "study_cards", "study_reviews", "study_sessions", "study_plans", "video_cache", "courses", "course_events", "course_tasks"]) {
     const { error } = await ctx.admin.from(table).select("*", { count: "exact", head: true });
     checks[`tabela_${table}`] = error ? { ok: false, detail: error.message } : { ok: true };
   }
@@ -2715,6 +2854,12 @@ const actions: Record<string, (ctx: Ctx, body: Record<string, unknown>) => Promi
   study_explain: studyExplain,
   study_ask: studyAsk,
   study_session_save: studySessionSave,
+  study_plan_create: studyPlanCreate,
+  study_plan_list: studyPlanList,
+  study_plan_get: studyPlanGet,
+  study_plan_day: studyPlanDay,
+  study_plan_videos: studyPlanVideos,
+  study_plan_delete: studyPlanDelete,
   memory_get: memoryGet,
   memory_set: memorySet,
   memory_clear: memoryClear,
