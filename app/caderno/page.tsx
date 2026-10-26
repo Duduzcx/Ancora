@@ -7,7 +7,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Mic, Square, Loader2, Check, Search, RotateCcw, Sparkles, MessageCircleQuestion, Timer, Pin, PinOff, Trash2, ChevronDown, Plus, X, NotebookPen, Bell } from 'lucide-react';
 import { noricaApi, type NoteKind, type StudyNote, type StudySummary } from '@/lib/norica-api';
-import { KINDS, kindInfo, cachedStudy, rememberStudy, refreshStudy, useVoiceNote, dayLabel, getReviewReminder, setReviewReminder } from '@/lib/caderno';
+import { KINDS, kindInfo, cachedStudy, refreshStudy, useVoiceNote, dayLabel, getReviewReminder, setReviewReminder, cachedNotes, rememberNotes } from '@/lib/caderno';
 import { HelpSheet } from '@/components/AjudaAgora';
 
 export default function CadernoPage() {
@@ -15,7 +15,7 @@ export default function CadernoPage() {
   const [kind, setKind] = useState<NoteKind>('aprendizado');
   const [text, setText] = useState('');
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState<{ note: StudyNote; cards: number; aiNote: string | null } | null>(null);
+  const [saved, setSaved] = useState<{ note: StudyNote; cards: number; aiNote: string | null; organizing?: boolean } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [help, setHelp] = useState(false);
   const [notes, setNotes] = useState<StudyNote[] | null>(null);
@@ -29,8 +29,11 @@ export default function CadernoPage() {
   const [materia, setMateria] = useState<string | null>(null);
   const voice = useVoiceNote((t) => setText((cur) => (cur.trim() ? `${cur.trim()} ${t}` : t)));
 
-  const load = () => noricaApi.studyNoteList().then((r) => { setNotes(r.notes); setSubjects(r.subjects); }).catch(() => setNotes((n) => n ?? []));
+  // A lista aparece na hora a partir do aparelho (só títulos e resumos) e se atualiza quando o servidor responde.
+  const load = () => noricaApi.studyNoteList().then((r) => { setNotes(r.notes); setSubjects(r.subjects); rememberNotes(r.notes, r.subjects); }).catch(() => setNotes((n) => n ?? []));
   useEffect(() => {
+    const cached = cachedNotes();
+    if (cached) { setNotes(cached.notes); setSubjects(cached.subjects); }
     setSummary(cachedStudy());
     const m = new URLSearchParams(window.location.search).get('materia');
     if (m) setMateria(m.slice(0, 40));
@@ -39,23 +42,44 @@ export default function CadernoPage() {
     refreshStudy().then((s) => s && setSummary(s));
   }, []);
 
+  // Mantém a cópia do aparelho em dia (depois de salvar, fixar ou apagar).
+  useEffect(() => { if (notes && notes.length) rememberNotes(notes, subjects); }, [notes, subjects]);
+
   const save = async () => {
     const content = text.trim();
     if (!content || saving) return;
     setSaving(true); setErr(null); setSaved(null);
     try {
       const r = await noricaApi.studyNoteSave({ kind, content, ...(materia ? { subject: materia } : {}) });
-      setSaved({ note: r.note, cards: r.cardsCreated, aiNote: r.aiNote });
+      setSaved({ note: r.note, cards: r.cardsCreated, aiNote: r.aiNote, organizing: !!r.organizing });
       setText('');
       setNotes((n) => [r.note, ...(n ?? [])]);
       if (r.note.subject) setSubjects((s) => (s.includes(r.note.subject) ? s : [r.note.subject, ...s]));
       if (r.crisis) setHelp(true);
-      refreshStudy().then((s) => s && setSummary(s));
+      if (r.organizing) followOrganizing(r.note.id);
+      else refreshStudy().then((s) => s && setSummary(s));
     } catch (e: any) {
       setErr(e?.message || 'Não foi possível salvar agora. Seu texto continua aqui.');
     } finally {
       setSaving(false);
     }
+  };
+
+  // A IA organiza depois de salvar: busca o resultado a cada 1,5 s (até 25 s) e atualiza a tela.
+  const followOrganizing = async (id: string) => {
+    for (let i = 0; i < 16; i++) {
+      await new Promise((res) => setTimeout(res, i === 0 ? 2000 : 1500));
+      try {
+        const r = await noricaApi.studyNoteGet(id);
+        if (r.note.aiState === 'pendente') continue;
+        setNotes((n) => (n ?? []).map((x) => (x.id === id ? r.note : x)));
+        setSaved((cur) => (cur && cur.note.id === id ? { note: r.note, cards: r.note.cards, aiNote: r.aiNote, organizing: false } : cur));
+        if (r.note.subject) setSubjects((s) => (s.includes(r.note.subject) ? s : [r.note.subject, ...s]));
+        refreshStudy().then((s) => s && setSummary(s));
+        return;
+      } catch (_e) { /* tenta de novo */ }
+    }
+    setSaved((cur) => (cur && cur.note.id === id ? { ...cur, organizing: false } : cur));
   };
 
   const shown = useMemo(() => {
@@ -91,7 +115,7 @@ export default function CadernoPage() {
     <main className="min-h-[100dvh] relative overflow-x-hidden pb-40 text-white" data-testid="caderno">
       <div className="relative z-10 max-w-md mx-auto px-6 pt-[calc(env(safe-area-inset-top)+1.5rem)] space-y-6">
         <div className="flex items-center justify-between">
-          <button onClick={() => router.back()} className="p-3 bg-white/5 border border-white/10 rounded-full text-emerald-300" aria-label="Voltar"><ArrowLeft size={20} /></button>
+          <button onClick={() => router.replace('/exercicios/')} className="p-3 bg-white/5 border border-white/10 rounded-full text-emerald-300" aria-label="Voltar"><ArrowLeft size={20} /></button>
           <span className="flex items-center gap-1.5 text-[9px] font-black text-emerald-300/80 uppercase tracking-[0.25em]"><NotebookPen size={12} /> Caderno</span>
         </div>
 
@@ -144,17 +168,18 @@ export default function CadernoPage() {
             </button>
             <button onClick={save} disabled={!text.trim() || saving || voice.state !== 'idle'}
               className="flex-1 h-12 rounded-2xl bg-emerald-400 text-slate-950 text-[11px] font-black uppercase tracking-widest disabled:opacity-40 flex items-center justify-center gap-2" data-testid="nota-salvar">
-              {saving ? <><Loader2 size={14} className="animate-spin" /> Organizando…</> : <><Sparkles size={14} /> Guardar no Caderno</>}
+              {saving ? <><Loader2 size={14} className="animate-spin" /> Guardando…</> : <><Sparkles size={14} /> Guardar no Caderno</>}
             </button>
           </div>
           {saved && (
             <div className="p-4 rounded-2xl bg-emerald-400/10 border border-emerald-300/25 space-y-1.5 card-in" data-testid="nota-salva">
-              <p className="text-[9px] font-black text-emerald-300 uppercase tracking-widest flex items-center gap-1.5"><Check size={12} /> Guardado</p>
+              <p className="text-[9px] font-black text-emerald-300 uppercase tracking-widest flex items-center gap-1.5"><Check size={12} /> Guardado na hora</p>
               <p className="text-sm font-black">{saved.note.title}</p>
               <div className="flex flex-wrap gap-1.5">
                 {saved.note.subject && <span className="px-2 py-0.5 rounded-full bg-white/10 text-[10px] font-bold">{saved.note.subject}</span>}
                 {saved.note.tags.map((t) => <span key={t} className="px-2 py-0.5 rounded-full bg-white/5 text-[10px] font-bold text-white/60">#{t}</span>)}
               </div>
+              {saved.organizing && <p className="text-[12px] text-white/60 font-semibold flex items-center gap-2" data-testid="organizando"><Loader2 size={13} className="animate-spin" /> A Nórica está organizando e criando seus cartões…</p>}
               {saved.cards > 0 && <p className="text-[12px] text-white/70 font-semibold">📒 {saved.cards} {saved.cards === 1 ? 'cartão de revisão criado' : 'cartões de revisão criados'} — eles aparecem para você relembrar nos próximos dias.</p>}
               {saved.aiNote && <p className="text-[11px] text-amber-200/80 font-semibold">{saved.aiNote}</p>}
             </div>
@@ -231,15 +256,16 @@ export default function CadernoPage() {
 
 function NoteItem({ n, open, onToggle, onPin, onDelete, onChanged }: { n: StudyNote; open: boolean; onToggle: () => void; onPin: () => void; onDelete: () => void; onChanged: () => void }) {
   const k = kindInfo(n.kind);
-  const [cards, setCards] = useState<{ id: string; front: string; back: string }[] | null>(null);
+  const [cards, setCards] = useState<{ id: string; front: string; back: string }[] | null>(n.cardList ?? null);
   const [adding, setAdding] = useState(false);
   const [front, setFront] = useState('');
   const [back, setBack] = useState('');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (open && cards === null) noricaApi.studyNoteCards(n.id).then((r) => setCards(r.cards)).catch(() => setCards([]));
-  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (open && cards === null) noricaApi.studyNoteCards(n.id).then((r) => setCards(Array.isArray(r?.cards) ? r.cards : [])).catch(() => setCards([]));
+  }, [open]);
+  useEffect(() => { if (n.cardList) setCards(n.cardList); }, [n.cardList]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const addCard = async () => {
     if (!front.trim() || !back.trim()) return;

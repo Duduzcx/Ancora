@@ -76,7 +76,7 @@ export default function MateriaPage() {
     <main className="min-h-[100dvh] relative overflow-x-hidden pb-40 text-white" data-testid="materia">
       <div className="relative z-10 max-w-md mx-auto px-6 pt-[calc(env(safe-area-inset-top)+1.5rem)] space-y-5">
         <div className="flex items-center justify-between">
-          <button onClick={() => router.push('/faculdade/')} className="p-3 bg-white/5 border border-white/10 rounded-full" style={{ color: col.hex }} aria-label="Voltar"><ArrowLeft size={20} /></button>
+          <button onClick={() => router.replace('/faculdade/')} className="p-3 bg-white/5 border border-white/10 rounded-full" style={{ color: col.hex }} aria-label="Voltar"><ArrowLeft size={20} /></button>
           <button onClick={() => setCourseSheet(true)} className="px-4 py-2.5 bg-white/5 border border-white/10 rounded-full text-[10px] font-black uppercase tracking-widest text-white/70 flex items-center gap-1.5" data-testid="editar-materia"><Pencil size={12} /> Editar</button>
         </div>
 

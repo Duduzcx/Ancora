@@ -51,7 +51,7 @@ export default function CalendarioPage() {
     <main className="min-h-[100dvh] relative overflow-x-hidden pb-40 text-white" data-testid="calendario">
       <div className="relative z-10 max-w-md mx-auto px-6 pt-[calc(env(safe-area-inset-top)+1.5rem)] space-y-5">
         <div className="flex items-center justify-between">
-          <button onClick={() => router.push('/faculdade/')} className="p-3 bg-white/5 border border-white/10 rounded-full text-emerald-300" aria-label="Voltar"><ArrowLeft size={20} /></button>
+          <button onClick={() => router.replace('/faculdade/')} className="p-3 bg-white/5 border border-white/10 rounded-full text-emerald-300" aria-label="Voltar"><ArrowLeft size={20} /></button>
           <span className="flex items-center gap-1.5 text-[9px] font-black text-emerald-300/80 uppercase tracking-[0.25em]"><CalendarDays size={12} /> Calendário</span>
         </div>
 

@@ -105,7 +105,7 @@ export default function FocoPage() {
     <main className="min-h-[100dvh] relative overflow-x-hidden pb-40 text-white" data-testid="foco">
       <div className="relative z-10 max-w-md mx-auto px-6 pt-[calc(env(safe-area-inset-top)+1.5rem)] space-y-6">
         <div className="flex items-center justify-between">
-          <button onClick={() => (step === 'foco' ? finishEarly() : step === 'pausa' ? endBreak() : router.push('/caderno/'))} className="p-3 bg-white/5 border border-white/10 rounded-full text-amber-300" aria-label="Voltar"><ArrowLeft size={20} /></button>
+          <button onClick={() => (step === 'foco' ? finishEarly() : step === 'pausa' ? endBreak() : router.replace('/caderno/'))} className="p-3 bg-white/5 border border-white/10 rounded-full text-amber-300" aria-label="Voltar"><ArrowLeft size={20} /></button>
           <span className="flex items-center gap-1.5 text-[9px] font-black text-amber-300/80 uppercase tracking-[0.25em]"><Timer size={12} /> Foco</span>
         </div>
 

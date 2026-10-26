@@ -6,7 +6,7 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import confetti from 'canvas-confetti';
 import { ArrowLeft, Check, Loader2, Timer, Droplets, Wind, MapPin, MessageCircle, Apple, StretchHorizontal, Moon, Sun, Phone } from 'lucide-react';
-import { logMood, markHabitToday, noricaApi, type Mood } from '@/lib/norica-api';
+import { logMood, markHabitsToday, noricaApi, type Mood } from '@/lib/norica-api';
 import { FEELINGS } from '@/components/RodaEmocoes';
 import { MOOD_COLOR, MOOD_LABEL } from '@/lib/farol';
 import { HelpSheet } from '@/components/AjudaAgora';
@@ -42,10 +42,13 @@ export default function HojePage() {
     if (!mood) return;
     setBusy(true); setErr(null);
     try {
-      await logMood(mood, feeling);
-      for (const id of cares) await markHabitToday(id).catch(() => false);
-      let crisis = false;
-      if (note.trim()) crisis = (await noricaApi.journalSave('hoje', note.trim())).crisis;
+      // Humor, cuidados e frase salvam ao mesmo tempo (antes era um depois do outro).
+      const [, , journal] = await Promise.all([
+        logMood(mood, feeling),
+        markHabitsToday(cares).catch(() => 0),
+        note.trim() ? noricaApi.journalSave('hoje', note.trim()) : Promise.resolve(null),
+      ]);
+      const crisis = !!journal?.crisis;
       try { localStorage.setItem('norica-hoje', new Date().toLocaleDateString('en-CA')); } catch (_e) {}
       setDone({ crisis: crisis || mood === 'sos' });
       if (!crisis && mood !== 'sos') { try { confetti({ particleCount: 70, spread: 70, origin: { y: 0.7 }, colors: ['#34d399', '#5eead4', '#fbbf24'] }); } catch (_e) {} }

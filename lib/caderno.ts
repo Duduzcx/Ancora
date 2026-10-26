@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import { BookOpen, Lightbulb, BellRing } from 'lucide-react';
 import { cacheGet, cacheSet } from '@/lib/cache';
 import { getAuthState } from '@/lib/auth-store';
-import { noricaApi, type NoteKind, type StudySummary } from '@/lib/norica-api';
+import { noricaApi, type NoteKind, type StudyNote, type StudySummary } from '@/lib/norica-api';
 import { cancelNotices, scheduleNotices } from '@/lib/reminder';
 
 export const KINDS: { id: NoteKind; label: string; short: string; icon: any; cls: string; dot: string; hint: string }[] = [
@@ -27,6 +27,13 @@ export function rememberStudy(s: StudySummary) {
   try { window.dispatchEvent(new Event('norica-caderno')); } catch (_e) {}
   scheduleReviewReminders(s).catch(() => {});
 }
+// Lista do Caderno guardada no aparelho para abrir na hora (sem os cartões e com o texto encurtado).
+export const cachedNotes = () => cacheGet<{ notes: StudyNote[]; subjects: string[] }>(uid(), 'caderno-notas');
+export function rememberNotes(notes: StudyNote[], subjects: string[]) {
+  const lean = notes.slice(0, 150).map(({ cardList: _c, content, ...n }) => ({ ...n, content: content.slice(0, 400) }));
+  cacheSet(uid(), 'caderno-notas', { notes: lean, subjects });
+}
+
 export async function refreshStudy(): Promise<StudySummary | null> {
   try { const s = await noricaApi.studySummary(); rememberStudy(s); return s; } catch (_e) { return null; }
 }

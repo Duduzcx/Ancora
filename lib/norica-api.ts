@@ -79,7 +79,8 @@ export type JournalEntry = { id: string; kind: JournalKind; mood: string | null;
 export type OrgSector = { id: string; name: string };
 // Caderno (estudos e ideias)
 export type NoteKind = 'aprendizado' | 'ideia' | 'lembrete';
-export type StudyNote = { id: string; kind: NoteKind; title: string; content: string; summary: string; subject: string; tags: string[]; pinned: boolean; created_at: string; updated_at: string; cards: number };
+export type StudyCardBrief = { id: string; front: string; back: string; due_on: string };
+export type StudyNote = { id: string; kind: NoteKind; title: string; content: string; summary: string; subject: string; tags: string[]; pinned: boolean; created_at: string; updated_at: string; cards: number; cardList?: StudyCardBrief[]; aiState?: 'pendente' | 'ok' | 'erro' | 'limite' | null };
 export type StudySummary = { due: number; notes: number; cards: number; weekMinutes: number; streak: number; reviewedToday: number };
 export type StudyCard = { id: string; noteId: string | null; front: string; back: string; isNew: boolean; late: boolean; note: string | null; subject: string | null };
 export type StudyGrade = 'errei' | 'dificil' | 'facil';
@@ -228,7 +229,8 @@ export const noricaApi = {
   journalVoice: (text: string) =>
     call<{ entry: JournalEntry; crisis: boolean; tasks: string[] }>('journal_voice', { text }),
   studyNoteSave: (note: { id?: string; kind: NoteKind; content: string; title?: string; summary?: string; subject?: string; tags?: string[]; cards?: { front: string; back: string }[]; organize?: boolean }) =>
-    call<{ note: StudyNote; organized: boolean; cardsCreated: number; aiNote: string | null; crisis: boolean }>('study_note_save', note),
+    call<{ note: StudyNote; organized: boolean; organizing?: boolean; cardsCreated: number; aiNote: string | null; crisis: boolean }>('study_note_save', note),
+  studyNoteGet: (id: string) => call<{ note: StudyNote; aiNote: string | null }>('study_note_get', { id }),
   studyNoteList: (q?: string) => call<{ notes: StudyNote[]; subjects: string[] }>('study_note_list', q ? { q } : {}),
   studyNoteDelete: (id: string) => call<{ ok: boolean }>('study_note_delete', { id }),
   studyNotePin: (id: string, pinned: boolean) => call<{ ok: boolean; pinned: boolean }>('study_note_pin', { id, pinned }),
@@ -480,6 +482,21 @@ export async function markHabitToday(id: number): Promise<boolean> {
   await saveDailyLog({ ...current, completed, progress });
   try { localStorage.setItem('norica-progress', String(progress)); } catch (_e) {}
   return true;
+}
+
+/** Marca vários hábitos de uma vez (uma leitura e uma gravação, em vez de uma por hábito). */
+export async function markHabitsToday(ids: number[]): Promise<number> {
+  if (!ids.length) return 0;
+  const day = todayKey();
+  const current = (await fetchDailyLog(day)) ?? { day, completed: [], custom_tasks: [], progress: 0 };
+  const fresh = ids.filter((id) => !current.completed.includes(id));
+  if (!fresh.length) return 0;
+  const completed = [...current.completed, ...fresh];
+  const customDone = current.custom_tasks.filter((t) => t.completed).length;
+  const progress = ((completed.length + customDone) / (BASE_HABITS + current.custom_tasks.length)) * 100;
+  await saveDailyLog({ ...current, completed, progress });
+  try { localStorage.setItem('norica-progress', String(progress)); } catch (_e) {}
+  return fresh.length;
 }
 
 // Adiciona ações sugeridas pela IA na lista de hoje (aba Logs).

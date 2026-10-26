@@ -31,6 +31,20 @@ const isChunkError = (err: any, msg = '') =>
   err?.message?.includes('Loading chunk') ||
   err?.message?.includes('Failed to fetch dynamically imported module');
 
+/** Tela "de cima" de cada área (usada pelo botão voltar do Android). */
+const PARENTS: [RegExp, string][] = [
+  [/^\/caderno\/(revisar|estudar|perguntar|foco|plano)\//, '/caderno/'],
+  [/^\/caderno\/$/, '/exercicios/'],
+  [/^\/faculdade\/(materia|calendario)\//, '/faculdade/'],
+  [/^\/faculdade\/$/, '/exercicios/'],
+  [/^\/estudos\/.+/, '/estudos/'],
+  [/^\/estudos\/$/, '/exercicios/'],
+];
+function parentRoute(path: string): string | null {
+  for (const [re, to] of PARENTS) if (re.test(path)) return to;
+  return null;
+}
+
 export default function LayoutWrapper({ children }: { children: React.ReactNode }) {
   const [isMounted, setIsMounted] = useState(false);
   // Login compartilhado: abre na hora com a sessão salva no aparelho.
@@ -101,6 +115,16 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
 
       // App aberto do zero por um toque no widget.
       App.getLaunchUrl().then((launch) => { if (launch?.url) openFromWidget(launch.url); }).catch(() => {});
+
+      // Botão "voltar" do Android: segue o caminho das telas (Caderno/Faculdade voltam para a Bússola),
+      // em vez de refazer o histórico tela por tela. Na Início, minimiza o app.
+      listeners.push(App.addListener('backButton', ({ canGoBack }) => {
+        const path = (pathnameRef.current || '/').replace(/\/?$/, '/');
+        const parent = parentRoute(path);
+        if (path === '/') { App.minimizeApp().catch(() => App.exitApp()); return; }
+        if (parent) { router.replace(parent); return; }
+        if (canGoBack) window.history.back(); else router.replace('/');
+      }));
 
       // Mantém o login vivo: renova o token quando o app volta para a tela.
       listeners.push(App.addListener('appStateChange', ({ isActive }) => {
@@ -175,7 +199,7 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
     if (!userId) return;
     const t = setTimeout(() => {
       // Uma tela por vez, quando o celular está livre (antes eram 22 de uma vez, o que travava a abertura).
-      const routes = ['/porto/', '/perfil/', '/farol/', '/exercicios/', '/log/', '/hoje/', '/amigos/', '/respiracao/', '/meditacoes/', '/cofre/', '/planos/', '/noite/', '/trilhas/', '/calma/', '/cartas/', '/terapia/', '/mural/', '/datas/', '/movimento/', '/toque/', '/fase/', '/arena/'];
+      const routes = ['/porto/', '/perfil/', '/farol/', '/exercicios/', '/caderno/', '/faculdade/', '/log/', '/hoje/', '/amigos/', '/respiracao/', '/meditacoes/', '/cofre/', '/planos/', '/noite/', '/trilhas/', '/calma/', '/cartas/', '/terapia/', '/mural/', '/datas/', '/movimento/', '/toque/', '/fase/', '/arena/'];
       const idle = (cb: () => void) => ((window as any).requestIdleCallback ? (window as any).requestIdleCallback(cb, { timeout: 2500 }) : setTimeout(cb, 300));
       const next = (i: number) => { if (i >= routes.length) return; idle(() => { try { router.prefetch(routes[i]); } catch (_e) {} setTimeout(() => next(i + 1), 250); }); };
       setTimeout(() => next(0), 2500);

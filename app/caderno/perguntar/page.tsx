@@ -49,7 +49,7 @@ export default function PerguntarPage() {
     <main className="min-h-[100dvh] relative overflow-x-hidden pb-48 text-white" data-testid="perguntar">
       <div className="relative z-10 max-w-md mx-auto px-6 pt-[calc(env(safe-area-inset-top)+1.5rem)] space-y-6">
         <div className="flex items-center justify-between">
-          <button onClick={() => router.push('/caderno/')} className="p-3 bg-white/5 border border-white/10 rounded-full text-sky-300" aria-label="Voltar"><ArrowLeft size={20} /></button>
+          <button onClick={() => router.replace('/caderno/')} className="p-3 bg-white/5 border border-white/10 rounded-full text-sky-300" aria-label="Voltar"><ArrowLeft size={20} /></button>
           <span className="flex items-center gap-1.5 text-[9px] font-black text-sky-300/80 uppercase tracking-[0.25em]"><MessageCircleQuestion size={12} /> Perguntar ao Caderno</span>
         </div>
 

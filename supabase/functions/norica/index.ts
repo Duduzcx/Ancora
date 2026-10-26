@@ -881,10 +881,13 @@ async function prepConversation(_ctx: Ctx, body: Record<string, unknown>) {
 // ---------------------------------------------------------------------
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const NOTE_COLS = "id, kind, title, content, summary, subject, tags, pinned, created_at, updated_at";
-type NoteRow = { id: string; kind: string; title: string; content: string; summary: string | null; subject: string | null; tags: string | null; pinned: boolean; created_at: string; updated_at: string };
+const NOTE_COLS = "id, kind, title, content, summary, subject, tags, pinned, ai_state, created_at, updated_at";
+type NoteRow = { id: string; kind: string; title: string; content: string; summary: string | null; subject: string | null; tags: string | null; pinned: boolean; ai_state?: string | null; created_at: string; updated_at: string };
+type CardOut = { id: string; front: string; back: string; due_on: string };
 
-async function noteOut(r: NoteRow, cards = 0) {
+const AI_LIMIT_NOTE = "Você usou as ajudas da IA de hoje no Caderno. A anotação foi guardada do jeito que você escreveu.";
+
+async function noteOut(r: NoteRow, cardList: CardOut[] = []) {
   const [title, content, summary, subject, tagsRaw] = await Promise.all([
     decrypt(r.title), decrypt(r.content),
     r.summary ? decrypt(r.summary) : Promise.resolve(""),
@@ -893,18 +896,35 @@ async function noteOut(r: NoteRow, cards = 0) {
   ]);
   let tags: string[] = [];
   try { tags = (JSON.parse(tagsRaw) as unknown[]).filter((t): t is string => typeof t === "string"); } catch (_e) { /* sem etiquetas */ }
-  return { id: r.id, kind: r.kind, title, content, summary, subject, tags, pinned: r.pinned, created_at: r.created_at, updated_at: r.updated_at, cards };
+  return {
+    id: r.id, kind: r.kind, title, content, summary, subject, tags, pinned: r.pinned,
+    aiState: r.ai_state ?? null, created_at: r.created_at, updated_at: r.updated_at,
+    cards: cardList.length, cardList,
+  };
 }
 type NoteOut = Awaited<ReturnType<typeof noteOut>>;
 
+/** Cartões de várias anotações de uma vez (já abertos), agrupados por anotação. */
+async function cardsByNote(ctx: Ctx, noteIds?: string[]): Promise<Map<string, CardOut[]>> {
+  let q = ctx.db.from("study_cards").select("id, note_id, front, back, due_on").eq("user_id", ctx.userId).order("created_at").limit(5000);
+  if (noteIds) q = q.in("note_id", noteIds);
+  const { data } = await q;
+  const map = new Map<string, CardOut[]>();
+  await Promise.all((data ?? []).filter((c) => c.note_id).map(async (c) => {
+    const out = { id: c.id, front: await decrypt(c.front), back: await decrypt(c.back), due_on: c.due_on };
+    map.set(c.note_id!, [...(map.get(c.note_id!) ?? []), out]);
+  }));
+  return map;
+}
+
 async function allNotes(ctx: Ctx, limit = 300): Promise<NoteOut[]> {
-  const { data, error } = await ctx.db.from("study_notes").select(NOTE_COLS).eq("user_id", ctx.userId)
-    .order("created_at", { ascending: false }).limit(limit);
+  // Anotações e cartões ao mesmo tempo (antes era um depois do outro).
+  const [{ data, error }, cards] = await Promise.all([
+    ctx.db.from("study_notes").select(NOTE_COLS).eq("user_id", ctx.userId).order("created_at", { ascending: false }).limit(limit),
+    cardsByNote(ctx),
+  ]);
   if (error) throw new HttpError(500, "Não foi possível abrir o Caderno agora");
-  const { data: cardRows } = await ctx.db.from("study_cards").select("note_id").eq("user_id", ctx.userId).limit(5000);
-  const counts = new Map<string, number>();
-  for (const c of cardRows ?? []) if (c.note_id) counts.set(c.note_id, (counts.get(c.note_id) ?? 0) + 1);
-  return await Promise.all((data ?? []).map((r) => noteOut(r as NoteRow, counts.get(r.id) ?? 0)));
+  return await Promise.all((data ?? []).map((r) => noteOut(r as NoteRow, cards.get(r.id) ?? [])));
 }
 
 async function insertCards(ctx: Ctx, noteId: string | null, cards: { front: string; back: string }[]): Promise<number> {
@@ -917,48 +937,93 @@ async function insertCards(ctx: Ctx, noteId: string | null, cards: { front: stri
   return rows.length;
 }
 
-/** Salva uma anotação. Nova anotação: a IA organiza (título, resumo, matéria, etiquetas e cartões). */
+type Organized = { title: string; summary: string; subject: string; tags: string[]; cards: { front: string; back: string }[] } | null;
+
+/** Pede para a IA organizar a anotação (título, resumo, matéria, etiquetas e cartões). */
+async function organizeNote(kind: string, content: string): Promise<Organized> {
+  const raw = await withTimeout(
+    groqChat([{ role: "system", content: ORGANIZE_PROMPT }, { role: "user", content: `Tipo: ${kind}\nTexto:\n${content}` }],
+      { model: FAST_MODEL, temperature: 0.3, maxTokens: 500 }).catch(() => ""),
+    20000, "");
+  const p = parseJsonObject(raw);
+  if (!p || !Object.keys(p).length) return null;
+  return {
+    title: cleanStr(p.titulo, 80),
+    summary: cleanStr(p.resumo, 300),
+    subject: cleanStr(p.materia, 40),
+    tags: Array.isArray(p.etiquetas) ? (p.etiquetas as unknown[]).map((t) => cleanStr(t, 24).toLowerCase()).filter(Boolean).slice(0, 3) : [],
+    cards: kind === "aprendizado" ? cleanCards(p.cartoes, 3) : [],
+  };
+}
+
+/** Roda depois de responder: a IA organiza e o app busca o resultado em seguida. */
+async function organizeInBackground(ctx: Ctx, noteId: string, kind: string, content: string, keep: { title: string; summary: string; subject: string; tags: string[] }) {
+  const limit = await consume(ctx.admin, ctx.userId, "study_ai");
+  if (limit) {
+    await ctx.db.from("study_notes").update({ ai_state: "limite" }).eq("id", noteId).eq("user_id", ctx.userId);
+    return;
+  }
+  const o = await organizeNote(kind, content);
+  if (!o) {
+    await ctx.db.from("study_notes").update({ ai_state: "erro" }).eq("id", noteId).eq("user_id", ctx.userId);
+    return;
+  }
+  const title = keep.title || o.title;
+  const summary = keep.summary || o.summary;
+  const subject = keep.subject || o.subject;
+  const tags = keep.tags.length ? keep.tags : o.tags;
+  await ctx.db.from("study_notes").update({
+    ...(title ? { title: await encrypt(title) } : {}),
+    summary: summary ? await encrypt(summary) : null,
+    subject: subject ? await encrypt(subject) : null,
+    tags: await encrypt(JSON.stringify(tags)),
+    ai_state: "ok",
+    updated_at: new Date().toISOString(),
+  }).eq("id", noteId).eq("user_id", ctx.userId);
+  await insertCards(ctx, noteId, o.cards);
+}
+
+/**
+ * Salva uma anotação NA HORA. Se for nova e com IA, a organização (título, matéria, cartões)
+ * acontece logo depois, em segundo plano: o app consulta com study_note_get.
+ */
 async function studyNoteSave(ctx: Ctx, body: Record<string, unknown>) {
   const kind = (NOTE_KINDS as readonly string[]).includes(String(body.kind)) ? String(body.kind) : "aprendizado";
   const content = cleanText(body.content, 6000);
   const id = typeof body.id === "string" && UUID_RE.test(body.id) ? body.id : null;
   const crisis = detectRisk(content);
-  let title = cleanStr(body.title, 80);
-  let summary = cleanStr(body.summary, 300);
-  let subject = cleanStr(body.subject, 40);
-  let tags = Array.isArray(body.tags) ? (body.tags as unknown[]).map((t) => cleanStr(t, 24).toLowerCase()).filter(Boolean).slice(0, 5) : [];
-  let cards = cleanCards(body.cards, 6); // cartões prontos (vindos do "Estudar com a IA")
+  const keep = {
+    title: cleanStr(body.title, 80),
+    summary: cleanStr(body.summary, 300),
+    subject: cleanStr(body.subject, 40),
+    tags: Array.isArray(body.tags) ? (body.tags as unknown[]).map((t) => cleanStr(t, 24).toLowerCase()).filter(Boolean).slice(0, 5) : [],
+  };
+  const cards = cleanCards(body.cards, 6); // cartões prontos (vindos do "Estudar com a IA" ou do Plano de estudos)
+  const wantAi = !crisis && (id ? body.organize === true : body.organize !== false);
+
+  // Edição pedindo IA (raro): espera a IA para devolver tudo pronto.
   let aiNote: string | null = null;
   let organized = false;
-
-  // Nova anotação: organiza com a IA (pode desligar). Edição: só se pedir.
-  const wantAi = !crisis && (id ? body.organize === true : body.organize !== false);
-  if (wantAi) {
+  let fields = { ...keep };
+  if (wantAi && id) {
     const limit = await consume(ctx.admin, ctx.userId, "study_ai");
     if (limit) aiNote = limit;
     else {
-      const raw = await withTimeout(
-        groqChat([{ role: "system", content: ORGANIZE_PROMPT }, { role: "user", content: `Tipo: ${kind}\nTexto:\n${content}` }],
-          { model: FAST_MODEL, temperature: 0.3, maxTokens: 500 }).catch(() => ""),
-        15000, "");
-      const p = parseJsonObject(raw) ?? {};
-      organized = Object.keys(p).length > 0;
-      title = title || cleanStr(p.titulo, 80);
-      summary = summary || cleanStr(p.resumo, 300);
-      subject = subject || cleanStr(p.materia, 40);
-      if (!tags.length && Array.isArray(p.etiquetas)) tags = (p.etiquetas as unknown[]).map((t) => cleanStr(t, 24).toLowerCase()).filter(Boolean).slice(0, 3);
-      if (!id && kind === "aprendizado" && !cards.length) cards = cleanCards(p.cartoes, 3);
+      const o = await organizeNote(kind, content);
+      if (o) { organized = true; fields = { title: keep.title || o.title, summary: keep.summary || o.summary, subject: keep.subject || o.subject, tags: keep.tags.length ? keep.tags : o.tags }; }
     }
   }
-  if (!title) title = content.split(/\s+/).slice(0, 6).join(" ").slice(0, 80);
+  const title = fields.title || content.split(/\s+/).slice(0, 6).join(" ").slice(0, 80);
+  const deferAi = wantAi && !id;
 
   const row = {
     kind,
     title: await encrypt(title),
     content: await encrypt(content),
-    summary: summary ? await encrypt(summary) : null,
-    subject: subject ? await encrypt(subject) : null,
-    tags: await encrypt(JSON.stringify(tags)),
+    summary: fields.summary ? await encrypt(fields.summary) : null,
+    subject: fields.subject ? await encrypt(fields.subject) : null,
+    tags: await encrypt(JSON.stringify(fields.tags)),
+    ai_state: deferAi ? "pendente" : organized ? "ok" : null,
     updated_at: new Date().toISOString(),
   };
   const q = id
@@ -968,12 +1033,20 @@ async function studyNoteSave(ctx: Ctx, body: Record<string, unknown>) {
   if (error || !saved) throw new HttpError(id ? 404 : 500, id ? "Anotação não encontrada" : "Não foi possível salvar a anotação agora");
 
   const created = await insertCards(ctx, saved.id, cards);
-  let total = created;
-  if (id) {
-    const { count } = await ctx.db.from("study_cards").select("id", { count: "exact", head: true }).eq("note_id", id);
-    total = count ?? 0;
-  }
-  return { note: await noteOut(saved as NoteRow, total), organized, cardsCreated: created, aiNote, crisis };
+  if (deferAi) runInBackground(organizeInBackground(ctx, saved.id, kind, content, keep));
+  const list = (await cardsByNote(ctx, [saved.id])).get(saved.id) ?? [];
+  return { note: await noteOut(saved as NoteRow, list), organized, organizing: deferAi, cardsCreated: created, aiNote, crisis };
+}
+
+/** Uma anotação (com os cartões): o app usa para buscar o resultado da organização em segundo plano. */
+async function studyNoteGet(ctx: Ctx, body: Record<string, unknown>) {
+  const id = String(body.id ?? "");
+  if (!UUID_RE.test(id)) throw new HttpError(400, "Anotação inválida");
+  const { data } = await ctx.db.from("study_notes").select(NOTE_COLS).eq("id", id).eq("user_id", ctx.userId).maybeSingle();
+  if (!data) throw new HttpError(404, "Anotação não encontrada");
+  const list = (await cardsByNote(ctx, [id])).get(id) ?? [];
+  const note = await noteOut(data as NoteRow, list);
+  return { note, aiNote: note.aiState === "limite" ? AI_LIMIT_NOTE : null };
 }
 
 async function studyNoteList(ctx: Ctx, body: Record<string, unknown>) {
@@ -1034,6 +1107,8 @@ async function studySummary(ctx: Ctx) {
 async function studyDue(ctx: Ctx, body: Record<string, unknown>) {
   const today = brtDay();
   const limit = Math.min(Math.max(Number(body.limit) || 20, 1), 50);
+  // Cartões e resumo ao mesmo tempo (antes um esperava o outro).
+  const summaryP = studySummary(ctx).catch(() => null);
   const { data, error } = await ctx.db.from("study_cards").select("id, note_id, front, back, reps, interval_days, due_on")
     .eq("user_id", ctx.userId).lte("due_on", today).order("due_on", { ascending: true }).order("created_at", { ascending: true }).limit(limit);
   if (error) throw new HttpError(500, "Não foi possível carregar a revisão agora");
@@ -1041,7 +1116,7 @@ async function studyDue(ctx: Ctx, body: Record<string, unknown>) {
   const titles = new Map<string, { title: string; subject: string }>();
   if (noteIds.length) {
     const { data: ns } = await ctx.db.from("study_notes").select("id, title, subject").in("id", noteIds);
-    for (const n of ns ?? []) titles.set(n.id, { title: await decrypt(n.title), subject: n.subject ? await decrypt(n.subject) : "" });
+    await Promise.all((ns ?? []).map(async (n) => titles.set(n.id, { title: await decrypt(n.title), subject: n.subject ? await decrypt(n.subject) : "" })));
   }
   const cards = await Promise.all((data ?? []).map(async (c) => ({
     id: c.id, noteId: c.note_id, front: await decrypt(c.front), back: await decrypt(c.back),
@@ -1049,7 +1124,7 @@ async function studyDue(ctx: Ctx, body: Record<string, unknown>) {
     note: c.note_id ? titles.get(c.note_id)?.title ?? null : null,
     subject: c.note_id ? titles.get(c.note_id)?.subject ?? null : null,
   })));
-  return { cards, summary: await studySummary(ctx) };
+  return { cards, summary: await summaryP };
 }
 
 async function studyReview(ctx: Ctx, body: Record<string, unknown>) {
@@ -2627,6 +2702,7 @@ const actions: Record<string, (ctx: Ctx, body: Record<string, unknown>) => Promi
   verify_purchase: verifyPurchase,
   promo_redeem: promoRedeem,
   study_note_save: studyNoteSave,
+  study_note_get: studyNoteGet,
   study_note_list: studyNoteList,
   study_note_delete: studyNoteDelete,
   study_note_pin: studyNotePin,
