@@ -8,6 +8,7 @@ import { supabase } from '@/lib/supabase-client';
 import AnimatedBackground from '@/components/AnimatedBackground'; // Usando o background padrão se o outro não existir
 import MovingGlow from '@/components/MovingGlow';
 import ParticleCoalesce from '@/components/ParticleCoalesce';
+import { authMessage, emailInputProps } from '@/lib/auth-errors';
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -32,17 +33,17 @@ export default function ForgotPasswordPage() {
     setError(null);
 
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      const { error } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
         redirectTo: `com.zcx.norica://login-callback?type=recovery`,
       });
 
       if (error) {
-        setError(error.message);
+        setError(authMessage(error));
       } else {
         setStep('code');
       }
     } catch (err: any) {
-      setError(err.message);
+      setError(authMessage(err));
     } finally {
       setIsLoading(false);
     }
@@ -108,6 +109,7 @@ export default function ForgotPasswordPage() {
                       <input
                         required
                         type="email"
+                        {...emailInputProps}
                         placeholder="seu@email.com"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
@@ -162,7 +164,7 @@ export default function ForgotPasswordPage() {
                     <p className="text-emerald-400 font-black text-sm truncate">{email}</p>
                   </div>
                   <p className="text-slate-500 text-[10px] font-bold leading-relaxed px-6">
-                    Acesse o link de validação enviado para restaurar seu acesso ao Porto Seguro Nórica.
+                    Abra o e-mail <b className="text-slate-300">neste celular</b> e toque no link: a Nórica abre e pede a senha nova. Não chegou? Veja o spam e espere 1 minuto antes de pedir outro.
                   </p>
                 </div>
 

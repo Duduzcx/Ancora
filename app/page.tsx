@@ -21,6 +21,7 @@ import RevealOnScroll from '@/components/RevealOnScroll';
 import LoginBackground from '@/components/LoginBackground';
 import NeblinaSOS from '@/components/NeblinaSOS';
 import { useAuth } from '@/lib/auth-store';
+import { authMessage, authProblem, emailInputProps, passwordInputProps } from '@/lib/auth-errors';
 import { cacheGet, cacheSet } from '@/lib/cache';
 import { dismissReminderInvite, enableReminder, rememberForNotifications, shouldInviteReminder } from '@/lib/reminder';
 import { Bell, X } from 'lucide-react';
@@ -143,6 +144,8 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [needsConfirm, setNeedsConfirm] = useState(false);
+  const [resent, setResent] = useState<'idle' | 'sending' | 'sent'>('idle');
   const router = useRouter();
   const supabase = createClient();
   const user = authUser;
@@ -285,17 +288,42 @@ export default function Home() {
     if (!email || !password) return;
     setLoading(true);
     setError(null);
+    setNeedsConfirm(false);
     try {
-      const { data, error: signInError } = await supabase.auth.signInWithPassword({ 
-        email: email.trim(), 
-        password: password.trim() 
-      });
+      // A senha vai exatamente como foi digitada (antes o app tirava espaços e a senha "não batia").
+      const mail = email.trim().toLowerCase();
+      let { error: signInError } = await supabase.auth.signInWithPassword({ email: mail, password });
+      // O teclado às vezes coloca um espaço no fim (sugestão de palavra): tenta de novo sem ele.
+      if (signInError && authProblem(signInError) === 'credenciais' && password.trim() !== password) {
+        ({ error: signInError } = await supabase.auth.signInWithPassword({ email: mail, password: password.trim() }));
+      }
       if (signInError) throw signInError;
     } catch (err: any) {
-      setError("E-mail ou senha incorretos.");
+      setNeedsConfirm(authProblem(err) === 'nao-confirmado');
+      setError(authMessage(err));
     } finally {
       setLoading(false);
     }
+  };
+
+  // Voltou de um link de e-mail vencido ou já usado: explica em vez de deixar a pessoa sem saber.
+  useEffect(() => {
+    try {
+      const q = new URLSearchParams(window.location.search);
+      if (q.get('erro_link')) setError(authMessage({ message: q.get('erro_link') ?? 'otp_expired', code: 'otp_expired' }));
+    } catch (_e) {}
+  }, []);
+
+  // Quem criou a conta e não achou o e-mail de confirmação pede outro aqui.
+  const resendConfirmation = async () => {
+    setResent('sending');
+    const { error: resendError } = await supabase.auth.resend({
+      type: 'signup',
+      email: email.trim().toLowerCase(),
+      options: { emailRedirectTo: 'com.zcx.norica://login-callback' },
+    });
+    if (resendError) { setError(authMessage(resendError)); setResent('idle'); }
+    else setResent('sent');
   };
 
 
@@ -768,6 +796,7 @@ export default function Home() {
                 <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40 group-focus-within:text-[#00D88B] transition-colors" size={18} />
                 <input 
                   type="email" 
+                  {...emailInputProps}
                   placeholder="Seu E-mail"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -779,6 +808,8 @@ export default function Home() {
                 <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40 group-focus-within:text-[#00D88B] transition-colors" size={18} />
                 <input 
                   type={showPassword ? "text" : "password"} 
+                  {...passwordInputProps}
+                  autoComplete="current-password"
                   placeholder="Sua Senha"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -816,6 +847,17 @@ export default function Home() {
                   className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-[11px] font-bold text-center"
                 >
                   {error}
+                  {needsConfirm && (
+                    <button
+                      type="button"
+                      onClick={resendConfirmation}
+                      disabled={resent !== 'idle' || !email.trim()}
+                      className="block mx-auto mt-2 text-[11px] font-black text-emerald-300 underline underline-offset-4 disabled:no-underline disabled:opacity-80"
+                      data-testid="reenviar-confirmacao"
+                    >
+                      {resent === 'sent' ? 'E-mail enviado! Veja também o spam.' : resent === 'sending' ? 'Enviando…' : 'Reenviar e-mail de confirmação'}
+                    </button>
+                  )}
                 </motion.div>
               )}
 

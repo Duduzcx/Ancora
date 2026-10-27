@@ -36,6 +36,7 @@ export function startAuth() {
 
   supabase.auth.onAuthStateChange((event, session) => {
     if (event === 'SIGNED_OUT') { cacheClear(); clearPersonalLocal(); }
+    if (event === 'PASSWORD_RECOVERY') { try { window.dispatchEvent(new CustomEvent('norica-recovery')); } catch (_e) {} }
     setState({ session, user: session?.user ?? null, ready: true });
   });
 

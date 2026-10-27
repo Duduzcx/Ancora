@@ -8,6 +8,7 @@ import { Mail, Lock, ArrowRight, Anchor, ArrowLeft, Sparkles, User, CheckCircle2
 import AnimatedBackground from '@/components/AnimatedBackground';
 import MovingGlow from '@/components/MovingGlow';
 import ParticleCoalesce from '@/components/ParticleCoalesce';
+import { authMessage, emailInputProps, passwordInputProps } from '@/lib/auth-errors';
 
 export default function SignupPage() {
   const [step, setStep] = useState(1);
@@ -36,8 +37,12 @@ export default function SignupPage() {
   const handleNextStep = () => {
     setError(null);
     if (step === 1) {
-      if (!email || !password) {
+      if (!email.trim() || !password) {
         setError("Preencha e-mail e senha.");
+        return;
+      }
+      if (/^\s|\s$/.test(password)) {
+        setError("A senha não pode começar nem terminar com espaço.");
         return;
       }
       if (password !== confirmPassword) {
@@ -95,7 +100,7 @@ export default function SignupPage() {
 
     try {
       const { data, error: signUpError } = await supabase.auth.signUp({
-        email,
+        email: email.trim().toLowerCase(),
         password,
         options: {
           data: { 
@@ -109,6 +114,13 @@ export default function SignupPage() {
       });
 
       if (signUpError) throw signUpError;
+
+      // E-mail que já tem conta: o Supabase devolve um usuário "vazio" (sem identidades) e não manda e-mail.
+      if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+        setStep(1);
+        setError('Este e-mail já tem conta na Nórica. Volte e entre com ele — ou toque em "Esqueci a senha".');
+        return;
+      }
 
       if (data.user) {
         await supabase.from('profiles').upsert({
@@ -129,7 +141,10 @@ export default function SignupPage() {
         }
       }
     } catch (err: any) {
-      setError(err.message);
+      // Senha fraca ou e-mail inválido: volta para o passo 1, onde a pessoa pode corrigir.
+      const msg = authMessage(err);
+      if (/senha|e-mail/i.test(msg)) setStep(1);
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -186,6 +201,7 @@ export default function SignupPage() {
                       <input
                         required
                         type="email"
+                        {...emailInputProps}
                         placeholder="E-mail"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
@@ -197,7 +213,9 @@ export default function SignupPage() {
                       <input
                         required
                         type="password"
-                        placeholder="Senha"
+                        {...passwordInputProps}
+                        autoComplete="new-password"
+                        placeholder="Senha (mínimo 6 caracteres)"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
                         className="w-full h-[56px] bg-white/5 border border-white/10 rounded-full px-14 text-sm font-bold text-white outline-none focus:border-[#00D88B]/40 focus:bg-white/10 transition-all placeholder:text-white/10"
@@ -208,6 +226,8 @@ export default function SignupPage() {
                       <input
                         required
                         type="password"
+                        {...passwordInputProps}
+                        autoComplete="new-password"
                         placeholder="Confirmar Senha"
                         value={confirmPassword}
                         onChange={(e) => setConfirmPassword(e.target.value)}
@@ -315,7 +335,10 @@ export default function SignupPage() {
                       <p className="text-[#00D88B] font-black text-sm truncate">{email}</p>
                     </div>
                     <p className="text-white/40 text-[10px] font-bold leading-relaxed px-4">
-                      Acesse o seu e-mail e clique no link de ativação para liberar seu acesso à Nórica.
+                      Abra o e-mail da Nórica <b className="text-white/70">neste celular</b> e toque no link de ativação. Não chegou? Veja a caixa de spam ou promoções.
+                    </p>
+                    <p className="text-white/40 text-[10px] font-bold leading-relaxed px-4">
+                      Depois de confirmar, entre com o mesmo e-mail e a senha que você criou.
                     </p>
                   </div>
                 </motion.div>

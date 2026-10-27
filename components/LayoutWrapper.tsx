@@ -103,10 +103,16 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
         log(`DeepLink aberto: ${String(event.url).split(/[?#]/)[0]}`); // sem o código de login no registro
         if (!(event.url.includes('com.zcx.norica') || event.url.includes('com.zcx.ancora'))) return;
         if (openFromWidget(event.url)) return;
-        if (!event.url.includes('code=')) return;
+        if (!event.url.includes('code=') && !event.url.includes('error')) return;
+        let destino = '/';
         try {
           const url = new URL(event.url.replace('#', '?'));
           const code = url.searchParams.get('code');
+          // Link de "Esqueci a senha": depois de entrar, a pessoa escolhe a senha nova.
+          if (url.searchParams.get('type') === 'recovery') destino = '/auth/nova-senha/';
+          // Link vencido ou já usado: avisa em vez de só voltar para o login sem explicação.
+          const linkError = url.searchParams.get('error_code') || url.searchParams.get('error');
+          if (linkError) destino = destino === '/' ? `/?erro_link=${encodeURIComponent(linkError)}` : destino;
           // Só o código PKCE (precisa da chave guardada neste aparelho). Tokens prontos vindos de um link
           // são ignorados: um site poderia trocar a conta da pessoa por outra sem ela perceber.
           if (code && deepLinkParts(event.url)?.host === 'login-callback') await supabase.auth.exchangeCodeForSession(code);
@@ -117,8 +123,13 @@ export default function LayoutWrapper({ children }: { children: React.ReactNode 
           const { Browser } = await import('@capacitor/browser');
           await Browser.close();
         } catch (_e) {}
-        router.push('/');
+        router.push(destino);
       }));
+
+      // O Supabase avisa quando a entrada veio de um link de nova senha.
+      const goRecovery = () => router.push('/auth/nova-senha/');
+      window.addEventListener('norica-recovery', goRecovery);
+      listeners.push(Promise.resolve({ remove: () => window.removeEventListener('norica-recovery', goRecovery) }));
 
       // App aberto do zero por um toque no widget.
       App.getLaunchUrl().then((launch) => { if (launch?.url) openFromWidget(launch.url); }).catch(() => {});

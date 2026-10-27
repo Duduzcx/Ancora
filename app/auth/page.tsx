@@ -12,6 +12,7 @@ import { GoogleSignIn } from '@capawesome/capacitor-google-sign-in';
 import LoginBackground from '@/components/LoginBackground';
 import MovingGlow from '@/components/MovingGlow';
 import PixelShadow from '@/components/PixelShadow';
+import { authMessage, authProblem, emailInputProps, passwordInputProps } from '@/lib/auth-errors';
 
 const GoogleIcon = () => (
   <svg viewBox="0 0 24 24" width="20" height="20" xmlns="http://www.w3.org/2000/svg">
@@ -89,20 +90,16 @@ export default function AuthPage() {
     setError(null);
 
     try {
-      const { error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+      const mail = email.trim().toLowerCase();
+      let { error: signInError } = await supabase.auth.signInWithPassword({ email: mail, password });
+      // O teclado às vezes coloca um espaço no fim (sugestão de palavra): tenta de novo sem ele.
+      if (signInError && authProblem(signInError) === 'credenciais' && password.trim() !== password) {
+        ({ error: signInError } = await supabase.auth.signInWithPassword({ email: mail, password: password.trim() }));
+      }
       if (signInError) throw signInError;
       router.push('/');
     } catch (err: any) {
-      const msg = err.message || "";
-      if (msg.includes("Invalid login credentials")) {
-        setError("E-mail ou senha inválidos.");
-      } else if (msg.includes("Email not confirmed")) {
-        setError("Confirme seu e-mail para entrar.");
-      } else if (msg.includes("Rate limit exceeded")) {
-        setError("Muitas tentativas. Tente mais tarde.");
-      } else {
-        setError("Erro ao entrar. Tente novamente.");
-      }
+      setError(authMessage(err));
     } finally {
       setLoading(false);
     }
@@ -201,6 +198,7 @@ export default function AuthPage() {
                 <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40 group-focus-within:text-[#00D88B] transition-colors" size={18} />
                 <input 
                   type="email" 
+                  {...emailInputProps}
                   placeholder="Seu E-mail"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -212,6 +210,8 @@ export default function AuthPage() {
                 <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40 group-focus-within:text-[#00D88B] transition-colors" size={18} />
                 <input 
                   type="password" 
+                  {...passwordInputProps}
+                  autoComplete="current-password"
                   placeholder="Sua Senha"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
